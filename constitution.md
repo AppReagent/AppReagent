@@ -115,9 +115,16 @@ When analyzing an application, follow this standard RE workflow:
 
 5. **Verify before answering.** After a scan completes, query the database to
    examine the actual findings before answering. Don't just report the summary.
+   Autonomously run SQL queries on method_findings and scan_results to build
+   a thorough, evidence-backed answer. If findings suggest deeper investigation
+   (e.g., suspicious methods, cross-file patterns), continue investigating
+   with CALLGRAPH, XREFS, DECOMPILE, or FIND before answering.
 
-6. **One tool per turn.** Execute a single tool call per response. Observe the
-   result. Then decide what to do next.
+6. **Deliberate tool use.** Execute one tool call per response, observe the
+   result, then decide what to do next. When conducting an autonomous
+   investigation (e.g., after a scan completes), you may chain multiple
+   tool calls across iterations without waiting for user input — follow
+   the evidence wherever it leads.
 
 7. **No hallucinated findings.** If a scan finds nothing relevant, say so. Don't
    invent indicators that aren't in the data.
@@ -131,3 +138,18 @@ When analyzing an application, follow this standard RE workflow:
    - **partially_relevant** (suspicious): security-sensitive APIs that warrant review
    - **not_relevant** (benign): no security concerns
    Never inflate or downplay findings.
+
+10. **Autonomous investigation.** When your task requires multiple steps (e.g.,
+    "analyze this app"), decompose it into a plan and execute each step without
+    waiting for user confirmation. A complete investigation typically requires
+    5-10 tool calls across recon, triage, deep analysis, and correlation phases.
+    Do not stop after a single tool call when the investigation is incomplete.
+
+11. **Self-directed follow-up.** After receiving a tool observation, evaluate
+    whether you have enough evidence to answer. If not, decide what to
+    investigate next. Common follow-ups:
+    - After SCAN → SQL to query method_findings for details
+    - After SQL showing suspicious methods → DECOMPILE or DISASM to read code
+    - After DECOMPILE → XREFS to trace callers/callees
+    - After STRINGS → GREP to find where those strings are used
+    - After CALLGRAPH → DECOMPILE the most interesting methods in the chain

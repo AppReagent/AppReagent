@@ -60,10 +60,13 @@ Harness Harness::createDefault() {
         "6. Only ANSWER when you have concrete evidence from the code itself.\n"
         "\n"
         "PERSISTENCE — don't stop prematurely:\n"
-        "- After a scan, query method_findings and scan_results to examine what was found\n"
-        "- After finding a suspicious method, trace its callers and callees\n"
+        "- After a scan, ALWAYS query method_findings and scan_results to examine what was found\n"
+        "- After finding a suspicious method, trace its callers and callees with CALLGRAPH/XREFS\n"
+        "- DECOMPILE the most interesting methods to read actual code before answering\n"
         "- Cross-reference across multiple files before concluding\n"
         "- If a scan finds nothing, READ the code directly — the scan may have missed context\n"
+        "- A good investigation typically takes 5-10 tool calls. If you've only used 1-2, keep going.\n"
+        "- When you receive a tool observation, your default should be to use ANOTHER tool, not to ANSWER.\n"
         "\n"
         "CONVERGENCE — know when you have enough evidence:\n"
         "- Once you have 2+ independent evidence sources pointing the same way, you can answer\n"
@@ -152,6 +155,33 @@ Harness Harness::createDefault() {
         "- User: \"evaluate the corpus\" → IMPROVE: evaluate\n"
         "- User: \"run the improve tool\" → IMPROVE: evaluate\n"
         "- User: \"improve triage accuracy\" → IMPROVE: improve triage accuracy for crypto mining\n"
+    });
+
+    h.addGuide({"autonomous_workflow",
+        "AUTONOMOUS OPERATION — you are a self-directed investigator.\n"
+        "\n"
+        "After every tool observation, ask yourself:\n"
+        "- Do I have enough evidence to give a thorough, concrete answer?\n"
+        "- What is the most important thing I haven't checked yet?\n"
+        "- Are there suspicious patterns that deserve follow-up?\n"
+        "\n"
+        "If the answer to the first question is NO, keep investigating. Do NOT answer prematurely.\n"
+        "\n"
+        "SCAN FOLLOW-UP PROTOCOL (always do this after a scan completes):\n"
+        "1. SQL: SELECT class_name, method_name, risk_label, threat_category, confidence "
+        "FROM method_findings WHERE run_id = '<run_id>' AND risk_label != 'not_relevant' "
+        "ORDER BY confidence DESC LIMIT 20\n"
+        "2. For the top suspicious methods: DECOMPILE or DISASM to read the actual code\n"
+        "3. CALLGRAPH or XREFS to trace how the suspicious code connects to entry points\n"
+        "4. Only then synthesize your findings into a comprehensive ANSWER\n"
+        "\n"
+        "GOAL DECOMPOSITION — for complex questions, break into sub-tasks:\n"
+        "- 'Is this app malicious?' → recon (CLASSES, MANIFEST) → triage (STRINGS, GREP) → "
+        "deep analysis (SCAN) → verification (SQL, DECOMPILE) → correlation (XREFS, CALLGRAPH)\n"
+        "- 'Trace the data flow' → find sources (GREP) → find sinks (GREP) → "
+        "connect them (XREFS, CALLGRAPH) → read the code (DECOMPILE)\n"
+        "- 'What does this app do?' → structure (CLASSES) → entry points (MANIFEST) → "
+        "key methods (DECOMPILE) → strings/resources (STRINGS)\n"
     });
 
     h.addSensor({"sql_read_only", "sql",
@@ -244,16 +274,36 @@ Harness Harness::createDefault() {
         }
     });
 
+    h.addSensor({"answer_completeness", "answer",
+        [](const std::string& answer, const std::string&) -> std::string {
+            // Check for scan summary regurgitation without follow-up
+            if (answer.find("Scan ") != std::string::npos &&
+                answer.find("complete:") != std::string::npos &&
+                answer.find("method_findings") == std::string::npos &&
+                answer.find("DECOMPILE") == std::string::npos &&
+                answer.find("class_name") == std::string::npos) {
+                return "You appear to be reporting a raw scan summary. Follow the "
+                       "SCAN FOLLOW-UP PROTOCOL: query method_findings for details, "
+                       "DECOMPILE suspicious methods, then give a thorough answer.";
+            }
+            return "";
+        }
+    });
+
     h.addSensor({"scan_followup", "scan",
         [](const std::string&, const std::string& observation) -> std::string {
-            // After a scan completes, remind the agent to query results
-            if (observation.find("Scan complete") != std::string::npos ||
-                observation.find("run_id:") != std::string::npos) {
-                // Extract run_id hint
-                return "REMINDER: Scan complete. Before answering, query the database:\n"
-                       "1. SQL: SELECT class_name, method_name, threat_category, findings FROM method_findings WHERE run_id = '<run_id>' AND relevant = true\n"
-                       "2. SQL: SELECT risk_score, recommendation FROM scan_results WHERE run_id = '<run_id>'\n"
-                       "Then cite specific findings in your answer.";
+            // After a scan completes, nudge the agent to query the database
+            if (observation.find("complete:") != std::string::npos) {
+                // Extract run_id for convenience
+                auto pos = observation.find("Scan ");
+                auto end = observation.find(" complete:");
+                if (pos != std::string::npos && end != std::string::npos) {
+                    std::string runId = observation.substr(pos + 5, end - pos - 5);
+                    return "NEXT STEP: Query the database for detailed findings. Run: "
+                           "SQL: SELECT class_name, method_name, risk_label, threat_category, "
+                           "confidence FROM method_findings WHERE run_id = '" + runId +
+                           "' AND risk_label != 'not_relevant' ORDER BY confidence DESC LIMIT 20";
+                }
             }
             return "";
         }

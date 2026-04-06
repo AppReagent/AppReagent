@@ -93,8 +93,17 @@ std::optional<ToolResult> ScanTool::tryExecute(const std::string& action, ToolCo
     std::string sensorFeedback = ctx.harness.runSensors("scan", args, observation);
 
     std::string feedback = "OBSERVATION: " + observation;
-    if (summary.answer.empty()) {
-        feedback += "\nYou can query the database for run_id '" + summary.run_id + "'.";
+    feedback += "\n\nrun_id: " + summary.run_id;
+    if (summary.files_relevant > 0 || summary.files_partial > 0) {
+        feedback += "\n\nIMPORTANT — Do NOT answer yet. Follow up autonomously:\n"
+                    "1. SQL: SELECT class_name, method_name, risk_label, threat_category, confidence "
+                    "FROM method_findings WHERE run_id = '" + summary.run_id +
+                    "' AND risk_label != 'not_relevant' ORDER BY confidence DESC LIMIT 20\n"
+                    "2. DECOMPILE the most suspicious methods to see actual code\n"
+                    "3. Use XREFS or CALLGRAPH to trace connections\n"
+                    "4. Then give a thorough ANSWER with concrete evidence";
+    } else if (summary.answer.empty()) {
+        feedback += "\nNo suspicious findings. You may query the database for run_id '" + summary.run_id + "' to confirm.";
     } else {
         feedback += "\nFor per-file details, query the database for run_id '" + summary.run_id + "'.";
     }

@@ -4,28 +4,36 @@ User's goal: {{user_goal}}
 
 Expand this into a detailed scan goal that includes:
 
-1. **Specific API targets** — List the exact Android/Java classes and methods to look for:
-   - Data access: ContentResolver.query, TelephonyManager.getDeviceId, LocationManager.getLastKnownLocation, ContactsContract, CallLog, Telephony.Sms
-   - Network: HttpURLConnection, OkHttpClient, Socket, WebSocket, URL.openConnection
-   - Crypto: Cipher.getInstance, SecretKeySpec, KeyGenerator, MessageDigest
-   - Execution: Runtime.exec, ProcessBuilder, DexClassLoader, Class.forName, Method.invoke
-   - SMS: SmsManager.sendTextMessage, SmsManager.getDefault
-   - System: PackageManager, DevicePolicyManager, AccessibilityService
+1. **Specific API targets** -- List the exact Android/Java classes and methods to look for:
+   - Data access: ContentResolver.query, TelephonyManager.getDeviceId, LocationManager.getLastKnownLocation, ContactsContract, CallLog, Telephony.Sms, ClipboardManager.getPrimaryClip, AccountManager.getAccounts
+   - Network: HttpURLConnection, OkHttpClient, Socket, WebSocket, URL.openConnection, Retrofit, Volley, ServerSocket
+   - Crypto: Cipher.getInstance, SecretKeySpec, KeyGenerator, MessageDigest, Mac.getInstance, javax.crypto
+   - Execution: Runtime.exec, ProcessBuilder, DexClassLoader, InMemoryDexClassLoader, Class.forName, Method.invoke
+   - SMS: SmsManager.sendTextMessage, SmsManager.getDefault, SmsReceiver, abortBroadcast
+   - System: PackageManager, DevicePolicyManager, AccessibilityService, NotificationListenerService, UsageStatsManager
+   - Media: Camera, CameraManager, MediaRecorder, AudioRecord
+   - Persistence: AlarmManager, JobScheduler, WorkManager, BOOT_COMPLETED, START_STICKY
 
-2. **Smali-level indicators** — What invoke instructions and patterns to flag:
+2. **Smali-level indicators** -- What invoke instructions and patterns to flag:
    - invoke-static for SmsManager, TelephonyManager static calls
    - invoke-virtual for ContentResolver.query, HttpURLConnection methods
-   - const-string with URLs, IPs, phone numbers, shell commands
+   - const-string with URLs, IPs, phone numbers, shell commands, bitcoin addresses
    - XOR/shift operations on byte arrays (string encryption)
    - Class.forName followed by getMethod and invoke (reflection chain)
+   - new-instance of Cipher, Socket, DexClassLoader, ProcessBuilder
+   - iget/sget accessing fields that hold URLs, keys, or configuration
 
-3. **Data flow evidence** — What source→sink paths would constitute findings:
-   - Contacts/SMS/location read → network send = data exfiltration
-   - Network receive → DexClassLoader = dropper/downloader
-   - String decrypt → Runtime.exec = hidden command execution
-   - User input → Cipher.encrypt → network = C2 communication
+3. **Data flow evidence** -- What source->sink paths would constitute findings:
+   - Contacts/SMS/location read -> network send = data exfiltration
+   - Network receive -> DexClassLoader = dropper/downloader
+   - String decrypt -> Runtime.exec = hidden command execution
+   - User input -> Cipher.encrypt -> network = C2 communication
+   - SMS receive -> abortBroadcast + forward = SMS interception
+   - File enumeration -> Cipher.encrypt -> file write = ransomware
+   - Device info collection -> HTTP POST = C2 registration
+   - Accessibility events -> text extraction -> network = keylogging
 
-4. **False positive guidance** — What looks suspicious but is likely benign:
+4. **False positive guidance** -- What looks suspicious but is likely benign:
    - HTTP requests in a class named "UpdateChecker", "Analytics", "CrashReporter", or "RemoteConfig"
    - Location access in a class with "Map", "Navigation", "Geofence", or "Weather" in the name
    - Crypto in a class handling HTTPS certificate pinning, TLS, or OAuth token storage
@@ -39,11 +47,11 @@ Expand this into a detailed scan goal that includes:
 
 Common threat-category expansions:
 - Ransomware: javax/crypto/Cipher for file encryption (not HTTPS TLS), FileOutputStream writing to external storage, DevicePolicyManager for screen lock, getExternalStorageDirectory + listFiles for file enumeration, ransom note strings, bitcoin/payment addresses, .locked/.encrypted file extensions
-- Network/C2: HttpURLConnection, OkHttpClient, Retrofit, Socket/ServerSocket for connections; Timer/AlarmManager/JobScheduler for periodic beacons; Base64 encoding of payloads; BOOT_COMPLETED for persistence; Runtime.exec for remote command execution
-- Cryptocurrency/mining: stratum:// pool URLs, CoinHive/WebView mining scripts, MessageDigest/SHA-256 for hash computation, CPU-intensive Thread/Runnable loops, wallet addresses (bc1/0x/4..monero), mining pool API calls
-- Data theft: ContentResolver.query on ContactsContract/CallLog/SMS URIs, TelephonyManager.getDeviceId/getSubscriberId/getLine1Number, AccountManager.getAccounts, followed by HTTP POST or SMS exfiltration of collected data
-- Spyware: LocationManager/FusedLocationProviderClient for GPS tracking, AudioRecord/MediaRecorder for audio capture, Camera/CameraManager for photo capture, KeyEvent monitoring, AccessibilityService abuse
-- Obfuscation: DexClassLoader/InMemoryDexClassLoader for dynamic loading, Class.forName + Method.invoke for reflection, native method calls via JNI, encrypted string tables with runtime decryption
+- Network/C2: HttpURLConnection, OkHttpClient, Retrofit, Socket/ServerSocket for connections; Timer/AlarmManager/JobScheduler for periodic beacons; Base64 encoding of payloads; BOOT_COMPLETED for persistence; Runtime.exec for remote command execution; WebSocket for bidirectional C2
+- Cryptocurrency/mining: stratum:// pool URLs, CoinHive/WebView mining scripts, MessageDigest/SHA-256 for hash computation, CPU-intensive Thread/Runnable loops, wallet addresses (bc1/0x/4..monero), mining pool API calls, nonce iteration patterns
+- Data theft: ContentResolver.query on ContactsContract/CallLog/SMS URIs, TelephonyManager.getDeviceId/getSubscriberId/getLine1Number, AccountManager.getAccounts, ClipboardManager, followed by HTTP POST or SMS exfiltration of collected data
+- Spyware: LocationManager/FusedLocationProviderClient for GPS tracking, AudioRecord/MediaRecorder for audio capture, Camera/CameraManager for photo capture, KeyEvent monitoring, AccessibilityService abuse, NotificationListenerService for message interception
+- Obfuscation/evasion: DexClassLoader/InMemoryDexClassLoader for dynamic loading, Class.forName + Method.invoke for reflection, native method calls via JNI, encrypted string tables with runtime decryption, anti-emulator checks (Build.FINGERPRINT, /dev/socket/qemud), anti-debug (isDebuggerConnected, TracerPid)
 - SMS abuse: SmsManager.sendTextMessage/sendMultipartTextMessage for premium SMS, ContentResolver.delete on content://sms for evidence destruction, BroadcastReceiver intercepting SMS_RECEIVED for 2FA theft
 - Credential theft: WebView.loadUrl with JavaScript injection for overlay attacks, AccessibilityService.onAccessibilityEvent for keylogging, custom login screens mimicking legitimate apps
 - Banking trojan: overlay attacks via TYPE_APPLICATION_OVERLAY or WindowManager.addView, WebView injection with JavaScript interfaces, SMS interception (RECEIVE_SMS + abortBroadcast), accessibility service monitoring EditText fields, clipboard hooking, credential harvesting via fake login screens
@@ -51,5 +59,6 @@ Common threat-category expansions:
 - SMS trojan: SmsManager.sendTextMessage to premium numbers, BroadcastReceiver for SMS_RECEIVED with abortBroadcast, SMS content reading + forwarding, WAP push message interception
 - Adware: WebView loading ad URLs in background, invisible Activity or 1x1 pixel windows, click simulation via MotionEvent.obtain, frequent AlarmManager triggers for ad refresh
 - Stalkerware: continuous location tracking with FusedLocationProviderClient, call recording via MediaRecorder on VOICE_CALL, notification listener for message capture, hidden from launcher (PackageManager.setComponentEnabledSetting)
+- Dropper/loader: APK download + REQUEST_INSTALL_PACKAGES, DexClassLoader with network-sourced DEX, encrypted assets decrypted to executable code, multi-stage payload delivery, payload stored in SharedPreferences or hidden files
 
-Be specific and technical. Output a single detailed paragraph that will guide per-method analysis. Preserve the original intent — augment, don't replace.
+Be specific and technical. Output a single detailed paragraph that will guide per-method analysis. Preserve the original intent -- augment, don't replace.

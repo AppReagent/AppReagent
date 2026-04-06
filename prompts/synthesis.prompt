@@ -20,7 +20,7 @@ Behavior is often split across multiple methods within a class:
 - Initialization methods configure C2 endpoints used by communication methods
 
 Trace these connections and describe the complete behavioral chain.
-Look for KILL CHAINS: data source (contacts, SMS, location) → processing (encoding, encryption) → exfiltration (network, SMS send).
+Look for KILL CHAINS: data source (contacts, SMS, location) -> processing (encoding, encryption) -> exfiltration (network, SMS send).
 A method that reads contacts is only suspicious if another method in the same file sends data over the network.
 Deduplicate: if multiple methods report the same API call or finding, consolidate into one entry.
 
@@ -28,12 +28,12 @@ Deduplicate: if multiple methods report the same API call or finding, consolidat
 If multiple threat types are present in the same class (e.g., data theft + C2 + persistence), identify ALL of them and classify by the PRIMARY threat. A class that reads contacts AND sends SMS AND connects to a C2 server is a more severe threat than any one behavior alone.
 
 ### Classification guidelines
-- **"relevant"** (risk score 70-100): DEFINITIVE malicious behavior — data theft, C2 communication, unauthorized access, privilege escalation, covert operations, crypto mining, file encryption for ransom, covert camera/microphone access combined with exfiltration. Multiple corroborating methods increase confidence.
+- **"relevant"** (risk score 70-100): DEFINITIVE malicious behavior -- data theft, C2 communication, unauthorized access, privilege escalation, covert operations, crypto mining, file encryption for ransom, covert camera/microphone access combined with exfiltration. Multiple corroborating methods increase confidence.
 - **"partially_relevant"** (risk score 15-55): Security-sensitive APIs that COULD be abused but appear legitimate in isolation. This includes: downloading files, accessing location, sending notifications, HTTP requests, analytics/tracking, device identifiers. Single suspicious method without corroboration.
-- **"not_relevant"** (risk score 0-15): NO security-sensitive operations — pure UI, data models, utilities, formatters, adapters.
+- **"not_relevant"** (risk score 0-15): NO security-sensitive operations -- pure UI, data models, utilities, formatters, adapters.
 
 ### Language rules (CRITICAL)
-- For **"not_relevant"** files: describe what the code DOES (e.g., "displays UI", "formats data"). Do NOT use words like "malware", "malicious", "exfiltration", "suspicious", or "threat" — not even in negated form like "no malicious behavior found". Simply state what the code does.
+- For **"not_relevant"** files: describe what the code DOES (e.g., "displays UI", "formats data"). Do NOT use words like "malware", "malicious", "exfiltration", "suspicious", or "threat" -- not even in negated form like "no malicious behavior found". Simply state what the code does.
 - For **"partially_relevant"** files: describe the security-sensitive APIs used and why they are noteworthy. Use descriptive terms matching actual functionality (e.g., "analytics tracking", "file downloading", "location monitoring"). Do NOT inflate language.
 - For **"relevant"** files: describe the specific malicious behaviors with concrete evidence. Name specific methods, API calls, string constants, and data flow paths.
 
@@ -64,7 +64,7 @@ Output ONLY valid JSON:
   "evidence_summary": "summary of all concrete evidence found, including data flow chains across methods",
   "overall_relevance": "relevant" | "partially_relevant" | "not_relevant",
   "threat_type": "banking_trojan|spyware|ransomware|rat|sms_trojan|adware|miner|dropper|stalkerware|c2|data_theft|credential_theft|persistence|evasion|unknown|none",
-  "mitre_techniques": ["T-number — description of observed behavior"],
+  "mitre_techniques": ["T-number -- description of observed behavior"],
   "relevance_score": 0-100,
   "recommendation": "actionable recommendation based on findings"
 }

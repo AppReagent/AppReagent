@@ -19,7 +19,7 @@ Class fields and context:
 
 {{call_graph_context}}
 
-Perform a detailed analysis of HOW this code relates to the scan goal. You must be precise and evidence-based — only report what the code ACTUALLY does, not what it "could potentially" do.
+Perform a detailed analysis of HOW this code relates to the scan goal. You must be precise and evidence-based -- only report what the code ACTUALLY does, not what it "could potentially" do.
 Do NOT invent API calls or behaviors not present in the code. If a method is short or trivial, say so.
 When referencing code, quote the actual instruction (e.g., "invoke-virtual {v0}, Landroid/telephony/SmsManager;->sendTextMessage").
 
@@ -27,7 +27,7 @@ When referencing code, quote the actual instruction (e.g., "invoke-virtual {v0},
 
 ### 1. Behavioral analysis
 - What specific behavior is relevant to the goal?
-- What is the INTENT behind this code — what is the developer trying to achieve?
+- What is the INTENT behind this code -- what is the developer trying to achieve?
 - Does this method implement a complete malicious action, or is it a component of a larger attack chain?
 
 ### 2. Data flow analysis
@@ -35,7 +35,7 @@ Trace every data flow path through this method:
 - **Sources**: Where does data originate? (ContentResolver, TelephonyManager, LocationManager, user input, network, SharedPreferences, clipboard, file system)
 - **Transformations**: How is data modified? (Base64 encoding, encryption, JSON wrapping, string concatenation, XOR, compression)
 - **Sinks**: Where does data go? (HTTP POST, SMS send, file write, SharedPreferences, Intent extras, IPC, logging)
-- Map each source→transformation→sink chain explicitly
+- Map each source->transformation->sink chain explicitly
 
 ### 3. API and system call analysis
 - List every API/system call and classify its security relevance
@@ -50,78 +50,78 @@ Trace every data flow path through this method:
 
 ### 5. Malware family pattern matching
 Does the behavior match known malware patterns?
-- **Banking trojan**: overlay injection on banking apps + SMS interception for 2FA + credential harvesting → sends to C2
-- **Spyware**: harvests contacts + location + SMS + call logs → periodic exfiltration to C2 endpoint
-- **Ransomware**: enumerates external storage → encrypts files with AES/RSA → displays ransom note with crypto address
+- **Banking trojan**: overlay injection on banking apps + SMS interception for 2FA + credential harvesting -> sends to C2
+- **Spyware**: harvests contacts + location + SMS + call logs -> periodic exfiltration to C2 endpoint
+- **Ransomware**: enumerates external storage -> encrypts files with AES/RSA -> displays ransom note with crypto address
 - **RAT (Remote Access Trojan)**: persistent C2 connection + command dispatch + shell execution + screen capture
 - **SMS trojan**: sends premium SMS or intercepts incoming SMS (OTP theft) + deletes evidence
 - **Adware**: aggressive ad display + click fraud + browser hijacking + installing additional packages
 - **Crypto miner**: CPU-intensive hash loops + mining pool connection (stratum://) + wallet address
-- **Dropper**: downloads payload from C2 → writes to storage → loads via DexClassLoader or installs APK
+- **Dropper**: downloads payload from C2 -> writes to storage -> loads via DexClassLoader or installs APK
 - **Stalkerware**: continuous location tracking + call recording + message interception + hidden from launcher
 
 ### 6. Cross-method context
 If call graph context is provided, analyze how this method fits into the broader execution flow:
 - Who calls this method? From what component (Activity, Service, BroadcastReceiver)?
 - What methods does this call? Do they form an attack chain?
-- Is there a clear kill chain: initialization → data collection → processing → exfiltration?
+- Is there a clear kill chain: initialization -> data collection -> processing -> exfiltration?
 
 ## MITRE ATT&CK Mobile mapping
 Match observed behavior to specific techniques:
 
 Data Collection:
-- Reading contacts/SMS/call logs → T1636 (Protected User Data), T1636.002 (Call Log), T1636.003 (Contact List), T1636.004 (SMS Messages)
-- Accessing contacts → T1432 (Access Contact List)
-- Location tracking → T1430 (Location Tracking)
-- Camera access → T1512 (Video Capture)
-- Microphone access → T1429 (Audio Capture)
-- Screen capture → T1513 (Screen Capture)
-- Clipboard data → T1414 (Clipboard Data)
-- Input capture / keylogging → T1417 (Input Capture), T1417.001 (Keylogging)
-- Calendar data → T1636.001 (Calendar Entries)
-- Notification access → T1517 (Access Notifications)
-- App discovery/enumeration → T1418 (Software Discovery)
-- System info gathering → T1426 (System Information Discovery)
-- Network config discovery → T1422 (System Network Configuration Discovery)
+- Reading contacts/SMS/call logs -> T1636 (Protected User Data), T1636.002 (Call Log), T1636.003 (Contact List), T1636.004 (SMS Messages)
+- Accessing contacts -> T1432 (Access Contact List)
+- Location tracking -> T1430 (Location Tracking)
+- Camera access -> T1512 (Video Capture)
+- Microphone access -> T1429 (Audio Capture)
+- Screen capture -> T1513 (Screen Capture)
+- Clipboard data -> T1414 (Clipboard Data)
+- Input capture / keylogging -> T1417 (Input Capture), T1417.001 (Keylogging)
+- Calendar data -> T1636.001 (Calendar Entries)
+- Notification access -> T1517 (Access Notifications)
+- App discovery/enumeration -> T1418 (Software Discovery)
+- System info gathering -> T1426 (System Information Discovery)
+- Network config discovery -> T1422 (System Network Configuration Discovery)
 
 Command and Control:
-- Network to hardcoded endpoints → T1437 (Application Layer Protocol)
-- HTTP/HTTPS C2 → T1437.001 (Web Protocols)
-- Encrypted C2 channel → T1573 (Encrypted Channel)
-- Web service as C2 → T1481 (Web Service), T1481.003 (One-Way Communication)
+- Network to hardcoded endpoints -> T1437 (Application Layer Protocol)
+- HTTP/HTTPS C2 -> T1437.001 (Web Protocols)
+- Encrypted C2 channel -> T1573 (Encrypted Channel)
+- Web service as C2 -> T1481 (Web Service), T1481.003 (One-Way Communication)
 
 Persistence & Execution:
-- BOOT_COMPLETED receiver → T1398 (Boot or Logon Initialization Scripts)
-- Scheduled tasks/alarms → T1603 (Scheduled Task/Job)
-- Foreground persistence → T1541 (Foreground Persistence)
-- Event-triggered execution → T1624 (Event Triggered Execution)
-- Native code execution → T1575 (Native Code)
+- BOOT_COMPLETED receiver -> T1398 (Boot or Logon Initialization Scripts)
+- Scheduled tasks/alarms -> T1603 (Scheduled Task/Job)
+- Foreground persistence -> T1541 (Foreground Persistence)
+- Event-triggered execution -> T1624 (Event Triggered Execution)
+- Native code execution -> T1575 (Native Code)
 
 Privilege Escalation:
-- Accessibility service abuse → T1626 (Abuse Elevation Control Mechanism)
-- Device admin abuse → T1401 (Device Administrator Permissions)
-- Root/su execution → T1404 (Exploitation of Privilege)
+- Accessibility service abuse -> T1626 (Abuse Elevation Control Mechanism)
+- Device admin abuse -> T1401 (Device Administrator Permissions)
+- Root/su execution -> T1404 (Exploitation of Privilege)
 
 Defense Evasion:
-- Reflection/dynamic loading → T1406 (Obfuscated Files or Information)
-- String encryption/packing → T1406.002 (Software Packing)
-- Download new code → T1407 (Download New Code at Runtime)
-- Indicator removal → T1630 (Indicator Removal on Host)
-- Anti-emulator checks → T1633 (Virtualization/Sandbox Evasion), T1633.001 (System Checks)
+- Reflection/dynamic loading -> T1406 (Obfuscated Files or Information)
+- String encryption/packing -> T1406.002 (Software Packing)
+- Download new code -> T1407 (Download New Code at Runtime)
+- Indicator removal -> T1630 (Indicator Removal on Host)
+- Anti-emulator checks -> T1633 (Virtualization/Sandbox Evasion), T1633.001 (System Checks)
 
 Exfiltration & Impact:
-- Sending/intercepting SMS → T1582 (SMS Control)
-- Data exfiltration over network → T1646 (Exfiltration Over C2 Channel)
-- Crypto on user files → T1471 (Data Encrypted for Impact)
-- Device wipe/lock → T1447 (Delete Device Data)
+- Sending/intercepting SMS -> T1582 (SMS Control)
+- Data exfiltration over network -> T1646 (Exfiltration Over C2 Channel)
+- Crypto on user files -> T1471 (Data Encrypted for Impact)
+- Device wipe/lock -> T1447 (Delete Device Data)
 
 Output ONLY valid JSON:
 {
   "detailed_findings": ["specific findings relevant to the scan goal"],
   "evidence": ["concrete code-level evidence (API calls, string constants, register values, field references)"],
-  "data_flows": ["source → transformation → sink descriptions for each data flow path"],
+  "data_flows": ["source -> transformation -> sink descriptions for each data flow path"],
   "threat_type": "banking_trojan|spyware|ransomware|rat|sms_trojan|adware|miner|dropper|stalkerware|c2|data_theft|credential_theft|persistence|evasion|unknown",
-  "mitre_techniques": ["T-number: technique name — specific evidence from this code"],
+  "mitre_techniques": ["T-number: technique name -- specific evidence from this code"],
   "adversary_intent": "what the code is trying to accomplish from the attacker's perspective",
   "relevance_score": 0-100,
   "reasoning": "thorough explanation of how this code relates to the scan goal, with evidence classification (definitive/strong/circumstantial)"

@@ -207,7 +207,22 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
             auto j = nlohmann::json::parse(extractJson(ctx.get("llm_response").get<std::string>()));
             bool relevant = j.value("relevant", false);
             auto confidence = j.value("confidence", 0.0);
-            return relevant || confidence < 0.9;
+
+            // Always pass through if marked relevant
+            if (relevant) return true;
+
+            // Pass through if triage found a non-trivial threat category
+            std::string category = j.value("threat_category", "none");
+            if (category != "none" && !category.empty()) return true;
+
+            // Pass through if triage found API calls worth investigating
+            if (j.contains("api_calls") && j["api_calls"].is_array() && !j["api_calls"].empty()) {
+                // Only discard if confidently irrelevant AND has no interesting API calls
+                return confidence < 0.85;
+            }
+
+            // Discard only if high confidence in irrelevance
+            return confidence < 0.9;
         } catch (...) {
             return true;
         }

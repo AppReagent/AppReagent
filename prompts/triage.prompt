@@ -33,28 +33,28 @@ Mark as relevant if the code contains CONCRETE evidence of:
 - **Dropper/loader**: DexClassLoader from network/storage paths, downloading + installing APKs, staged payloads
 - **Surveillance**: covert camera/mic access without UI, screen recording, keystroke logging
 - **Persistence**: BOOT_COMPLETED receivers starting services, alarm-based scheduling, foreground services resisting termination
-- **Evasion**: reflection chains (Class.forName→getMethod→invoke), DexClassLoader, string decryption
+- **Evasion**: reflection chains (Class.forName->getMethod->invoke), DexClassLoader, string decryption
 - **Anti-analysis**: emulator detection (Build.FINGERPRINT checks for "generic"), debugger detection (Debug.isDebuggerConnected), timing checks, root detection combined with app termination
 
-## Possibly RELEVANT (confidence 0.5-0.7) — worth deeper analysis
+## Possibly RELEVANT (confidence 0.5-0.7) -- worth deeper analysis
 Mark with medium confidence if the code uses security-sensitive APIs in potentially suspicious context:
-- Network requests (HTTP/sockets) — especially to non-standard ports, with encoded payloads, or from background services
-- Location access — especially continuous tracking or from non-UI components
-- Camera/microphone — especially without corresponding UI or preview surface
-- SMS read/send — any programmatic SMS access
-- File operations on external storage — especially bulk reads/writes or targeting specific file types
-- Device identifiers (IMEI, IMSI, ANDROID_ID, MAC address) — especially when collected together
-- Crypto operations — any Cipher/SecretKeySpec/MessageDigest usage
-- Reflection chains (Class.forName → getMethod → invoke) — dynamic behavior hiding
-- Runtime.exec or ProcessBuilder — shell command execution
-- DexClassLoader/PathClassLoader — dynamic code loading
-- Base64 encoding/decoding combined with network or crypto — payload obfuscation
-- AccessibilityService event handling — potential for UI manipulation
-- AlarmManager/JobScheduler/WorkManager — persistent scheduled tasks from background
-- PackageManager queries — app enumeration, checking for security tools
-- Clipboard read/write — clipboard hijacking (especially crypto wallet addresses)
+- Network requests (HTTP/sockets) -- especially to non-standard ports, with encoded payloads, or from background services
+- Location access -- especially continuous tracking or from non-UI components
+- Camera/microphone -- especially without corresponding UI or preview surface
+- SMS read/send -- any programmatic SMS access
+- File operations on external storage -- especially bulk reads/writes or targeting specific file types
+- Device identifiers (IMEI, IMSI, ANDROID_ID, MAC address) -- especially when collected together
+- Crypto operations -- any Cipher/SecretKeySpec/MessageDigest usage
+- Reflection chains (Class.forName -> getMethod -> invoke) -- dynamic behavior hiding
+- Runtime.exec or ProcessBuilder -- shell command execution
+- DexClassLoader/PathClassLoader -- dynamic code loading
+- Base64 encoding/decoding combined with network or crypto -- payload obfuscation
+- AccessibilityService event handling -- potential for UI manipulation
+- AlarmManager/JobScheduler/WorkManager -- persistent scheduled tasks from background
+- PackageManager queries -- app enumeration, checking for security tools
+- Clipboard read/write -- clipboard hijacking (especially crypto wallet addresses)
 
-## NOT RELEVANT (confidence >= 0.9) — only for clearly benign code
+## NOT RELEVANT (confidence >= 0.9) -- only for clearly benign code
 Mark as not relevant ONLY for code with NO security-sensitive operations:
 - Pure UI rendering (setContentView, findViewById, onClick, RecyclerView adapters)
 - Data models / POJOs (getters, setters, constructors, toString, equals, hashCode, Parcelable)
@@ -66,19 +66,19 @@ Mark as not relevant ONLY for code with NO security-sensitive operations:
 
 ## Threat categories
 When marking as relevant, classify the primary threat:
-- "c2" — Command-and-control communication (hardcoded endpoints, polling, command dispatch, beacon intervals)
-- "data_theft" — Reading contacts, SMS, call logs, location, clipboard, browser data, accounts
-- "sms_abuse" — Sending premium SMS, deleting SMS evidence, intercepting SMS, reading SMS for OTP theft
-- "credential_theft" — Overlay attacks, keylogging, phishing WebViews, accessibility abuse for input capture
-- "persistence" — BOOT_COMPLETED receivers, alarm/job scheduling, device admin, foreground services that resist killing
-- "evasion" — Reflection, dynamic class loading, string obfuscation/encryption, anti-emulator, anti-debug, packer indicators
-- "ransomware" — File encryption with Cipher on user files, device locking via DevicePolicyManager, ransom demands
-- "surveillance" — Camera/mic capture without UI, screen recording, location tracking, keystroke logging
-- "dropper" — DexClassLoader, APK download + install, staged payloads, code fetched from C2
-- "crypto_mining" — Hash computation, mining pool connections, wallet addresses, CPU/GPU resource abuse
-- "banking_trojan" — Overlay injection + SMS interception + credential harvesting (combined pattern)
-- "rootkit" — su execution, /system writes, kernel module loading, SELinux bypass
-- "other" — Doesn't fit the above categories
+- "c2" -- Command-and-control communication (hardcoded endpoints, polling, command dispatch, beacon intervals)
+- "data_theft" -- Reading contacts, SMS, call logs, location, clipboard, browser data, accounts
+- "sms_abuse" -- Sending premium SMS, deleting SMS evidence, intercepting SMS, reading SMS for OTP theft
+- "credential_theft" -- Overlay attacks, keylogging, phishing WebViews, accessibility abuse for input capture
+- "persistence" -- BOOT_COMPLETED receivers, alarm/job scheduling, device admin, foreground services that resist killing
+- "evasion" -- Reflection, dynamic class loading, string obfuscation/encryption, anti-emulator, anti-debug, packer indicators
+- "ransomware" -- File encryption with Cipher on user files, device locking via DevicePolicyManager, ransom demands
+- "surveillance" -- Camera/mic capture without UI, screen recording, location tracking, keystroke logging
+- "dropper" -- DexClassLoader, APK download + install, staged payloads, code fetched from C2
+- "crypto_mining" -- Hash computation, mining pool connections, wallet addresses, CPU/GPU resource abuse
+- "banking_trojan" -- Overlay injection + SMS interception + credential harvesting (combined pattern)
+- "rootkit" -- su execution, /system writes, kernel module loading, SELinux bypass
+- "other" -- Doesn't fit the above categories
 
 Output ONLY valid JSON with these fields:
 {

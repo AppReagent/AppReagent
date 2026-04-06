@@ -25,11 +25,11 @@ Trace the complete attack flow from entry point to impact:
 Name specific classes and methods at each stage.
 
 ### Cross-file patterns to identify
-- **Data pipeline**: Class A collects data → Class B processes/encodes → Class C exfiltrates
-- **Command infrastructure**: Class A maintains C2 connection → Class B parses commands → Class C executes actions
+- **Data pipeline**: Class A collects data -> Class B processes/encodes -> Class C exfiltrates
+- **Command infrastructure**: Class A maintains C2 connection -> Class B parses commands -> Class C executes actions
 - **Modular malware**: Different classes implement different capabilities (SMS module, camera module, location module) orchestrated by a central controller
-- **Evasion layers**: Class A checks environment (emulator, debugger, root) → only activates Class B (payload) if checks pass
-- **Persistence chain**: BroadcastReceiver → Service → AlarmManager → re-registers itself
+- **Evasion layers**: Class A checks environment (emulator, debugger, root) -> only activates Class B (payload) if checks pass
+- **Persistence chain**: BroadcastReceiver -> Service -> AlarmManager -> re-registers itself
 
 ### Threat severity amplification
 Multiple threat types in the same app compound severity:
@@ -54,11 +54,11 @@ Output ONLY valid JSON:
   "threat_description": "1-2 sentence summary of the malware's purpose and behavior",
   "key_findings": [
     {
-      "category": "category of finding (e.g. 'Data Exfiltration', 'C2 Communication', 'Persistence')",
+      "category": "category of finding (e.g. 'Data Exfiltration', 'C2 Communication', 'Persistence', 'Evasion')",
       "files": ["file1.smali", "file2.smali"],
       "description": "what was found and how the files relate to each other",
       "severity": "critical | high | medium | low | info",
-      "mitre_technique": "T-number — technique name"
+      "mitre_technique": "T-number -- technique name"
     }
   ],
   "iocs": {
@@ -69,7 +69,7 @@ Output ONLY valid JSON:
     "phone_numbers": ["extracted phone numbers"],
     "file_paths": ["extracted suspicious file paths"]
   },
-  "mitre_techniques": ["T-number — technique name: brief evidence"],
+  "mitre_techniques": ["T-number -- technique name: brief evidence"],
   "kill_chain": "step-by-step description of how the attack flows from entry to impact, naming specific classes/methods at each stage",
   "cross_file_patterns": ["patterns observed across multiple files that are significant"],
   "risk_score": 0-100,

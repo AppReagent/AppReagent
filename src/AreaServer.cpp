@@ -27,6 +27,7 @@
 #include "tools/DecompileTool.h"
 #include "tools/DisasmTool.h"
 #include "tools/ReportTool.h"
+#include "tools/ReadCodeTool.h"
 
 #include <csignal>
 #include <filesystem>
@@ -142,6 +143,7 @@ ChatSession& AreaServer::getOrCreateChat(const std::string& id, const std::strin
         session->tools->add(std::make_unique<FindFilesTool>());
         session->tools->add(std::make_unique<GrepTool>());
         session->tools->add(std::make_unique<ReadFileTool>());
+        session->tools->add(std::make_unique<ReadCodeTool>());
         session->tools->add(std::make_unique<XrefsTool>());
         session->tools->add(std::make_unique<StringsTool>());
         session->tools->add(std::make_unique<ManifestTool>());

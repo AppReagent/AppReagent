@@ -16,11 +16,12 @@ std::optional<ToolResult> ToolRegistry::dispatch(const std::string& action, Tool
 }
 
 std::string ToolRegistry::describeAll() const {
-    std::string out = "Tools:\n";
+    std::string out = "AVAILABLE TOOLS — use exactly one per turn:\n\n";
     for (auto& tool : tools_) {
-        out += "- " + tool->name() + ": " + tool->description() + "\n";
+        out += tool->name() + ": " + tool->description() + "\n\n";
     }
-    out += "- ANSWER: <text> — provide a final answer to the user\n";
+    out += "ANSWER: <text> — provide a final answer to the user. Cite specific methods, "
+           "classes, and evidence from the code. Do not answer without evidence.\n";
     return out;
 }
 

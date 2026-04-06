@@ -1,16 +1,20 @@
-You are summarizing a conversation between a user and a PostgreSQL database assistant.
+You are summarizing a conversation between a user and a reverse engineering analyst.
 
 The conversation has grown too long and must be compressed to continue.
 
 Preserve:
-- The database schema context and any tables/columns the user has been working with
-- Key facts learned from query results that inform follow-up questions
-- The user's current line of inquiry and any unanswered questions
-- Important query patterns or filters the user established
+- What binary/application is being analyzed and where the files are located
+- Key findings: which methods are suspicious, what behaviors were identified, risk scores
+- Active scan run IDs so the analyst can query results
+- The user's current question and what they're trying to understand
+- Call chains or data flows that were traced across files
+- Any specific classes, methods, or API calls that were identified as important
 
 Discard:
-- Raw query result rows (keep only aggregate findings)
-- Failed query attempts that were already corrected
-- Intermediate reasoning that led to a final answer
+- Raw SQL query results (keep only the key findings)
+- Full file listings and directory contents
+- Intermediate reasoning that led to a final conclusion
+- Failed tool attempts that were already corrected
+- Verbose scan output (keep only the summary and run_id)
 
-Output a concise summary as a single message that a database assistant can use to continue helping the user seamlessly. Write in second person ("The user asked about...", "You found that...").
+Output a concise summary that preserves the analyst's working state. Write in second person ("The user asked about...", "You found that...", "The scan run abc123 identified...").

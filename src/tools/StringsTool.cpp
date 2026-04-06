@@ -84,10 +84,14 @@ static bool isInteresting(const std::string& s) {
     if (s.size() < 3) return false;
     std::string lower = toLowerST(s);
 
-    // URLs
+    // URLs (including mining pool protocols)
     if (lower.starts_with("http://") || lower.starts_with("https://") ||
         lower.starts_with("ftp://") || lower.starts_with("ws://") ||
-        lower.starts_with("wss://")) return true;
+        lower.starts_with("wss://") || lower.starts_with("stratum://") ||
+        lower.starts_with("stratum+tcp://") || lower.starts_with("stratum+ssl://")) return true;
+
+    // Telegram bot API URLs
+    if (lower.find("api.telegram.org/bot") != std::string::npos) return true;
 
     // IP addresses (rough check)
     if (s.find('.') != std::string::npos) {
@@ -104,10 +108,49 @@ static bool isInteresting(const std::string& s) {
 
     // Domain-like strings
     if (lower.find(".com") != std::string::npos || lower.find(".net") != std::string::npos ||
-        lower.find(".org") != std::string::npos || lower.find(".io") != std::string::npos) return true;
+        lower.find(".org") != std::string::npos || lower.find(".io") != std::string::npos ||
+        lower.find(".ru") != std::string::npos || lower.find(".cn") != std::string::npos ||
+        lower.find(".top") != std::string::npos || lower.find(".xyz") != std::string::npos ||
+        lower.find(".onion") != std::string::npos) return true;
+
+    // Dynamic DNS domains (common in malware C2)
+    if (lower.find(".duckdns.org") != std::string::npos ||
+        lower.find(".no-ip.com") != std::string::npos ||
+        lower.find(".no-ip.org") != std::string::npos ||
+        lower.find(".ddns.net") != std::string::npos ||
+        lower.find(".hopto.org") != std::string::npos ||
+        lower.find(".zapto.org") != std::string::npos ||
+        lower.find(".sytes.net") != std::string::npos) return true;
 
     // Content URIs
     if (lower.starts_with("content://")) return true;
+
+    // Bitcoin addresses (bc1, 1, 3 prefixed, 26-62 chars)
+    if ((s.starts_with("bc1") || s.starts_with("1") || s.starts_with("3")) && s.size() >= 26 && s.size() <= 62) {
+        bool validBtc = true;
+        for (char c : s) {
+            if (!std::isalnum(c)) { validBtc = false; break; }
+        }
+        if (validBtc) return true;
+    }
+
+    // Ethereum addresses (0x followed by 40 hex chars)
+    if (s.starts_with("0x") && s.size() == 42) {
+        bool validEth = true;
+        for (size_t i = 2; i < s.size(); i++) {
+            if (!std::isxdigit(s[i])) { validEth = false; break; }
+        }
+        if (validEth) return true;
+    }
+
+    // Monero addresses (start with 4, 95 chars)
+    if (s.starts_with("4") && s.size() == 95) {
+        bool validXmr = true;
+        for (char c : s) {
+            if (!std::isalnum(c)) { validXmr = false; break; }
+        }
+        if (validXmr) return true;
+    }
 
     // Package names
     if (std::count(lower.begin(), lower.end(), '.') >= 2 && lower.find(' ') == std::string::npos) return true;
@@ -115,7 +158,8 @@ static bool isInteresting(const std::string& s) {
     // Crypto/encoding keywords
     if (lower.find("aes") != std::string::npos || lower.find("rsa") != std::string::npos ||
         lower.find("sha") != std::string::npos || lower.find("md5") != std::string::npos ||
-        lower.find("base64") != std::string::npos) return true;
+        lower.find("base64") != std::string::npos || lower.find("cipher") != std::string::npos ||
+        lower.find("hmac") != std::string::npos || lower.find("pkcs") != std::string::npos) return true;
 
     // SQL
     if (lower.find("select ") != std::string::npos || lower.find("insert ") != std::string::npos ||
@@ -123,7 +167,13 @@ static bool isInteresting(const std::string& s) {
 
     // Commands/shell
     if (lower.starts_with("su") || lower.find("/bin/") != std::string::npos ||
-        lower.find("chmod") != std::string::npos) return true;
+        lower.find("chmod") != std::string::npos || lower.find("/system/") != std::string::npos ||
+        lower.find("runtime.exec") != std::string::npos) return true;
+
+    // Suspicious file extensions
+    if (lower.ends_with(".dex") || lower.ends_with(".apk") || lower.ends_with(".jar") ||
+        lower.ends_with(".so") || lower.ends_with(".locked") || lower.ends_with(".encrypted") ||
+        lower.ends_with(".enc")) return true;
 
     // Base64-like (long alphanumeric strings)
     if (s.size() > 20) {
@@ -315,18 +365,49 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
 
     for (auto& s : strings) {
         std::string lower = toLowerST(s.value);
-        if (lower.starts_with("http://") || lower.starts_with("https://") ||
+        if (lower.starts_with("stratum://") || lower.starts_with("stratum+tcp://") ||
+            lower.starts_with("stratum+ssl://")) {
+            addToCategory("Mining Pool URLs", &s);
+        } else if (lower.starts_with("http://") || lower.starts_with("https://") ||
             lower.starts_with("ftp://") || lower.starts_with("ws://")) {
-            addToCategory("URLs", &s);
+            // Sub-categorize URLs
+            if (lower.find("api.telegram.org/bot") != std::string::npos) {
+                addToCategory("Telegram Bot APIs", &s);
+            } else {
+                addToCategory("URLs", &s);
+            }
         } else if (lower.starts_with("content://")) {
             addToCategory("Content URIs", &s);
         } else if (lower.find("/bin/") != std::string::npos || lower == "su" ||
-                   lower.find("chmod") != std::string::npos) {
+                   lower.find("chmod") != std::string::npos || lower.find("/system/") != std::string::npos) {
             addToCategory("Shell/Commands", &s);
         } else if (lower.find("select ") != std::string::npos ||
                    lower.find("insert ") != std::string::npos ||
                    lower.find("create table") != std::string::npos) {
             addToCategory("SQL", &s);
+        } else if ([&]() {
+            // Bitcoin addresses
+            if ((s.value.starts_with("bc1") || s.value.starts_with("1") || s.value.starts_with("3"))
+                && s.value.size() >= 26 && s.value.size() <= 62) {
+                bool valid = true;
+                for (char c : s.value) if (!std::isalnum(c)) { valid = false; break; }
+                if (valid) return true;
+            }
+            // Ethereum addresses
+            if (s.value.starts_with("0x") && s.value.size() == 42) {
+                bool valid = true;
+                for (size_t i = 2; i < s.value.size(); i++) if (!std::isxdigit(s.value[i])) { valid = false; break; }
+                if (valid) return true;
+            }
+            // Monero addresses
+            if (s.value.starts_with("4") && s.value.size() == 95) {
+                bool valid = true;
+                for (char c : s.value) if (!std::isalnum(c)) { valid = false; break; }
+                if (valid) return true;
+            }
+            return false;
+        }()) {
+            addToCategory("Crypto Wallets", &s);
         } else if ([&]() {
             int digits = 0;
             for (char c : s.value) if (std::isdigit(c)) digits++;
@@ -337,18 +418,31 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
             return true;
         }()) {
             addToCategory("Phone Numbers", &s);
+        } else if (lower.find(".duckdns.org") != std::string::npos ||
+                   lower.find(".no-ip.com") != std::string::npos ||
+                   lower.find(".ddns.net") != std::string::npos ||
+                   lower.find(".hopto.org") != std::string::npos ||
+                   lower.find(".zapto.org") != std::string::npos ||
+                   lower.find(".sytes.net") != std::string::npos ||
+                   lower.find(".onion") != std::string::npos) {
+            addToCategory("Dynamic DNS / Suspicious Domains", &s);
         } else if (lower.find("java.lang.runtime") != std::string::npos ||
                    lower.find("java.lang.processbuilder") != std::string::npos ||
                    lower.find("java.lang.class") != std::string::npos ||
                    lower.find("java.lang.reflect") != std::string::npos ||
                    lower.find("dalvik.system.dexclassloader") != std::string::npos ||
-                   lower.find("dalvik.system.pathclassloader") != std::string::npos) {
+                   lower.find("dalvik.system.pathclassloader") != std::string::npos ||
+                   lower.find("dalvik.system.inmemorydexclassloader") != std::string::npos) {
             addToCategory("Reflection Targets", &s);
         } else if (lower.find("aes") != std::string::npos || lower.find("rsa") != std::string::npos ||
                    lower.find("des/") != std::string::npos || lower.find("pkcs") != std::string::npos ||
                    lower.find("hmac") != std::string::npos || lower.find("sha1") != std::string::npos ||
-                   lower.find("sha256") != std::string::npos || lower.find("md5") != std::string::npos) {
+                   lower.find("sha256") != std::string::npos || lower.find("md5") != std::string::npos ||
+                   lower.find("cipher") != std::string::npos) {
             addToCategory("Crypto/Encoding", &s);
+        } else if (lower.ends_with(".dex") || lower.ends_with(".apk") || lower.ends_with(".jar") ||
+                   lower.ends_with(".so") || lower.ends_with(".locked") || lower.ends_with(".encrypted")) {
+            addToCategory("Suspicious File Extensions", &s);
         } else {
             addToCategory("Other", &s);
         }

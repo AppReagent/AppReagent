@@ -10,6 +10,9 @@ Check the following:
 7. Is the "recommendation" actionable and consistent with the evidence?
 8. Is "threat_type" a recognized category or "none" for non-relevant files?
 9. Are "mitre_techniques" entries formatted as "T-number — description"?
+10. Classification consistency: if overall_relevance is "relevant", risk_score must be >= 70 and there must be concrete malicious findings. If "not_relevant", risk_score must be <= 15 and the answer must NOT use words like "malicious", "suspicious", or "threat".
+11. Cross-method synthesis: if multiple methods have findings, the evidence_summary should describe how they relate to each other (e.g., "method A collects data that method B exfiltrates"), not just list individual findings.
+12. If any method showed definitive malicious behavior, the overall classification should not be "not_relevant".
 
 If the output passes all checks, respond with: PASS
 If it fails any check, respond with: FAIL - <explanation of what's wrong>

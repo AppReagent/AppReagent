@@ -6,8 +6,11 @@ Check the following:
 3. Is "relevant" a boolean?
 4. Is confidence between 0.0 and 1.0?
 5. Does the reasoning logically support the relevance determination?
-6. Are the listed API calls actually present in the code, or hallucinated?
-7. Is "threat_category" one of: c2, data_theft, sms_abuse, credential_theft, persistence, evasion, ransomware, surveillance, dropper, other, none?
+6. Are the listed API calls actually plausible for the code being analyzed, or hallucinated? (e.g., don't list SMS APIs if the code is a RecyclerView adapter)
+7. Is "threat_category" one of: c2, data_theft, sms_abuse, credential_theft, persistence, evasion, ransomware, surveillance, dropper, crypto_mining, banking_trojan, rootkit, other, none?
+8. Confidence calibration: if relevant=false, confidence should be >= 0.7 (not marking irrelevant with low confidence). If relevant=true with confidence >= 0.8, there must be concrete findings, not vague speculation.
+9. If the code contains only UI rendering, data models, or utility functions, the result should be relevant=false. Flag if benign code is marked relevant.
+10. If the code contains security-sensitive APIs (network, crypto, SMS, location, reflection), the result should NOT be marked irrelevant with high confidence. Flag if suspicious code is dismissed.
 
 If the output passes all checks, respond with: PASS
 If it fails any check, respond with: FAIL - <explanation of what's wrong>

@@ -5,11 +5,13 @@ Check the following:
 2. Are all required fields present (detailed_findings, evidence, data_flows, threat_type, mitre_techniques, adversary_intent, relevance_score, reasoning)?
 3. Is "relevance_score" a number between 0 and 100?
 4. Are "detailed_findings", "evidence", and "data_flows" non-empty arrays?
-5. Does the reasoning reference specific code constructs (API calls, string constants, control flow) rather than vague generalities?
-6. Are the listed evidence items actually plausible given the code context, or do they appear hallucinated?
-7. Is "threat_type" a recognized category (banking_trojan, spyware, ransomware, rat, sms_trojan, adware, miner, dropper, unknown)?
-8. Do "mitre_techniques" entries include valid T-numbers with supporting evidence?
-9. Does "adversary_intent" describe a concrete attacker goal, not a vague statement?
+5. Does the reasoning reference specific code constructs (API calls, string constants, control flow, register values) rather than vague generalities like "could potentially be used for..."?
+6. Are the listed evidence items actually plausible given the code context, or do they appear hallucinated? Evidence should reference specific API calls, string constants, or patterns visible in the code.
+7. Is "threat_type" a recognized category (banking_trojan, spyware, ransomware, rat, sms_trojan, adware, miner, dropper, stalkerware, unknown)?
+8. Do "mitre_techniques" entries include valid T-numbers with supporting evidence from the actual code?
+9. Does "adversary_intent" describe a concrete attacker goal, not a vague statement like "could be used maliciously"?
+10. Score calibration: relevance_score 80-100 requires definitive evidence (clear malicious API usage + data flow). Score 50-79 requires strong indicators (multiple correlated suspicious APIs). Score below 50 should not have high-severity findings.
+11. Data flow completeness: if the code reads sensitive data AND transmits over network, data_flows must describe the source→sink path. Flag if data flows are missing for code with obvious source-sink patterns.
 
 If the output passes all checks, respond with: PASS
 If it fails any check, respond with: FAIL - <explanation of what's wrong>

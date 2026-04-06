@@ -6,6 +6,9 @@ Class: {{class_name}}
 Method: {{method_name}}
 Signature: {{method_signature}}
 
+Class fields:
+{{fields_summary}}
+
 Method body:
 ```
 {{method_body}}
@@ -13,57 +16,76 @@ Method body:
 
 Analyze this code with respect to the scan goal above. Determine whether it contains behavior RELEVANT to answering the goal question.
 
-Decision framework — evaluate in order:
+IMPORTANT guidelines:
 
-1. DEFINITELY RELEVANT (relevant=true, confidence 0.85-1.0):
-   Code contains CONCRETE evidence of security-critical behavior directly related to the scan goal:
-   - Data exfiltration: reading contacts/SMS/call logs/location then sending over network
-   - C2 communication: sockets/HTTP to hardcoded IPs, polling loops, command parsing
-   - SMS abuse: SmsManager.sendTextMessage with hardcoded or dynamically resolved numbers
-   - Credential theft: overlay attacks, keylogging, accessibility abuse
-   - Persistence: BOOT_COMPLETED receivers starting services, alarm-based scheduling
-   - Evasion: reflection chains (Class.forName→getMethod→invoke), DexClassLoader, string decryption
-   - Crypto abuse: file encryption of external storage, mining loops (hash computation + nonce)
-   - Privilege escalation: DeviceAdminReceiver, root exploits, Runtime.exec("su")
+IMPORTANT: If in doubt, mark as relevant with lower confidence. False negatives (missing real threats) are much worse than false positives (flagging benign code for review).
 
-2. POSSIBLY RELEVANT (relevant=true, confidence 0.5-0.75):
-   Code uses security-sensitive APIs in a context that warrants deeper analysis:
-   - Network requests (HTTP/sockets) — especially in background services
-   - Location/camera/microphone access — especially without visible UI
-   - File downloads or dynamic code loading
-   - Device identifier collection (IMEI, ANDROID_ID, subscriber ID)
-   - MessageDigest/hashing in loops (potential mining)
-   - Runtime.exec or ProcessBuilder
-   These need deep analysis to determine if usage is malicious or legitimate.
+## Definitely RELEVANT (confidence >= 0.8)
+Mark as relevant if the code contains CONCRETE evidence of:
+- **Data exfiltration**: reading contacts/SMS/call logs/location then sending over network or SMS
+- **C2 communication**: HTTP/socket connections to hardcoded IPs or domains, polling loops, command parsing
+- **Unauthorized access**: reading sensitive ContentProvider URIs (contacts, SMS, call log, browser history)
+- **SMS abuse**: sending SMS programmatically (SmsManager.sendTextMessage), deleting SMS, intercepting incoming SMS via BroadcastReceiver
+- **Credential theft**: overlay/phishing WebViews, keylogging via AccessibilityService, input monitoring
+- **Crypto mining**: hash computation loops (MessageDigest in loops), nonce manipulation, difficulty checking, stratum:// URLs, wallet addresses, thread pool exhaustion for computation
+- **Ransomware**: Cipher operations on user files (not TLS), external storage traversal + encryption, ransom note display, bitcoin/payment addresses
+- **Privilege escalation**: Runtime.exec("su"), writing to /system, exploiting root access, DeviceAdminReceiver abuse
+- **Dropper/loader**: DexClassLoader from network/storage paths, downloading + installing APKs, staged payloads
+- **Surveillance**: covert camera/mic access without UI, screen recording, keystroke logging
+- **Persistence**: BOOT_COMPLETED receivers starting services, alarm-based scheduling, foreground services resisting termination
+- **Evasion**: reflection chains (Class.forName→getMethod→invoke), DexClassLoader, string decryption
+- **Anti-analysis**: emulator detection (Build.FINGERPRINT checks for "generic"), debugger detection (Debug.isDebuggerConnected), timing checks, root detection combined with app termination
 
-3. NOT RELEVANT (relevant=false, confidence 0.9-1.0):
-   Code has NO security-sensitive operations whatsoever:
-   - Pure UI: Activity/Fragment lifecycle, View inflation, RecyclerView adapters, animations
-   - Data models: POJOs, getters/setters, toString, equals, hashCode, Parcelable
-   - Utilities: string formatting, date parsing, math helpers, color conversion
-   - Standard framework: Application.onCreate (without suspicious initialization), BuildConfig
+## Possibly RELEVANT (confidence 0.5-0.7) — worth deeper analysis
+Mark with medium confidence if the code uses security-sensitive APIs in potentially suspicious context:
+- Network requests (HTTP/sockets) — especially to non-standard ports, with encoded payloads, or from background services
+- Location access — especially continuous tracking or from non-UI components
+- Camera/microphone — especially without corresponding UI or preview surface
+- SMS read/send — any programmatic SMS access
+- File operations on external storage — especially bulk reads/writes or targeting specific file types
+- Device identifiers (IMEI, IMSI, ANDROID_ID, MAC address) — especially when collected together
+- Crypto operations — any Cipher/SecretKeySpec/MessageDigest usage
+- Reflection chains (Class.forName → getMethod → invoke) — dynamic behavior hiding
+- Runtime.exec or ProcessBuilder — shell command execution
+- DexClassLoader/PathClassLoader — dynamic code loading
+- Base64 encoding/decoding combined with network or crypto — payload obfuscation
+- AccessibilityService event handling — potential for UI manipulation
+- AlarmManager/JobScheduler/WorkManager — persistent scheduled tasks from background
+- PackageManager queries — app enumeration, checking for security tools
+- Clipboard read/write — clipboard hijacking (especially crypto wallet addresses)
 
-   IMPORTANT: If in doubt, mark as relevant with lower confidence. False negatives (missing real threats) are much worse than false positives (flagging benign code for review).
+## NOT RELEVANT (confidence >= 0.9) — only for clearly benign code
+Mark as not relevant ONLY for code with NO security-sensitive operations:
+- Pure UI rendering (setContentView, findViewById, onClick, RecyclerView adapters)
+- Data models / POJOs (getters, setters, constructors, toString, equals, hashCode, Parcelable)
+- String/date/number formatting utilities
+- View styling, animation, layout inflation
+- Serialization (Gson, Jackson, Moshi) without network context
+- Logging wrappers (Log.d, Log.i)
+- Navigation / fragment transactions
 
-When marking as relevant, also identify the threat category:
-- "c2" — Command-and-control communication (sockets, HTTP to hardcoded IPs/domains, polling loops, command parsing)
-- "data_theft" — Reading contacts, SMS, call logs, location, clipboard, browser data, device identifiers and exfiltrating them
-- "sms_abuse" — Sending premium SMS, deleting SMS evidence, intercepting SMS, WAP push abuse
+## Threat categories
+When marking as relevant, classify the primary threat:
+- "c2" — Command-and-control communication (hardcoded endpoints, polling, command dispatch, beacon intervals)
+- "data_theft" — Reading contacts, SMS, call logs, location, clipboard, browser data, accounts
+- "sms_abuse" — Sending premium SMS, deleting SMS evidence, intercepting SMS, reading SMS for OTP theft
 - "credential_theft" — Overlay attacks, keylogging, phishing WebViews, accessibility abuse for input capture
-- "persistence" — BOOT_COMPLETED receivers, alarm/job scheduling, device admin, foreground services that resist termination
-- "evasion" — Reflection, dynamic class loading, string obfuscation, anti-emulator checks, packer/protector behavior
-- "ransomware" — File encryption with Cipher, device locking via DevicePolicyManager, external storage traversal, ransom note display
-- "surveillance" — Camera/mic capture, screen recording, location tracking, call recording, keylogging
-- "dropper" — DexClassLoader, APK download + install, staged payloads, dynamic DEX loading from network
-- "crypto_mining" — Hash computation loops, CPU-intensive thread pools, mining pool connections, wallet addresses
+- "persistence" — BOOT_COMPLETED receivers, alarm/job scheduling, device admin, foreground services that resist killing
+- "evasion" — Reflection, dynamic class loading, string obfuscation/encryption, anti-emulator, anti-debug, packer indicators
+- "ransomware" — File encryption with Cipher on user files, device locking via DevicePolicyManager, ransom demands
+- "surveillance" — Camera/mic capture without UI, screen recording, location tracking, keystroke logging
+- "dropper" — DexClassLoader, APK download + install, staged payloads, code fetched from C2
+- "crypto_mining" — Hash computation, mining pool connections, wallet addresses, CPU/GPU resource abuse
+- "banking_trojan" — Overlay injection + SMS interception + credential harvesting (combined pattern)
+- "rootkit" — su execution, /system writes, kernel module loading, SELinux bypass
 - "other" — Doesn't fit the above categories
 
 Output ONLY valid JSON with these fields:
 {
   "relevant": boolean - true if this code is relevant to the scan goal,
   "confidence": 0.0-1.0,
-  "api_calls": ["list of API/system calls found"],
+  "api_calls": ["list of API/system calls found in the code"],
   "findings": ["list of specific findings relevant to the scan goal"],
-  "threat_category": "c2|data_theft|sms_abuse|credential_theft|persistence|evasion|ransomware|surveillance|dropper|other|none",
+  "threat_category": "c2|data_theft|sms_abuse|credential_theft|persistence|evasion|ransomware|surveillance|dropper|crypto_mining|banking_trojan|rootkit|other|none",
   "reasoning": "brief explanation of why this code is or is not relevant to the goal"
 }

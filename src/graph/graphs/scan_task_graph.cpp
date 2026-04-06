@@ -219,6 +219,30 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
 
     // RAG enrichment: query embedding DB for similar methods from past scans
     auto rag_enrich = g.add<CodeNode>("rag_enrich", [embeddingStore](TaskContext ctx) {
+        // Build call graph context from extracted method_calls
+        if (ctx.has("method_calls")) {
+            try {
+                auto calls = ctx.get("method_calls");
+                if (calls.is_array() && !calls.empty()) {
+                    std::ostringstream cg;
+                    cg << "Methods called by this function:\n";
+                    for (auto& c : calls) {
+                        cg << "  " << c.value("invoke_type", "")
+                           << " " << c.value("target_class", "")
+                           << "->" << c.value("target_method", "")
+                           << c.value("target_signature", "") << "\n";
+                    }
+                    ctx.set("call_graph_context", cg.str());
+                } else {
+                    ctx.set("call_graph_context", "");
+                }
+            } catch (...) {
+                ctx.set("call_graph_context", "");
+            }
+        } else {
+            ctx.set("call_graph_context", "");
+        }
+
         if (!embeddingStore || !embeddingStore->hasBackend()) return ctx;
 
         std::string methodBody = ctx.has("method_body") ? ctx.get("method_body").get<std::string>() : "";

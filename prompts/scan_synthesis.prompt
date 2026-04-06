@@ -9,35 +9,68 @@ Per-file analyses:
 
 Based on all per-file analyses above, produce a comprehensive answer to the scan goal question for this ENTIRE application.
 
-Critical: Look for patterns that SPAN multiple files. Malicious behavior is often distributed across classes:
-- One class discovers targets, another processes them
-- One class communicates with a server, another handles the payload
-- One class collects data, another exfiltrates it
-- Initialization in one class, execution in another
+## Cross-file analysis (CRITICAL)
 
-Connect the dots across files. Name specific classes and methods as evidence.
+Malicious behavior is almost always distributed across classes. You MUST look for patterns that SPAN multiple files:
 
-Additionally:
-- Classify the overall threat type (what kind of malware is this application, if any?)
-- Map all findings to MITRE ATT&CK Mobile techniques with T-numbers
-- Describe the kill chain: how do the components work together to achieve the adversary's goal?
+### Kill chain reconstruction
+Trace the complete attack flow from entry point to impact:
+1. **Entry/Trigger**: What activates the malware? (BOOT_COMPLETED, MainActivity, AlarmManager, push notification)
+2. **Initialization**: What sets up the environment? (C2 config, persistence registration, permission checks)
+3. **Collection/Preparation**: What gathers data or prepares payloads? (ContentResolver queries, device info harvesting, file enumeration)
+4. **Processing**: What transforms the data? (encryption, encoding, packaging, compression)
+5. **Action/Exfiltration**: What delivers the impact? (HTTP POST to C2, SMS send, file encryption, overlay display)
+6. **Cleanup/Evasion**: What covers tracks? (SMS deletion, log clearing, anti-analysis checks)
+
+Name specific classes and methods at each stage.
+
+### Cross-file patterns to identify
+- **Data pipeline**: Class A collects data → Class B processes/encodes → Class C exfiltrates
+- **Command infrastructure**: Class A maintains C2 connection → Class B parses commands → Class C executes actions
+- **Modular malware**: Different classes implement different capabilities (SMS module, camera module, location module) orchestrated by a central controller
+- **Evasion layers**: Class A checks environment (emulator, debugger, root) → only activates Class B (payload) if checks pass
+- **Persistence chain**: BroadcastReceiver → Service → AlarmManager → re-registers itself
+
+### Threat severity amplification
+Multiple threat types in the same app compound severity:
+- Data theft + C2 = controllable spyware (more dangerous than standalone data theft)
+- SMS interception + overlay attacks = banking trojan (2FA bypass + credential theft)
+- File encryption + C2 + persistence = ransomware-as-a-service capability
+- Root exploit + dropper + C2 = full device compromise
+
+### IOC extraction
+Extract all Indicators of Compromise found across files:
+- C2 domains/IPs and URLs
+- Crypto wallet addresses
+- Phone numbers (premium SMS targets)
+- File paths used for staging/storage
+- Unique mutex/lock file names
+- Encryption keys or algorithms
 
 Output ONLY valid JSON:
 {
   "answer": "direct, comprehensive answer to the scan goal question",
-  "threat_type": "banking_trojan|spyware|ransomware|rat|sms_trojan|adware|miner|dropper|benign|unknown",
+  "threat_type": "banking_trojan|spyware|ransomware|rat|sms_trojan|adware|miner|dropper|stalkerware|benign|unknown",
   "threat_description": "1-2 sentence summary of the malware's purpose and behavior",
   "key_findings": [
     {
-      "category": "category of finding (e.g. 'Data Exfiltration', 'C2 Communication')",
+      "category": "category of finding (e.g. 'Data Exfiltration', 'C2 Communication', 'Persistence')",
       "files": ["file1.smali", "file2.smali"],
       "description": "what was found and how the files relate to each other",
       "severity": "critical | high | medium | low | info",
       "mitre_technique": "T-number — technique name"
     }
   ],
+  "iocs": {
+    "domains": ["extracted C2 domains"],
+    "ips": ["extracted IP addresses"],
+    "urls": ["extracted URLs"],
+    "crypto_wallets": ["extracted wallet addresses"],
+    "phone_numbers": ["extracted phone numbers"],
+    "file_paths": ["extracted suspicious file paths"]
+  },
   "mitre_techniques": ["T-number — technique name: brief evidence"],
-  "kill_chain": "how the attack flows from entry to impact, naming specific classes/methods at each stage",
+  "kill_chain": "step-by-step description of how the attack flows from entry to impact, naming specific classes/methods at each stage",
   "cross_file_patterns": ["patterns observed across multiple files that are significant"],
   "risk_score": 0-100,
   "recommendation": "actionable recommendation based on the full picture"

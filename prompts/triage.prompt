@@ -14,7 +14,11 @@ Method body:
 {{method_body}}
 ```
 
+{{static_analysis_summary}}
+
 Analyze this code with respect to the scan goal above. Determine whether it contains behavior RELEVANT to answering the goal question.
+
+IMPORTANT: Pay close attention to the STATIC ANALYSIS section above (if present). It contains programmatically extracted API calls, risk indicators, and file-level threat signals. These are ground truth — the APIs listed were actually found in the code. Use them to confirm or override your initial impression.
 
 IMPORTANT guidelines:
 

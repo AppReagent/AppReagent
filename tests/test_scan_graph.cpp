@@ -66,6 +66,7 @@ TEST_F(ScanGraphTest, FullScanWithMocks) {
         "confidence": 0.8,
         "api_calls": ["URL.openConnection"],
         "findings": ["Method connects to external URL"],
+        "threat_category": "c2",
         "reasoning": "Method connects to external URL for potential data exfiltration"
     })");
 
@@ -75,10 +76,10 @@ TEST_F(ScanGraphTest, FullScanWithMocks) {
     // Tier 2 (worker for deep analysis + synthesis worker): returns analysis
     // tier2 handles deep analysis (3 methods) + synthesis (1 call) = 4 responses
     tier2.setResponses({
-        R"json({"detailed_findings":["constructor - no relevant behavior"],"evidence":[],"data_flows":["init"],"relevance_score":5,"reasoning":"constructor"})json",
-        R"json({"detailed_findings":["URL connection to http://evil.com/exfil"],"evidence":["URL.openConnection","http://evil.com/exfil"],"data_flows":["URL connection to http://evil.com/exfil"],"relevance_score":90,"reasoning":"exfiltration via HTTP"})json",
-        R"json({"detailed_findings":["AES cipher usage"],"evidence":["Cipher.getInstance(AES)"],"data_flows":["AES cipher"],"relevance_score":70,"reasoning":"crypto operation"})json",
-        R"json({"answer":"This class sends data to http://evil.com/exfil using URL connections and encrypts data with AES.","relevant_methods":[{"method":"sendData","finding":"HTTP connection to evil.com"},{"method":"encrypt","finding":"AES encryption"}],"evidence_summary":"Encrypts and exfiltrates data.","overall_relevance":"relevant","relevance_score":90,"recommendation":"block"})json"
+        R"json({"detailed_findings":["constructor - no relevant behavior"],"evidence":[],"data_flows":["init"],"threat_type":"unknown","mitre_techniques":[],"adversary_intent":"none","relevance_score":5,"reasoning":"constructor"})json",
+        R"json({"detailed_findings":["URL connection to http://evil.com/exfil"],"evidence":["URL.openConnection","http://evil.com/exfil"],"data_flows":["URL connection to http://evil.com/exfil"],"threat_type":"rat","mitre_techniques":["T1437 - Application Layer Protocol"],"adversary_intent":"exfiltrate data via HTTP","relevance_score":90,"reasoning":"exfiltration via HTTP"})json",
+        R"json({"detailed_findings":["AES cipher usage"],"evidence":["Cipher.getInstance(AES)"],"data_flows":["AES cipher"],"threat_type":"unknown","mitre_techniques":[],"adversary_intent":"encrypt data before exfiltration","relevance_score":70,"reasoning":"crypto operation"})json",
+        R"json({"answer":"This class sends data to http://evil.com/exfil using URL connections and encrypts data with AES.","relevant_methods":[{"method":"sendData","finding":"HTTP connection to evil.com"},{"method":"encrypt","finding":"AES encryption"}],"evidence_summary":"Encrypts and exfiltrates data.","overall_relevance":"relevant","threat_type":"rat","mitre_techniques":["T1437 - Application Layer Protocol"],"relevance_score":90,"recommendation":"block"})json"
     });
 
     TierBackends backends;
@@ -93,6 +94,7 @@ TEST_F(ScanGraphTest, FullScanWithMocks) {
     initial.set("scan_goal", "Does this code exfiltrate data or connect to external servers?");
 
     GraphRunner runner;
+    runner.setMaxParallel(1); // serial execution for deterministic mock responses
 
     std::vector<std::string> nodeTrace;
     runner.onNodeStart([&](const std::string& name, const TaskContext&) {
@@ -111,7 +113,8 @@ TEST_F(ScanGraphTest, FullScanWithMocks) {
     // Verify the graph executed the expected nodes
     EXPECT_EQ(nodeTrace[0], "read_file");
     EXPECT_EQ(nodeTrace[1], "detect_format");
-    EXPECT_EQ(nodeTrace[2], "split_methods");
+    EXPECT_EQ(nodeTrace[2], "file_signals");
+    EXPECT_EQ(nodeTrace[3], "split_methods");
 
     // rag_enrich should appear in the trace (between filter and deep_analysis)
     bool hasRagEnrich = false;
@@ -128,13 +131,13 @@ TEST_F(ScanGraphTest, FullScanWithMocks) {
 
 TEST_F(ScanGraphTest, MethodCallsExtracted) {
     // Verify that split_methods extracts call graph edges into TaskContext
-    tier1.setResponse(R"({"relevant": true, "confidence": 0.95, "api_calls": [], "findings": [], "reasoning": "test"})");
+    tier1.setResponse(R"({"relevant": true, "confidence": 0.95, "api_calls": [], "findings": [], "threat_category": "other", "reasoning": "test"})");
     tier0.setResponse("PASS");
     tier2.setResponses({
-        R"json({"detailed_findings":["test"],"evidence":[],"data_flows":[],"relevance_score":50,"reasoning":"test"})json",
-        R"json({"detailed_findings":["test"],"evidence":[],"data_flows":[],"relevance_score":50,"reasoning":"test"})json",
-        R"json({"detailed_findings":["test"],"evidence":[],"data_flows":[],"relevance_score":50,"reasoning":"test"})json",
-        R"json({"answer":"test","relevant_methods":[],"evidence_summary":"test","overall_relevance":"relevant","relevance_score":50,"recommendation":"review"})json"
+        R"json({"detailed_findings":["test"],"evidence":["test"],"data_flows":["test"],"threat_type":"unknown","mitre_techniques":[],"adversary_intent":"test","relevance_score":50,"reasoning":"test"})json",
+        R"json({"detailed_findings":["test"],"evidence":["test"],"data_flows":["test"],"threat_type":"unknown","mitre_techniques":[],"adversary_intent":"test","relevance_score":50,"reasoning":"test"})json",
+        R"json({"detailed_findings":["test"],"evidence":["test"],"data_flows":["test"],"threat_type":"unknown","mitre_techniques":[],"adversary_intent":"test","relevance_score":50,"reasoning":"test"})json",
+        R"json({"answer":"test","relevant_methods":[],"evidence_summary":"test","overall_relevance":"relevant","threat_type":"unknown","mitre_techniques":[],"relevance_score":50,"recommendation":"review"})json"
     });
 
     TierBackends backends;
@@ -149,6 +152,7 @@ TEST_F(ScanGraphTest, MethodCallsExtracted) {
     initial.set("scan_goal", "test");
 
     GraphRunner runner;
+    runner.setMaxParallel(1);
 
     // Collect method_calls from node contexts
     bool foundMethodCalls = false;

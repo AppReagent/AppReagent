@@ -8,7 +8,11 @@ Source: {{source_file}}
 Per-function analyses:
 {{collected}}
 
-Based on all the analyses above, produce a comprehensive answer to the scan goal question for this file.
+{{file_signals_summary}}
+
+Based on all the analyses above (including file-level threat signals if present), produce a comprehensive answer to the scan goal question for this file.
+
+IMPORTANT: The file-level threat signals above (if present) show compound behavioral patterns detected by static analysis across ALL methods in this file. These cross-method patterns are critical — malware often splits behavior across methods (e.g., one method reads contacts, another sends SMS). Incorporate these cross-method findings into your assessment.
 
 ## Synthesis instructions
 

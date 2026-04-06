@@ -15,6 +15,8 @@ Initial triage: {{llm_response}}
 Class fields and context:
 {{fields_summary}}
 
+{{static_analysis_summary}}
+
 {{rag_context}}
 
 {{call_graph_context}}

@@ -1180,7 +1180,7 @@ bool Tui::handleInput() {
                         return true;
                     }
                     // Consume other sequences (page up/down)
-                    if (seq1 == '5' || seq1 == '6') { char t; read(STDIN_FILENO, &t, 1); }
+                    if (seq1 == '5' || seq1 == '6') { char t; if (read(STDIN_FILENO, &t, 1)) {} }
                 }
                 contextMenuOpen_ = false;
                 return true;
@@ -1476,7 +1476,7 @@ void Tui::handleServerMessage(const nlohmann::json& msg) {
         std::string typeStr = m.value("type", "answer");
         std::string content = m.value("content", "");
         std::lock_guard lk(messagesMu_);
-        messages_.push_back({Message::AGENT, parseAgentType(typeStr), content, animFrame_});
+        messages_.push_back({Message::AGENT, parseAgentType(typeStr), content, static_cast<int>(animFrame_.load())});
         messagesDirty_ = true;
         scrollOffset_ = 0;
 
@@ -1568,15 +1568,15 @@ void Tui::submit() {
 
     // Handle /dangerous toggle
     if (query == "/dangerous") {
-        dangerousMode_ = !dangerousMode_;
+        dangerousMode_ = !dangerousMode_.load();
         if (sockFd_ >= 0) {
-            sendToServer({{"type", "set_dangerous"}, {"chat_id", currentChatId_}, {"enabled", dangerousMode_}});
+            sendToServer({{"type", "set_dangerous"}, {"chat_id", currentChatId_}, {"enabled", dangerousMode_.load()}});
         }
         std::lock_guard lk(messagesMu_);
         messages_.push_back({Message::AGENT, AgentMessage::RESULT,
             dangerousMode_ ? "Dangerous mode ON — tool calls auto-approved"
                            : "Dangerous mode OFF — tool calls require confirmation",
-            animFrame_});
+            static_cast<int>(animFrame_.load())});
         messagesDirty_ = true;
         inputBuffer_.clear();
         cursorPos_ = 0;
@@ -1594,7 +1594,7 @@ void Tui::submit() {
 
     {
         std::lock_guard lk(messagesMu_);
-        messages_.push_back({Message::USER, AgentMessage::THINKING, query, animFrame_});
+        messages_.push_back({Message::USER, AgentMessage::THINKING, query, static_cast<int>(animFrame_.load())});
     }
     render();
 
@@ -1655,7 +1655,7 @@ void Tui::submit() {
             // Suppress in-flight messages after interrupt (including duplicate "(interrupted)")
             if (interruptShown_) return;
             std::lock_guard lk(messagesMu_);
-            messages_.push_back({Message::AGENT, msg.type, msg.content, animFrame_});
+            messages_.push_back({Message::AGENT, msg.type, msg.content, static_cast<int>(animFrame_.load())});
             messagesDirty_ = true;
             scrollOffset_ = 0;
         }, confirm);

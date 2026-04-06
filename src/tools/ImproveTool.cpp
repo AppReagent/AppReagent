@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <memory>
 #include <iostream>
 #include <signal.h>
 #include <sstream>
@@ -43,11 +44,14 @@ ImproveTool::CmdResult ImproveTool::exec(const std::string& cmd) {
     std::string result;
     FILE* pipe = popen((cmd + " 2>&1").c_str(), "r");
     if (!pipe) return {"popen failed", -1};
+    // RAII guard to ensure pclose is called even if an exception occurs
+    auto pcloseDeleter = [](FILE* f) { return pclose(f); };
+    std::unique_ptr<FILE, decltype(pcloseDeleter)> pipeGuard(pipe, pcloseDeleter);
     std::array<char, 4096> buf;
-    while (fgets(buf.data(), buf.size(), pipe)) {
+    while (fgets(buf.data(), buf.size(), pipeGuard.get())) {
         result += buf.data();
     }
-    int status = pclose(pipe);
+    int status = pclose(pipeGuard.release());
     int exitCode = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
     while (!result.empty() && result.back() == '\n') result.pop_back();
     return {result, exitCode};
@@ -260,7 +264,8 @@ ImproveTool::FileScore ImproveTool::scoreFile(
 
     // Evidence quality
     std::string profileLower = profileJson;
-    std::transform(profileLower.begin(), profileLower.end(), profileLower.begin(), ::tolower);
+    std::transform(profileLower.begin(), profileLower.end(), profileLower.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
 
     int hits = 0, total = 0;
     if (label.contains("must_mention")) {
@@ -429,7 +434,8 @@ std::optional<ToolResult> ImproveTool::tryExecute(const std::string& action, Too
     bool evalOnly = false;
     {
         std::string lower = task;
-        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        std::transform(lower.begin(), lower.end(), lower.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
         evalOnly = lower.empty() || lower == "evaluate" || lower == "eval"
                 || lower == "score" || lower == "baseline" || lower == "run"
                 || lower == "run the improve tool" || lower == "run improve";

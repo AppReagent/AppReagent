@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <sstream>
 
 namespace fs = std::filesystem;
@@ -18,11 +19,14 @@ static std::string runCmd(const std::string& cmd, int* exitCode = nullptr) {
         if (exitCode) *exitCode = -1;
         return "failed to execute command";
     }
+    // RAII guard to ensure pclose is called even on exception
+    auto pcloseDeleter = [](FILE* f) { return pclose(f); };
+    std::unique_ptr<FILE, decltype(pcloseDeleter)> pipeGuard(pipe, pcloseDeleter);
     std::array<char, 4096> buf;
-    while (fgets(buf.data(), buf.size(), pipe)) {
+    while (fgets(buf.data(), buf.size(), pipeGuard.get())) {
         result += buf.data();
     }
-    int status = pclose(pipe);
+    int status = pclose(pipeGuard.release());
     if (exitCode) *exitCode = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
     // trim trailing newline
     while (!result.empty() && result.back() == '\n') result.pop_back();
@@ -42,15 +46,26 @@ Sandbox::~Sandbox() {
 void Sandbox::ensureRunning() {
     if (!containerId_.empty()) return;
 
+    // Shell-quote a path to prevent command injection from special characters
+    auto shellQuote = [](const std::string& s) -> std::string {
+        std::string q = "'";
+        for (char c : s) {
+            if (c == '\'') q += "'\\''";
+            else q += c;
+        }
+        q += "'";
+        return q;
+    };
+
     std::ostringstream cmd;
     cmd << "docker run -d --rm"
         << " --network none"
         << " --memory 512m"
         << " --cpus 1"
-        << " -v " << workDir_ << ":/workspace";
+        << " -v " << shellQuote(workDir_) << ":/workspace";
 
     if (!samplesDir_.empty() && fs::exists(samplesDir_)) {
-        cmd << " -v " << samplesDir_ << ":/samples:ro";
+        cmd << " -v " << shellQuote(samplesDir_) << ":/samples:ro";
     }
 
     cmd << " -w /workspace"

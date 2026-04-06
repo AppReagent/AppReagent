@@ -18,6 +18,11 @@
 #include "tools/SimilarTool.h"
 #include "tools/CallGraphTool.h"
 #include "tools/FindBehaviorTool.h"
+#include "tools/GrepTool.h"
+#include "tools/ReadFileTool.h"
+#include "tools/XrefsTool.h"
+#include "tools/StringsTool.h"
+#include "tools/ManifestTool.h"
 
 #include <csignal>
 #include <filesystem>
@@ -131,6 +136,11 @@ ChatSession& AreaServer::getOrCreateChat(const std::string& id, const std::strin
         session->tools->add(std::make_unique<DeleteScanTool>(db_, &scanState_));
         session->tools->add(std::make_unique<ShellTool>(session->sandbox.get()));
         session->tools->add(std::make_unique<FindFilesTool>());
+        session->tools->add(std::make_unique<GrepTool>());
+        session->tools->add(std::make_unique<ReadFileTool>());
+        session->tools->add(std::make_unique<XrefsTool>());
+        session->tools->add(std::make_unique<StringsTool>());
+        session->tools->add(std::make_unique<ManifestTool>());
         session->tools->add(std::make_unique<ScanTool>(&config_, db_, &scanState_, id, &eventBus_));
         session->tools->add(std::make_unique<AnalyzeTool>(&config_, db_, &eventBus_));
         session->tools->add(std::make_unique<TuiTool>());

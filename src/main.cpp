@@ -37,6 +37,11 @@
 #include "tools/SimilarTool.h"
 #include "tools/CallGraphTool.h"
 #include "tools/FindBehaviorTool.h"
+#include "tools/GrepTool.h"
+#include "tools/ReadFileTool.h"
+#include "tools/XrefsTool.h"
+#include "tools/StringsTool.h"
+#include "tools/ManifestTool.h"
 #include "tools/ToolContext.h"
 
 namespace fs = std::filesystem;
@@ -90,6 +95,11 @@ static int runTui(area::Config& config, area::Database& db) {
     tools.add(std::make_unique<area::DeleteScanTool>(db, &scanState));
     tools.add(std::make_unique<area::ShellTool>(&sandbox));
     tools.add(std::make_unique<area::FindFilesTool>());
+    tools.add(std::make_unique<area::GrepTool>());
+    tools.add(std::make_unique<area::ReadFileTool>());
+    tools.add(std::make_unique<area::XrefsTool>());
+    tools.add(std::make_unique<area::StringsTool>());
+    tools.add(std::make_unique<area::ManifestTool>());
     tools.add(std::make_unique<area::ScanTool>(&config, db, &scanState, "standalone"));
     tools.add(std::make_unique<area::AnalyzeTool>(&config, db));
     tools.add(std::make_unique<area::SqlTool>(db));

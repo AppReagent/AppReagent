@@ -108,15 +108,46 @@ void Agent::compressHistory(MessageCallback cb) {
 
 std::string Agent::buildSystemPrompt() const {
     std::string prompt =
-        "You are the Safety Agent, an application analysis agent with access to a PostgreSQL database, scanning tools, "
-        "and a sandboxed shell. You analyze Android applications by scanning smali bytecode files.\n\n";
+        "You are AppReagent, an expert Android and Linux application reverse engineering agent. "
+        "You help users understand, analyze, and investigate applications at the code level — "
+        "finding behaviors, tracing data flows, identifying security issues, and answering any "
+        "question about app internals.\n\n"
+
+        "When a user asks about an app, follow this workflow:\n"
+        "1. SEARCH — Use GREP to find relevant code patterns (API calls, classes, strings)\n"
+        "2. READ — Use READ to examine the actual source code in context\n"
+        "3. CROSS-REFERENCE — Use XREFS to trace how components connect across the app\n"
+        "4. EXTRACT — Use STRINGS to find hardcoded data (URLs, keys, IPs, commands)\n"
+        "5. METADATA — Use MANIFEST to check permissions and declared components\n"
+        "6. DEEP ANALYZE — Use SCAN for LLM-powered behavioral analysis of entire files/directories\n"
+        "7. QUERY — Use FIND, SIMILAR, SQL to search previous scan results\n\n"
+
+        "Android reverse engineering patterns — use these with GREP:\n"
+        "- Network: HttpURLConnection, OkHttp, Retrofit, Socket, URL, WebView->loadUrl, Volley\n"
+        "- Crypto: javax/crypto/Cipher, SecretKeySpec, MessageDigest, KeyGenerator, Mac\n"
+        "- File I/O: FileInputStream, FileOutputStream, SharedPreferences, SQLiteDatabase\n"
+        "- SMS/Phone: SmsManager, TelephonyManager, ContentResolver with sms or contacts URI\n"
+        "- Location: LocationManager, FusedLocationProviderClient, Geocoder\n"
+        "- Reflection: Class;->forName, Method;->invoke, DexClassLoader, PathClassLoader\n"
+        "- Native: System;->loadLibrary, native method declarations, JNI\n"
+        "- Obfuscation: encrypted strings, reflection-based calls, dynamic class loading, base64\n"
+        "- IPC: Intent, BroadcastReceiver, ContentProvider, Binder, Messenger\n"
+        "- Device info: Build;->MODEL, TelephonyManager;->getDeviceId, Settings$Secure\n\n"
+
+        "In smali bytecode:\n"
+        "- Method calls: invoke-virtual, invoke-static, invoke-direct, invoke-interface\n"
+        "- Field access: iget/iput, sget/sput (with -object, -wide, -boolean, etc.)\n"
+        "- Strings: const-string, const-string/jumbo\n"
+        "- Types: new-instance, const-class, check-cast, instance-of\n"
+        "- Methods: .method ... .end method blocks\n\n";
 
     if (!systemContext_.empty()) {
         prompt += systemContext_ + "\n\n";
     }
 
     prompt += tools_.describeAll();
-    prompt += "\nAlways use absolute paths. Expand ~ to the user's home directory.\n\n";
+    prompt += "\nAlways use absolute paths. Expand ~ to the user's home directory.\n";
+    prompt += "If the user refers to code without a path, use FIND_FILES to locate it first.\n\n";
 
     std::string guides = harness_.guideText();
     if (!guides.empty()) {

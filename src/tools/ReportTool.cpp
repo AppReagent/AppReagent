@@ -25,8 +25,10 @@ static std::string resolveRunId(Database& db, const std::string& input) {
 static std::string timestamp() {
     auto now = std::chrono::system_clock::now();
     auto t = std::chrono::system_clock::to_time_t(now);
+    struct tm tm_buf;
+    gmtime_r(&t, &tm_buf);
     char buf[64];
-    std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S UTC", std::gmtime(&t));
+    std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S UTC", &tm_buf);
     return buf;
 }
 

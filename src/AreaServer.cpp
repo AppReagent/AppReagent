@@ -110,7 +110,7 @@ AreaServer::~AreaServer() {
 }
 
 std::string AreaServer::generateId() {
-    static std::mt19937 rng(std::random_device{}());
+    static thread_local std::mt19937 rng(std::random_device{}());
     static const char chars[] = "abcdefghijklmnopqrstuvwxyz0123456789";
     std::string id;
     for (int i = 0; i < 8; i++) id += chars[rng() % (sizeof(chars) - 1)];

@@ -25,7 +25,7 @@ public:
     ExecResult exec(const std::string& command, int timeout_sec = 60);
 
     // Check if the container is running
-    bool running() const { return !containerId_.empty(); }
+    bool running() const { std::lock_guard lk(mu_); return !containerId_.empty(); }
 
     // Path to the writable workspace (host side)
     const std::string& workDir() const { return workDir_; }

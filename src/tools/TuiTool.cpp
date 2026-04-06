@@ -17,7 +17,8 @@ std::optional<ToolResult> TuiTool::tryExecute(const std::string& action, ToolCon
     // Trim leading whitespace
     while (!rest.empty() && rest[0] == ' ') rest.erase(0, 1);
     // Lowercase
-    std::transform(rest.begin(), rest.end(), rest.begin(), ::tolower);
+    std::transform(rest.begin(), rest.end(), rest.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
 
     bool show = false;
     std::string panel;

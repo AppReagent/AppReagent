@@ -32,19 +32,25 @@ std::string SqlTool::extractSql(const std::string& response) {
 
     auto sqlStart = response.find("```sql");
     if (sqlStart != std::string::npos) {
-        sqlStart = response.find('\n', sqlStart) + 1;
-        auto sqlEnd = response.find("```", sqlStart);
-        if (sqlEnd != std::string::npos) {
-            return response.substr(sqlStart, sqlEnd - sqlStart);
+        auto nl = response.find('\n', sqlStart);
+        if (nl != std::string::npos) {
+            sqlStart = nl + 1;
+            auto sqlEnd = response.find("```", sqlStart);
+            if (sqlEnd != std::string::npos) {
+                return response.substr(sqlStart, sqlEnd - sqlStart);
+            }
         }
     }
 
     auto start = response.find("```");
     if (start != std::string::npos) {
-        start = response.find('\n', start) + 1;
-        auto end = response.find("```", start);
-        if (end != std::string::npos) {
-            return response.substr(start, end - start);
+        auto nl = response.find('\n', start);
+        if (nl != std::string::npos) {
+            start = nl + 1;
+            auto end = response.find("```", start);
+            if (end != std::string::npos) {
+                return response.substr(start, end - start);
+            }
         }
     }
 

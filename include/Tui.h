@@ -97,7 +97,7 @@ private:
 
     int scrollOffset_ = 0;
     int taskScrollOffset_ = 0;
-    uint64_t animFrame_ = 0;   // 60fps counter for wave bar
+    std::atomic<uint64_t> animFrame_{0};   // 60fps counter for wave bar
     int noiseFrame_ = 0;  // slow counter for text noise, increments on full renders
     uint64_t fadeStartFrame_ = 0; // animFrame_ when last new message arrived
     int layoutRows_ = 0, layoutCols_ = 0;
@@ -128,7 +128,7 @@ private:
     std::vector<Message> messages_;
 
     ColorTheme theme_;
-    bool dangerousMode_ = false;
+    std::atomic<bool> dangerousMode_{false};
 
     // Confirm UI state
     std::mutex confirmMu_;
@@ -151,12 +151,12 @@ private:
 
     std::string outputBuf_;
 
-    struct termios origTermios_;
+    struct termios origTermios_{};
     bool rawMode_ = false;
     std::chrono::steady_clock::time_point lastCtrlC_{};
     bool ctrlCPending_ = false;
-    bool interruptShown_ = false;  // suppress duplicate (interrupted) from server
-    bool interruptSuppressing_ = false;  // suppress all agent_msg until server confirms done
+    std::atomic<bool> interruptShown_{false};  // suppress duplicate (interrupted) from server
+    std::atomic<bool> interruptSuppressing_{false};  // suppress all agent_msg until server confirms done
     std::string inputFlash_;
     std::chrono::steady_clock::time_point flashTime_{};
 

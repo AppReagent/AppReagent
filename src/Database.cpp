@@ -15,6 +15,12 @@ Database::~Database() {
 }
 
 void Database::connect(const std::string& url, const std::string& postgres_cert_path) {
+    // Close any existing connection to avoid leaking the old PGconn
+    if (conn_) {
+        PQfinish(conn_);
+        conn_ = nullptr;
+    }
+
     char sep = (url.find('?') != std::string::npos) ? '&' : '?';
     std::string conninfo = url + sep +
         "sslmode=verify-full"

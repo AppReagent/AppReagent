@@ -112,7 +112,7 @@ AnalysisResult AnalyzeCommand::run(const std::string& run_id) {
         }
     });
 
-    runner.onNodeEnd([this, &resolvedId](const std::string& nodeName, const graph::TaskContext& ctx) {
+    runner.onNodeEnd([this, resolvedId](const std::string& nodeName, const graph::TaskContext& ctx) {
         if (ctx.has("llm_response") && ctx.has("llm_prompt")) {
             auto prompt = ctx.get("llm_prompt").get<std::string>();
             auto response = ctx.get("llm_response").get<std::string>();

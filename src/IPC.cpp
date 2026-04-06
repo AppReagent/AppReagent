@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <mutex>
 #include <unordered_map>
 
 static void setNonBlocking(int fd) {
@@ -16,6 +17,7 @@ static void setNonBlocking(int fd) {
 
 namespace area::ipc {
 
+static std::mutex g_readBufsMu;
 static std::unordered_map<int, std::string> g_readBufs;
 
 int createListener(const std::string& path) {
@@ -83,6 +85,7 @@ bool sendLine(int fd, const nlohmann::json& j) {
 }
 
 std::optional<nlohmann::json> readLine(int fd) {
+    std::lock_guard lk(g_readBufsMu);
     auto& buf = g_readBufs[fd];
 
     // Check if we already have a complete line buffered
@@ -122,7 +125,10 @@ void removeSock(const std::string& path) {
 }
 
 void closeFd(int fd) {
-    g_readBufs.erase(fd);
+    {
+        std::lock_guard lk(g_readBufsMu);
+        g_readBufs.erase(fd);
+    }
     close(fd);
 }
 

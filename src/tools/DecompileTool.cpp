@@ -655,7 +655,7 @@ static std::string decompileMethod(const std::vector<std::string>& lines,
                 if (comma != std::string::npos) {
                     std::string reg = trim(operands.substr(0, comma));
                     std::string label = trim(operands.substr(comma + 1));
-                    if (label[0] == ':') label = label.substr(1);
+                    if (!label.empty() && label[0] == ':') label = label.substr(1);
                     out << indent << "if (" << reg << cond << ") goto " << label << ";\n";
                 }
             } else {
@@ -676,7 +676,7 @@ static std::string decompileMethod(const std::vector<std::string>& lines,
                     if (comma2 != std::string::npos) {
                         std::string r2 = trim(operands.substr(comma1 + 1, comma2 - comma1 - 1));
                         std::string label = trim(operands.substr(comma2 + 1));
-                        if (label[0] == ':') label = label.substr(1);
+                        if (!label.empty() && label[0] == ':') label = label.substr(1);
                         out << indent << "if (" << r1 << op << r2 << ") goto " << label << ";\n";
                     }
                 }

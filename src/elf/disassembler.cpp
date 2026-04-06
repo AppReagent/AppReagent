@@ -60,6 +60,12 @@ static std::string disassembleBytes(const uint8_t* code, size_t codeSize,
         return "; disassembly failed: could not initialize capstone\n";
     }
 
+    // RAII guard to ensure cs_close is always called
+    struct CsGuard {
+        csh& h;
+        ~CsGuard() { cs_close(&h); }
+    } guard{handle};
+
     cs_insn* insn;
     size_t count = cs_disasm(handle, code, codeSize, baseAddr, 0, &insn);
 
@@ -71,7 +77,6 @@ static std::string disassembleBytes(const uint8_t* code, size_t codeSize,
     }
 
     if (count > 0) cs_free(insn, count);
-    cs_close(&handle);
 
     return ss.str();
 }
@@ -87,7 +92,10 @@ static ElfInfo disassembleImpl(const uint8_t* data, size_t dataSize,
         return info;
     }
 
-    const auto* ehdr = reinterpret_cast<const Ehdr*>(data);
+    // Use memcpy to avoid undefined behavior from unaligned reinterpret_cast
+    Ehdr ehdrBuf;
+    std::memcpy(&ehdrBuf, data, sizeof(Ehdr));
+    const auto* ehdr = &ehdrBuf;
     info.arch = archString(ehdr->e_machine);
     info.type = typeString(ehdr->e_type);
 
@@ -170,7 +178,8 @@ static ElfInfo disassembleImpl(const uint8_t* data, size_t dataSize,
 
             std::string symName;
             if (sym->st_name > 0 && sym->st_name < strSect->sh_size) {
-                symName = strtab + sym->st_name;
+                symName = std::string(strtab + sym->st_name,
+                    strnlen(strtab + sym->st_name, strSect->sh_size - sym->st_name));
             }
             if (symName.empty()) continue;
 

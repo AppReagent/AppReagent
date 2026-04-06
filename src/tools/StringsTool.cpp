@@ -298,8 +298,9 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
         std::string ext = filePath.extension().string();
         for (auto& c : ext) c = std::tolower(static_cast<unsigned char>(c));
 
-        auto fsize = fs::file_size(filePath);
-        if (fsize > 2 * 1024 * 1024) return;
+        std::error_code ec;
+        auto fsize = fs::file_size(filePath, ec);
+        if (ec || fsize > 2 * 1024 * 1024) return;
 
         filesProcessed++;
 

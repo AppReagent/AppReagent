@@ -7,15 +7,21 @@ namespace area::graph {
 inline std::string extractJson(const std::string& text) {
     auto start = text.find("```json");
     if (start != std::string::npos) {
-        start = text.find('\n', start) + 1;
-        auto end = text.find("```", start);
-        if (end != std::string::npos) return text.substr(start, end - start);
+        auto nl = text.find('\n', start);
+        if (nl != std::string::npos) {
+            start = nl + 1;
+            auto end = text.find("```", start);
+            if (end != std::string::npos) return text.substr(start, end - start);
+        }
     }
     start = text.find("```");
     if (start != std::string::npos) {
-        start = text.find('\n', start) + 1;
-        auto end = text.find("```", start);
-        if (end != std::string::npos) return text.substr(start, end - start);
+        auto nl = text.find('\n', start);
+        if (nl != std::string::npos) {
+            start = nl + 1;
+            auto end = text.find("```", start);
+            if (end != std::string::npos) return text.substr(start, end - start);
+        }
     }
     start = text.find('{');
     if (start != std::string::npos) {

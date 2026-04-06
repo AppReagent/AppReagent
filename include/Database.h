@@ -24,14 +24,14 @@ public:
     Database& operator=(const Database&) = delete;
 
     void connect(const std::string& url, const std::string& postgres_cert_path);
-    bool isConnected() const { return conn_ != nullptr; }
+    bool isConnected() const { std::lock_guard lk(mu_); return conn_ != nullptr; }
     std::string getSchema();
     QueryResult execute(const std::string& sql);
     QueryResult executeParams(const std::string& sql, const std::vector<std::string>& params);
 
 private:
     PGconn* conn_ = nullptr;
-    std::mutex mu_;
+    mutable std::mutex mu_;
 };
 
 } // namespace area

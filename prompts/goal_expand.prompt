@@ -30,4 +30,12 @@ Expand this into a detailed scan goal that includes:
    - Location access in a class with "Map" or "Navigation" in the name
    - Crypto in a class handling HTTPS certificate pinning
 
+Common threat-category expansions:
+- Ransomware: javax/crypto/Cipher for file encryption (not HTTPS TLS), FileOutputStream writing to external storage, DevicePolicyManager for screen lock, getExternalStorageDirectory + listFiles for file enumeration, ransom note strings, bitcoin/payment addresses, .locked/.encrypted file extensions
+- Network/C2: HttpURLConnection, OkHttpClient, Retrofit, Socket/ServerSocket for connections; Timer/AlarmManager/JobScheduler for periodic beacons; Base64 encoding of payloads; BOOT_COMPLETED for persistence; Runtime.exec for remote command execution
+- Cryptocurrency/mining: stratum:// pool URLs, CoinHive/WebView mining scripts, MessageDigest/SHA-256 for hash computation, CPU-intensive Thread/Runnable loops, wallet addresses (bc1/0x/4..monero), mining pool API calls
+- Data theft: ContentResolver.query on ContactsContract/CallLog/SMS URIs, TelephonyManager.getDeviceId/getSubscriberId/getLine1Number, AccountManager.getAccounts, followed by HTTP POST or SMS exfiltration of collected data
+- Spyware: LocationManager/FusedLocationProviderClient for GPS tracking, AudioRecord/MediaRecorder for audio capture, Camera/CameraManager for photo capture, KeyEvent monitoring, AccessibilityService abuse
+- Obfuscation: DexClassLoader/InMemoryDexClassLoader for dynamic loading, Class.forName + Method.invoke for reflection, native method calls via JNI, encrypted string tables with runtime decryption
+
 Be specific and technical. Output a single detailed paragraph that will guide per-method analysis. Preserve the original intent — augment, don't replace.

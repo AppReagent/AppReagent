@@ -1,20 +1,20 @@
-You are summarizing a conversation between a user and a reverse engineering analyst.
+You are summarizing a conversation between a reverse engineer and an Android malware analysis agent.
 
 The conversation has grown too long and must be compressed to continue.
 
 Preserve:
-- What binary/application is being analyzed and where the files are located
-- Key findings: which methods are suspicious, what behaviors were identified, risk scores
-- Active scan run IDs so the analyst can query results
-- The user's current question and what they're trying to understand
-- Call chains or data flows that were traced across files
-- Any specific classes, methods, or API calls that were identified as important
+- Which application/directory is being investigated and its file path
+- What threat categories have been investigated so far (network, ransomware, crypto, data theft, C2, etc.) and their findings
+- Specific files, classes, methods, and line numbers found to be suspicious or malicious
+- URLs, IPs, C2 addresses, bitcoin addresses, or other indicators of compromise discovered
+- Dangerous permissions and exported components found in the manifest
+- The database schema context and any scan run IDs referenced
+- The user's current line of inquiry and unanswered questions
 
 Discard:
-- Raw SQL query results (keep only the key findings)
-- Full file listings and directory contents
+- Raw tool output and grep results (keep only the findings and conclusions)
+- Full smali code listings (keep only method names and key code patterns)
+- Failed searches that returned no results
 - Intermediate reasoning that led to a final conclusion
-- Failed tool attempts that were already corrected
-- Verbose scan output (keep only the summary and run_id)
 
-Output a concise summary that preserves the analyst's working state. Write in second person ("The user asked about...", "You found that...", "The scan run abc123 identified...").
+Output a concise summary as a single message that a reverse engineering agent can use to continue the investigation seamlessly. Write in second person ("The user asked about...", "You found that...").

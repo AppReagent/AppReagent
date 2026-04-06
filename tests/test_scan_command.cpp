@@ -3,6 +3,7 @@
 #include <fstream>
 
 #include "ScanCommand.h"
+#include "ScanLog.h"
 #include "graph/graphs/tier_pool.h"
 
 namespace fs = std::filesystem;
@@ -95,6 +96,26 @@ TEST_F(ScanCommandTest, SingleFileTarget) {
     std::string file = testDir + "/com/test/Malware.smali";
     EXPECT_TRUE(fs::is_regular_file(file));
     EXPECT_TRUE(file.ends_with(".smali"));
+}
+
+TEST(ScanLogTest, BytesToPgHexEmpty) {
+    EXPECT_EQ(area::ScanLog::bytesToPgHex(""), "\\x");
+}
+
+TEST(ScanLogTest, BytesToPgHexAscii) {
+    EXPECT_EQ(area::ScanLog::bytesToPgHex("AB"), "\\x4142");
+}
+
+TEST(ScanLogTest, BytesToPgHexBinaryWithNulls) {
+    std::string data("\x00\x01\xff", 3);
+    EXPECT_EQ(area::ScanLog::bytesToPgHex(data), "\\x0001ff");
+}
+
+TEST(ScanLogTest, Sha256Deterministic) {
+    std::string hash1 = area::ScanLog::sha256("hello world");
+    std::string hash2 = area::ScanLog::sha256("hello world");
+    EXPECT_EQ(hash1, hash2);
+    EXPECT_EQ(hash1.size(), 64u); // 256 bits = 64 hex chars
 }
 
 TEST(TierPoolTest, CreatesBackendsFromConfig) {

@@ -21,6 +21,18 @@ std::string ScanLog::sha256(const std::string& data) {
     return ss.str();
 }
 
+std::string ScanLog::bytesToPgHex(const std::string& data) {
+    static const char hex[] = "0123456789abcdef";
+    std::string result;
+    result.reserve(2 + data.size() * 2);
+    result += "\\x";
+    for (unsigned char c : data) {
+        result += hex[c >> 4];
+        result += hex[c & 0x0f];
+    }
+    return result;
+}
+
 std::string ScanLog::generateRunId() {
     static const char chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     std::random_device rd;
@@ -35,6 +47,7 @@ void ScanLog::dropTables() {
     db_.execute("DROP TABLE IF EXISTS llm_calls CASCADE");
     db_.execute("DROP TABLE IF EXISTS scan_results CASCADE");
     db_.execute("DROP TABLE IF EXISTS method_embeddings CASCADE");
+    db_.execute("DROP TABLE IF EXISTS scan_files CASCADE");
 }
 
 void ScanLog::ensureTables() {
@@ -151,11 +164,22 @@ void ScanLog::logMethodFinding(const std::string& run_id,
          std::to_string(confidence), threat_category});
 }
 
+void ScanLog::storeFile(const std::string& run_id, const std::string& file_path,
+                        const std::string& file_hash, const std::string& contents) {
+    std::string pgHex = bytesToPgHex(contents);
+    db_.executeParams(
+        "INSERT INTO scan_files (run_id, file_path, file_hash, file_size, contents) "
+        "VALUES ($1, $2, $3, $4, $5) "
+        "ON CONFLICT (run_id, file_hash) DO NOTHING",
+        {run_id, file_path, file_hash, std::to_string(contents.size()), pgHex});
+}
+
 void ScanLog::deleteRun(const std::string& run_id) {
     db_.executeParams("DELETE FROM scan_results WHERE run_id = $1", {run_id});
     db_.executeParams("DELETE FROM llm_calls WHERE run_id = $1", {run_id});
     db_.executeParams("DELETE FROM method_calls WHERE run_id = $1", {run_id});
     db_.executeParams("DELETE FROM method_findings WHERE run_id = $1", {run_id});
+    db_.executeParams("DELETE FROM scan_files WHERE run_id = $1", {run_id});
 }
 
 } // namespace area

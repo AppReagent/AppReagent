@@ -82,6 +82,30 @@ CREATE TABLE IF NOT EXISTS method_findings (
 CREATE INDEX IF NOT EXISTS idx_method_findings_run ON method_findings (run_id);
 CREATE INDEX IF NOT EXISTS idx_method_findings_class ON method_findings (run_id, class_name);
 
+CREATE TABLE IF NOT EXISTS scan_files (
+    id          BIGSERIAL PRIMARY KEY,
+    run_id      TEXT NOT NULL,
+    file_path   TEXT NOT NULL,
+    file_hash   TEXT NOT NULL,
+    file_size   BIGINT NOT NULL DEFAULT 0,
+    contents    BYTEA NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_scan_files_run ON scan_files (run_id);
+CREATE INDEX IF NOT EXISTS idx_scan_files_hash ON scan_files (run_id, file_hash);
+
+-- Deduplicate: one copy of content per (run_id, file_hash)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_indexes
+        WHERE indexname = 'idx_scan_files_unique'
+    ) THEN
+        CREATE UNIQUE INDEX idx_scan_files_unique ON scan_files (run_id, file_hash);
+    END IF;
+END $$;
+
 -- Migration: add threat_category column for existing databases
 DO $$
 BEGIN

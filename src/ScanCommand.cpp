@@ -112,6 +112,9 @@ void ScanCommand::processFile(const std::string& filePath, const std::string& ru
     std::string contents = readFile(filePath);
     std::string fileHash = ScanLog::sha256(contents);
 
+    // Upload file to database so other agents can access it
+    log_.storeFile(runId, filePath, fileHash, contents);
+
     if (completedHashes_.count(fileHash) || log_.fileCompleted(runId, fileHash)) {
         summary.files_skipped++;
         return;

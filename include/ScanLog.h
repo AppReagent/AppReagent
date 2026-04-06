@@ -56,12 +56,18 @@ public:
                           double confidence,
                           const std::string& threat_category = "none");
 
-    // Delete all data for a run_id from scan_results, llm_calls, and method_calls
+    // Store a file's contents in the database for a given run
+    void storeFile(const std::string& run_id, const std::string& file_path,
+                   const std::string& file_hash, const std::string& contents);
+
+    // Delete all data for a run_id from scan_results, llm_calls, method_calls, and scan_files
     void deleteRun(const std::string& run_id);
 
     static std::string sha256(const std::string& data);
     static std::string generateRunId();
     static std::string loadDDL();
+    // Encode binary data as PostgreSQL hex BYTEA literal (\xDEAD...)
+    static std::string bytesToPgHex(const std::string& data);
 
 private:
     Database& db_;

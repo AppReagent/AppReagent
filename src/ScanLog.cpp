@@ -87,7 +87,8 @@ std::string ScanLog::findCachedPrompt(const std::string& run_id, const std::stri
     auto result = db_.execute(
         "SELECT response FROM llm_calls WHERE run_id = '" + escape(run_id) +
         "' AND prompt_hash = '" + escape(prompt_hash) + "' LIMIT 1");
-    if (result.ok() && !result.rows.empty() && result.rows[0][0] != "NULL") {
+    if (result.ok() && !result.rows.empty() && !result.rows[0].empty()
+        && result.rows[0][0] != "NULL") {
         return result.rows[0][0];
     }
     return "";

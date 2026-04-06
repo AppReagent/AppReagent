@@ -39,7 +39,7 @@ std::string AnalyzeCommand::resolveRunId(const std::string& run_id) {
 
     auto result = db_.execute(
         "SELECT DISTINCT run_id FROM scan_results ORDER BY created_at DESC LIMIT 1");
-    if (result.ok() && !result.rows.empty()) {
+    if (result.ok() && !result.rows.empty() && !result.rows[0].empty()) {
         return result.rows[0][0];
     }
     return "";
@@ -50,7 +50,7 @@ std::string AnalyzeCommand::loadScanGoal(const std::string& run_id) {
     auto result = db_.execute(
         "SELECT prompt FROM llm_calls WHERE run_id = '" + run_id +
         "' AND node_name = 'scan_synthesis' LIMIT 1");
-    if (result.ok() && !result.rows.empty()) {
+    if (result.ok() && !result.rows.empty() && !result.rows[0].empty()) {
         // Extract goal from the synthesis prompt — it starts with "Scan goal: ..."
         auto& prompt = result.rows[0][0];
         auto goalPos = prompt.find("Scan goal:");
@@ -77,7 +77,7 @@ AnalysisResult AnalyzeCommand::run(const std::string& run_id) {
     // Check that scan results exist
     auto check = db_.execute(
         "SELECT COUNT(*) FROM scan_results WHERE run_id = '" + resolvedId + "' AND risk_score > 0");
-    if (!check.ok() || check.rows.empty() || check.rows[0][0] == "0") {
+    if (!check.ok() || check.rows.empty() || check.rows[0].empty() || check.rows[0][0] == "0") {
         emitLog("No relevant findings in run " + resolvedId + " (nothing to analyze)");
         return result;
     }

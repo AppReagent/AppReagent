@@ -78,7 +78,10 @@ std::vector<float> OllamaEmbeddingBackend::embed(const std::string& text) {
     }
 
     // Ollama /api/embed returns {"embeddings": [[...]]}
-    auto& arr = j.at("embeddings").at(0);
+    if (!j.contains("embeddings") || !j["embeddings"].is_array() || j["embeddings"].empty()) {
+        throw std::runtime_error("ollama embedding error: response missing 'embeddings' array");
+    }
+    auto& arr = j["embeddings"][0];
     std::vector<float> result;
     result.reserve(arr.size());
     for (auto& v : arr) {
@@ -108,7 +111,11 @@ std::vector<float> OpenAIEmbeddingBackend::embed(const std::string& text) {
     }
 
     // OpenAI format: {"data": [{"embedding": [...]}]}
-    auto& arr = j.at("data").at(0).at("embedding");
+    if (!j.contains("data") || !j["data"].is_array() || j["data"].empty() ||
+        !j["data"][0].contains("embedding")) {
+        throw std::runtime_error("openai embedding error: response missing 'data[0].embedding'");
+    }
+    auto& arr = j["data"][0]["embedding"];
     std::vector<float> result;
     result.reserve(arr.size());
     for (auto& v : arr) {

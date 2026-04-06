@@ -37,6 +37,8 @@ int64_t JobQueue::enqueue(const std::string& type, const std::string& payload, i
 
     auto result = db_.execute(sql);
     if (!result.ok()) throw std::runtime_error("enqueue failed: " + result.error);
+    if (result.rows.empty() || result.rows[0].empty())
+        throw std::runtime_error("enqueue failed: no id returned");
     return std::stoll(result.rows[0][0]);
 }
 

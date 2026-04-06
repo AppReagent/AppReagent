@@ -89,11 +89,15 @@ TaskContext GraphRunner::executeFrom(RunState& state, const std::string& nodeNam
             for (auto& splitCtx : nr.outputs) {
                 sem.acquire();
                 threads.emplace_back([&, ctx = std::move(splitCtx)]() mutable {
-                    RunState subState{state.graph, {}};
-                    auto result = executeFrom(subState, subgraphEntry, std::move(ctx));
-                    if (!result.discarded) {
-                        std::lock_guard lk(collectedMu);
-                        collected.push_back(std::move(result));
+                    try {
+                        RunState subState{state.graph, {}};
+                        auto result = executeFrom(subState, subgraphEntry, std::move(ctx));
+                        if (!result.discarded) {
+                            std::lock_guard lk(collectedMu);
+                            collected.push_back(std::move(result));
+                        }
+                    } catch (...) {
+                        // Ensure semaphore is always released even on exception
                     }
                     sem.release();
                 });

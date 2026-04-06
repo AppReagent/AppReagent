@@ -104,6 +104,9 @@ static ChatResult extractResult(const std::string& raw, const std::string& endpo
         throw std::runtime_error("endpoint " + endpointId + ": " + j["error"].dump());
     }
     ChatResult r;
+    if (!j.contains("choices") || !j["choices"].is_array() || j["choices"].empty()) {
+        throw std::runtime_error(endpointId + ": response missing 'choices' array");
+    }
     auto contentVal = j["choices"][0]["message"]["content"];
     if (contentVal.is_null()) {
         throw std::runtime_error(endpointId + ": response content is null (model returned no text)");
@@ -140,6 +143,9 @@ std::string OllamaBackend::chat(const std::string& system,
     auto j = nlohmann::json::parse(raw);
     if (j.contains("error")) {
         throw std::runtime_error("ollama " + endpoint_.id + ": " + j["error"].dump());
+    }
+    if (!j.contains("message") || !j["message"].contains("content")) {
+        throw std::runtime_error("ollama " + endpoint_.id + ": response missing 'message.content'");
     }
     auto contentVal = j["message"]["content"];
     if (contentVal.is_null()) {

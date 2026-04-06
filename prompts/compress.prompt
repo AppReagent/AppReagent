@@ -2,19 +2,22 @@ You are summarizing a conversation between a reverse engineer and an Android mal
 
 The conversation has grown too long and must be compressed to continue.
 
-Preserve:
+Preserve (in order of importance):
 - Which application/directory is being investigated and its file path
-- What threat categories have been investigated so far (network, ransomware, crypto, data theft, C2, etc.) and their findings
-- Specific files, classes, methods, and line numbers found to be suspicious or malicious
+- The user's current line of inquiry, unanswered questions, and investigation direction
+- HYPOTHESES formed and their current status (confirmed, refuted, or pending)
+- What threat categories have been investigated so far and their findings
+- Specific files, classes, methods found to be suspicious or malicious, with WHY they are suspicious
 - URLs, IPs, C2 addresses, bitcoin addresses, or other indicators of compromise discovered
 - Dangerous permissions and exported components found in the manifest
+- Data flow chains discovered (source class → transformation → sink class)
 - The database schema context and any scan run IDs referenced
-- The user's current line of inquiry and unanswered questions
+- Key reasoning pivots — moments where evidence changed the investigation direction
 
 Discard:
 - Raw tool output and grep results (keep only the findings and conclusions)
-- Full smali code listings (keep only method names and key code patterns)
+- Full smali code listings (keep only method names and key behavioral patterns)
 - Failed searches that returned no results
-- Intermediate reasoning that led to a final conclusion
+- Verbose explanations when a concise summary captures the same information
 
 Output a concise summary as a single message that a reverse engineering agent can use to continue the investigation seamlessly. Write in second person ("The user asked about...", "You found that...").

@@ -19,15 +19,16 @@ IMPORTANT guidelines:
 - Mark as NOT relevant (confidence >= 0.9) ONLY for code that has NO security-sensitive operations: pure UI rendering, data models, string utilities, date formatting, view adapters, serialization, constructors, getters/setters, toString, equals, hashCode.
 
 When marking as relevant, also identify the threat category:
-- "c2" — Command-and-control communication (sockets, HTTP to hardcoded IPs/domains, polling loops)
-- "data_theft" — Reading contacts, SMS, call logs, location, clipboard, browser data
-- "sms_abuse" — Sending premium SMS, deleting SMS evidence, intercepting SMS
-- "credential_theft" — Overlay attacks, keylogging, phishing WebViews, accessibility abuse
-- "persistence" — BOOT_COMPLETED receivers, alarm/job scheduling, device admin
-- "evasion" — Reflection, dynamic class loading, string obfuscation, anti-emulator checks
-- "ransomware" — File encryption, device locking, external storage traversal
-- "surveillance" — Camera/mic capture, screen recording, location tracking
-- "dropper" — DexClassLoader, APK download + install, staged payloads
+- "c2" — Command-and-control communication (sockets, HTTP to hardcoded IPs/domains, polling loops, command parsing)
+- "data_theft" — Reading contacts, SMS, call logs, location, clipboard, browser data, device identifiers and exfiltrating them
+- "sms_abuse" — Sending premium SMS, deleting SMS evidence, intercepting SMS, WAP push abuse
+- "credential_theft" — Overlay attacks, keylogging, phishing WebViews, accessibility abuse for input capture
+- "persistence" — BOOT_COMPLETED receivers, alarm/job scheduling, device admin, foreground services that resist termination
+- "evasion" — Reflection, dynamic class loading, string obfuscation, anti-emulator checks, packer/protector behavior
+- "ransomware" — File encryption with Cipher, device locking via DevicePolicyManager, external storage traversal, ransom note display
+- "surveillance" — Camera/mic capture, screen recording, location tracking, call recording, keylogging
+- "dropper" — DexClassLoader, APK download + install, staged payloads, dynamic DEX loading from network
+- "crypto_mining" — Hash computation loops, CPU-intensive thread pools, mining pool connections, wallet addresses
 - "other" — Doesn't fit the above categories
 
 Output ONLY valid JSON with these fields:

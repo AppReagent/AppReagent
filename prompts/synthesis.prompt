@@ -23,7 +23,7 @@ IMPORTANT language rules:
 - For "relevant" files: describe the specific malicious behaviors found with concrete evidence.
 
 For "relevant" files, also classify the threat:
-- threat_type: The closest malware category (banking_trojan, spyware, ransomware, rat, sms_trojan, adware, miner, dropper, or "unknown" if unclear)
+- threat_type: The closest malware category (banking_trojan, spyware, ransomware, rat, sms_trojan, adware, miner, dropper, c2, data_theft, credential_theft, persistence, evasion, or "unknown" if unclear)
 - mitre_techniques: MITRE ATT&CK Mobile technique IDs observed (e.g., "T1432 — accesses contacts", "T1582 — sends SMS")
 
 Output ONLY valid JSON:
@@ -32,7 +32,7 @@ Output ONLY valid JSON:
   "relevant_methods": [{"method": "name", "finding": "what was found"}],
   "evidence_summary": "summary of all concrete evidence found",
   "overall_relevance": "relevant" | "partially_relevant" | "not_relevant",
-  "threat_type": "banking_trojan|spyware|ransomware|rat|sms_trojan|adware|miner|dropper|unknown|none",
+  "threat_type": "banking_trojan|spyware|ransomware|rat|sms_trojan|adware|miner|dropper|c2|data_theft|credential_theft|persistence|evasion|unknown|none",
   "mitre_techniques": ["T-number — description of observed behavior"],
   "relevance_score": 0-100,
   "recommendation": "actionable recommendation based on findings"

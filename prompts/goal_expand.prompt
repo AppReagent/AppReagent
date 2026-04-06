@@ -26,9 +26,16 @@ Expand this into a detailed scan goal that includes:
    - User input → Cipher.encrypt → network = C2 communication
 
 4. **False positive guidance** — What looks suspicious but is likely benign:
-   - HTTP requests in a class named "UpdateChecker" or "Analytics"
-   - Location access in a class with "Map" or "Navigation" in the name
-   - Crypto in a class handling HTTPS certificate pinning
+   - HTTP requests in a class named "UpdateChecker", "Analytics", "CrashReporter", or "RemoteConfig"
+   - Location access in a class with "Map", "Navigation", "Geofence", or "Weather" in the name
+   - Crypto in a class handling HTTPS certificate pinning, TLS, or OAuth token storage
+   - SMS permission in a class named "Verification", "OTP", or "TwoFactor" (phone number verification)
+   - File I/O in classes named "Cache", "ImageLoader", "DownloadManager", or "MediaStore"
+   - Device identifiers in advertising/attribution SDKs (e.g., "Adjust", "AppsFlyer", "Firebase", "Mixpanel")
+   - WebView loading well-known domains (googleapis.com, facebook.com, cloudfront.net)
+   - Background services in "SyncAdapter", "GcmReceiver", "FirebaseMessaging" (push notifications)
+   - AccessibilityService in classes providing genuine assistive features (screen readers, font scaling)
+   - Reflection in dependency injection frameworks (Dagger, Hilt) or serialization libraries (Gson, Moshi)
 
 Common threat-category expansions:
 - Ransomware: javax/crypto/Cipher for file encryption (not HTTPS TLS), FileOutputStream writing to external storage, DevicePolicyManager for screen lock, getExternalStorageDirectory + listFiles for file enumeration, ransom note strings, bitcoin/payment addresses, .locked/.encrypted file extensions
@@ -37,13 +44,9 @@ Common threat-category expansions:
 - Data theft: ContentResolver.query on ContactsContract/CallLog/SMS URIs, TelephonyManager.getDeviceId/getSubscriberId/getLine1Number, AccountManager.getAccounts, followed by HTTP POST or SMS exfiltration of collected data
 - Spyware: LocationManager/FusedLocationProviderClient for GPS tracking, AudioRecord/MediaRecorder for audio capture, Camera/CameraManager for photo capture, KeyEvent monitoring, AccessibilityService abuse
 - Obfuscation: DexClassLoader/InMemoryDexClassLoader for dynamic loading, Class.forName + Method.invoke for reflection, native method calls via JNI, encrypted string tables with runtime decryption
-
-Common threat-category expansions:
-- Ransomware: javax/crypto/Cipher for file encryption (not HTTPS TLS), FileOutputStream writing to external storage, DevicePolicyManager for screen lock, getExternalStorageDirectory + listFiles for file enumeration, ransom note strings, bitcoin/payment addresses, .locked/.encrypted file extensions
-- Network/C2: HttpURLConnection, OkHttpClient, Retrofit, Socket/ServerSocket for connections; Timer/AlarmManager/JobScheduler for periodic beacons; Base64 encoding of payloads; BOOT_COMPLETED for persistence; Runtime.exec for remote command execution
-- Cryptocurrency/mining: stratum:// pool URLs, CoinHive/WebView mining scripts, MessageDigest/SHA-256 for hash computation, CPU-intensive Thread/Runnable loops, wallet addresses (bc1/0x/4..monero), mining pool API calls
-- Data theft: ContentResolver.query on ContactsContract/CallLog/SMS URIs, TelephonyManager.getDeviceId/getSubscriberId/getLine1Number, AccountManager.getAccounts, followed by HTTP POST or SMS exfiltration of collected data
-- Spyware: LocationManager/FusedLocationProviderClient for GPS tracking, AudioRecord/MediaRecorder for audio capture, Camera/CameraManager for photo capture, KeyEvent monitoring, AccessibilityService abuse
-- Obfuscation: DexClassLoader/InMemoryDexClassLoader for dynamic loading, Class.forName + Method.invoke for reflection, native method calls via JNI, encrypted string tables with runtime decryption
+- Banking trojan: overlay attacks via TYPE_APPLICATION_OVERLAY or WindowManager.addView, WebView injection with JavaScript interfaces, SMS interception (RECEIVE_SMS + abortBroadcast), accessibility service monitoring EditText fields, clipboard hooking
+- RAT (Remote Access Trojan): bi-directional socket/WebSocket channels, command parsing loops (switch/if-else on server messages), shell command execution via Runtime.exec, screen capture via MediaProjection, file upload/download handlers
+- SMS trojan: SmsManager.sendTextMessage to premium numbers, BroadcastReceiver for SMS_RECEIVED with abortBroadcast, SMS content reading + forwarding, WAP push message interception
+- Adware: WebView loading ad URLs in background, invisible Activity or 1x1 pixel windows, click simulation via MotionEvent.obtain, frequent AlarmManager triggers for ad refresh
 
 Be specific and technical. Output a single detailed paragraph that will guide per-method analysis. Preserve the original intent — augment, don't replace.

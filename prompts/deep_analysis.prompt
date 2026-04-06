@@ -23,27 +23,64 @@ Perform a detailed analysis of HOW this code relates to the scan goal. Focus on:
 3. What API/system calls or operations directly relate to the goal
 4. Whether the behavior is definitive evidence or merely circumstantial
 5. What the INTENT behind this code is — what is the developer trying to achieve?
-6. Whether the behavior pattern matches known malware families (e.g., banking trojans use overlays + SMS interception; spyware harvests contacts + location; ransomware encrypts files + locks device)
+6. Whether the behavior pattern matches known malware families:
+   - Banking trojans: overlay attacks + SMS interception + credential harvesting (e.g., Anubis, Cerberus, SharkBot)
+   - Spyware: contact/SMS/location harvesting + silent exfiltration (e.g., Pegasus, Predator, SpyNote)
+   - Ransomware: file encryption + device lock + ransom display (e.g., DoubleLocker, Koler, Simplocker)
+   - RATs: bidirectional C2 + shell exec + file transfer (e.g., AhMyth, SpyMax, AndroRAT)
+   - SMS trojans: premium SMS sending + message interception (e.g., FakeInst, Boxer)
+   - Droppers: download + dynamic load + install (e.g., Sharkbot dropper, Brunhilda)
+   - Miners: CPU-intensive loops + pool connections + wallet addresses (e.g., CoinHive, HiddenMiner)
 
 Be precise and evidence-based. Only report what the code ACTUALLY does, not what it "could potentially" do.
 
-For MITRE ATT&CK mapping, match observed behavior to techniques:
-- Reading contacts/SMS/call logs → T1636 (Protected User Data), T1432 (Access Contacts)
-- Sending SMS → T1582 (SMS Control)
-- Network connections to hardcoded endpoints → T1437 (Application Layer Protocol)
-- Reflection/dynamic loading → T1406 (Obfuscated Files)
-- BOOT_COMPLETED receiver → T1398 (Boot or Logon Initialization)
-- Accessibility service abuse → T1626 (Abuse Elevation Control)
+For MITRE ATT&CK Mobile mapping, match observed behavior to techniques:
+
+Data Collection:
+- Reading contacts/SMS/call logs → T1636 (Protected User Data), T1636.003 (Contact List), T1636.004 (SMS Messages)
+- Location tracking → T1430 (Location Tracking)
 - Camera/mic access → T1512 (Video Capture), T1429 (Audio Capture)
-- Crypto operations on user files → T1471 (Data Encrypted for Impact)
+- Screen capture → T1513 (Screen Capture)
+- Clipboard data → T1414 (Clipboard Data)
+- Keylogging → T1417 (Input Capture), T1417.001 (Keylogging)
+- Call log access → T1636.002 (Call Log)
+- Calendar data → T1636.001 (Calendar Entries)
+
+Command and Control:
+- Network connections to hardcoded endpoints → T1437 (Application Layer Protocol)
+- Encrypted C2 channel → T1573 (Encrypted Channel)
+- Web service as C2 → T1481 (Web Service), T1481.003 (One-Way Communication)
+- Standard application protocol → T1437.001 (Web Protocols)
+
+Persistence & Execution:
+- BOOT_COMPLETED receiver → T1398 (Boot or Logon Initialization Scripts)
+- Scheduled tasks/alarms → T1603 (Scheduled Task/Job)
+- Foreground service → T1624 (Event Triggered Execution)
+- Native code execution → T1575 (Native Code)
+
+Privilege Escalation:
+- Accessibility service abuse → T1626 (Abuse Elevation Control Mechanism)
 - Device admin → T1401 (Device Administrator Permissions)
+- Root/su execution → T1404 (Exploitation of Privilege)
+
+Defense Evasion:
+- Reflection/dynamic loading → T1406 (Obfuscated Files or Information)
+- Dynamic code loading → T1407 (Download New Code at Runtime)
+- Indicator removal → T1630 (Indicator Removal on Host)
+- Anti-emulator checks → T1633 (Virtualization/Sandbox Evasion), T1633.001 (System Checks)
+
+Exfiltration & Impact:
+- Sending SMS → T1582 (SMS Control)
+- Data exfiltration over network → T1646 (Exfiltration Over C2 Channel)
+- Crypto operations on user files → T1471 (Data Encrypted for Impact)
+- Device wipe/lock → T1447 (Delete Device Data)
 
 Output ONLY valid JSON:
 {
   "detailed_findings": ["specific findings relevant to the scan goal"],
   "evidence": ["concrete code-level evidence (API calls, string constants, references)"],
   "data_flows": ["description of relevant data flow paths"],
-  "threat_type": "banking_trojan|spyware|ransomware|rat|sms_trojan|adware|miner|dropper|unknown",
+  "threat_type": "banking_trojan|spyware|ransomware|rat|sms_trojan|adware|miner|dropper|c2|data_theft|credential_theft|persistence|evasion|unknown",
   "mitre_techniques": ["T-number: technique name — evidence"],
   "adversary_intent": "what the code is trying to accomplish from the attacker's perspective",
   "relevance_score": 0-100,

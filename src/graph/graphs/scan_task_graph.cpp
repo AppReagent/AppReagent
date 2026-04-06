@@ -476,7 +476,7 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
     });
 
     // 3. Code splitter — handles both smali methods and ELF functions
-    auto split_methods = g.add<SplitterNode>("split_methods", [](TaskContext ctx) {
+    auto split_methods = g.add<SplitterNode>("split_methods", [prompts_dir](TaskContext ctx) {
         auto contents = ctx.get("file_contents").get<std::string>();
         auto format = ctx.has("file_format") ? ctx.get("file_format").get<std::string>() : "smali";
         std::string scanGoal = ctx.has("scan_goal") ? ctx.get("scan_goal").get<std::string>() : "";
@@ -501,14 +501,10 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
             }
             std::string imports = importsSummary.str();
 
-            std::string formatCtx =
-                "You are analyzing a disassembled function from a native ELF binary ("
-                + info.arch + " architecture). Focus on system calls, C library functions, "
-                "network operations (socket, connect, send, recv), file operations "
-                "(open, read, write, mmap), process manipulation (fork, exec, ptrace), "
-                "dynamic loading (dlopen, dlsym), and suspicious patterns like encoded "
-                "strings or anti-debugging techniques. "
-                "The \"api_calls\" field should list any library or system calls found.";
+            std::string elfFmtTmpl = loadPrompt(prompts_dir + "/elf_format_context.prompt");
+            TaskContext archCtx;
+            archCtx.set("arch", info.arch);
+            std::string formatCtx = resolveTemplate(elfFmtTmpl, archCtx);
 
             for (auto& func : info.functions) {
                 TaskContext item;
@@ -545,12 +541,7 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
             }
             std::string fields = fieldsSummary.str();
 
-            std::string formatCtx =
-                "You are analyzing a single method from an Android application's "
-                "smali bytecode (Dalvik VM). Focus on Android/Java API calls, intent "
-                "handling, content provider access, broadcast receivers, service "
-                "communication, reflection, dynamic class loading, and native method "
-                "invocation.";
+            std::string formatCtx = loadPrompt(prompts_dir + "/smali_format_context.prompt");
 
             // Propagate file-level threat signals to each method item
             bool hasFileSignals = ctx.has("file_threat_signals");
@@ -660,12 +651,13 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
 
     std::string triagePrompt = loadPrompt(prompts_dir + "/triage.prompt");
     std::string triageSupervisorPrompt = loadPrompt(prompts_dir + "/triage_supervisor.prompt");
+    std::string triageSystemPrompt = loadPrompt(prompts_dir + "/triage_system.prompt");
 
     auto triage = g.add<SupervisedLLMCallNode>("triage",
         SupervisedLLMCallConfig{
             .tier = 0,
             .prompt_template = triagePrompt,
-            .system_prompt = "You are a reverse engineering analyst. Analyze code with respect to the given scan goal. Output ONLY valid JSON, no markdown.",
+            .system_prompt = triageSystemPrompt,
             .supervisor_prompt = triageSupervisorPrompt,
             .max_retries = 1,
         },
@@ -797,12 +789,13 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
 
     std::string deepPrompt = loadPrompt(prompts_dir + "/deep_analysis.prompt");
     std::string deepSupervisorPrompt = loadPrompt(prompts_dir + "/deep_analysis_supervisor.prompt");
+    std::string deepSystemPrompt = loadPrompt(prompts_dir + "/deep_analysis_system.prompt");
 
     auto deep_analysis = g.add<SupervisedLLMCallNode>("deep_analysis",
         SupervisedLLMCallConfig{
             .tier = 1,
             .prompt_template = deepPrompt,
-            .system_prompt = "You are a senior reverse engineer. Analyze code with respect to the given scan goal. Be precise and evidence-based.",
+            .system_prompt = deepSystemPrompt,
             .supervisor_prompt = deepSupervisorPrompt,
             .max_retries = 2,
         },
@@ -839,12 +832,13 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
 
     std::string synthesisPrompt = loadPrompt(prompts_dir + "/synthesis.prompt");
     std::string synthesisSupervisorPrompt = loadPrompt(prompts_dir + "/synthesis_supervisor.prompt");
+    std::string synthesisSystemPrompt = loadPrompt(prompts_dir + "/synthesis_system.prompt");
 
     auto synthesize = g.add<SupervisedLLMCallNode>("synthesize",
         SupervisedLLMCallConfig{
             .tier = 0,
             .prompt_template = synthesisPrompt,
-            .system_prompt = "You are a senior analyst producing final answers to scan goal questions. Output ONLY valid JSON, no markdown.",
+            .system_prompt = synthesisSystemPrompt,
             .supervisor_prompt = synthesisSupervisorPrompt,
             .max_retries = 1,
         },

@@ -92,10 +92,8 @@ std::string ScanCommand::expandGoal(const std::string& goal, const std::string& 
         std::string expandPrompt = graph::resolveTemplate(expandPromptTmpl, goalCtx);
 
         auto* goalBackend = backends.at(1);
-        std::string expanded = goalBackend->chat(
-            "You expand analysis goals into specific, detailed scan criteria. "
-            "Output a single detailed paragraph, nothing else.",
-            {{"user", expandPrompt}});
+        std::string goalSystem = graph::loadPrompt(promptsDir + "/goal_expand_system.prompt");
+        std::string expanded = goalBackend->chat(goalSystem, {{"user", expandPrompt}});
         util::rtrimInPlace(expanded);
         if (!expanded.empty()) {
             emitLog("Expanded goal: " + expanded.substr(0, 120) + "...");
@@ -220,8 +218,7 @@ void ScanCommand::synthesizeResults(const std::string& runId, const std::string&
         std::string expandedPrompt = graph::resolveTemplate(synthPromptTmpl, synthCtx);
 
         auto* synthBackend = backends.at(2);
-        std::string system = "You are a senior reverse engineering analyst producing a final "
-                             "cross-file synthesis. Output ONLY valid JSON, no markdown.";
+        std::string system = graph::loadPrompt(promptsDir + "/scan_synthesis_system.prompt");
         std::string response = synthBackend->chat(system, {{"user", expandedPrompt}});
 
         auto synthJson = nlohmann::json::parse(graph::extractJson(response));

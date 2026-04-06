@@ -157,16 +157,15 @@ TaskGraph buildAnalyzeTaskGraph(const TierBackends& backends,
 
     // 4. Analyze each finding with RAG context (supervised LLM call)
     std::string analyzePrompt = loadPrompt(prompts_dir + "/analyze.prompt");
+    std::string analyzeFindingSystem = loadPrompt(prompts_dir + "/analyze_finding_system.prompt");
+    std::string analyzeFindingSupervisor = loadPrompt(prompts_dir + "/analyze_finding_supervisor.prompt");
 
     auto analyze_finding = g.add<SupervisedLLMCallNode>("analyze_finding",
         SupervisedLLMCallConfig{
             .tier = 1,
             .prompt_template = analyzePrompt,
-            .system_prompt = "You are a senior malware analyst with access to a corpus of previously analyzed applications. "
-                           "Use pattern matching from the corpus to produce deeper, more confident assessments. "
-                           "Output ONLY valid JSON, no markdown.",
-            .supervisor_prompt = "Review this analysis. Is it valid JSON with assessment and confidence? "
-                                "Does it meaningfully use the RAG context? Respond PASS or FAIL - reason.",
+            .system_prompt = analyzeFindingSystem,
+            .supervisor_prompt = analyzeFindingSupervisor,
             .max_retries = 1,
         },
         backends.at(2),
@@ -204,14 +203,13 @@ TaskGraph buildAnalyzeTaskGraph(const TierBackends& backends,
 
     // 6. Final synthesis
     std::string synthPrompt = loadPrompt(prompts_dir + "/analyze_synthesis.prompt");
+    std::string analyzeSynthesisSystem = loadPrompt(prompts_dir + "/analyze_synthesis_system.prompt");
 
     auto final_synthesis = g.add<SupervisedLLMCallNode>("analyze_synthesis",
         SupervisedLLMCallConfig{
             .tier = 0,
             .prompt_template = synthPrompt,
-            .system_prompt = "You are a senior threat analyst producing a comprehensive RAG-augmented analysis report. "
-                           "Synthesize per-method findings with cross-application pattern matches. "
-                           "Output ONLY valid JSON, no markdown.",
+            .system_prompt = analyzeSynthesisSystem,
             .supervisor_prompt = "",
             .max_retries = 1,
         },

@@ -168,6 +168,17 @@ ChatSession& AreaServer::getOrCreateChat(const std::string& id, const std::strin
 
         session->agent = std::make_unique<Agent>(chatPool_.get(), *session->tools, std::move(h));
 
+        std::string promptsDir = "prompts";
+        if (auto envDir = std::getenv("AREA_PROMPTS_DIR")) {
+            promptsDir = envDir;
+        }
+        // Per-session prompt overrides take priority
+        std::string sessionPrompts = dataDir_ + "/chats/" + id + "/prompts";
+        if (std::filesystem::exists(sessionPrompts + "/agent_system.prompt")) {
+            promptsDir = sessionPrompts;
+        }
+        session->agent->setPromptsDir(promptsDir);
+
         std::string systemCtx;
         std::string ddl;
         try { ddl = ScanLog::loadDDL(); } catch (...) {}

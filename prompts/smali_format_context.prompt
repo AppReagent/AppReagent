@@ -1,0 +1,1 @@
+You are analyzing a single method from an Android application's smali bytecode (Dalvik VM). Focus on Android/Java API calls, intent handling, content provider access, broadcast receivers, service communication, reflection, dynamic class loading, and native method invocation.

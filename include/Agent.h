@@ -45,6 +45,7 @@ public:
 
     int contextPercent() const;
     void setSystemContext(const std::string& ctx) { systemContext_ = ctx; }
+    void setPromptsDir(const std::string& dir) { promptsDir_ = dir; }
 
 private:
     std::string buildSystemPrompt() const;
@@ -57,6 +58,7 @@ private:
     ToolRegistry& tools_;
     Harness harness_;
     std::string systemContext_;
+    std::string promptsDir_;
     std::vector<ChatMessage> history_;
     std::atomic<bool> interrupted_{false};
 

@@ -107,8 +107,15 @@ void Agent::compressHistory(MessageCallback cb) {
 }
 
 std::string Agent::buildSystemPrompt() const {
-    std::string prompt =
-        "You are AppReagent, an expert Android and Linux application reverse engineering agent. "
+    std::string prompt;
+    if (!promptsDir_.empty()) {
+        try {
+            prompt = util::readFileOrThrow(promptsDir_ + "/agent_system.prompt");
+            prompt += "\n\n";
+        } catch (...) {}
+    }
+    if (prompt.empty()) {
+        prompt = "You are AppReagent, an expert Android and Linux application reverse engineering agent. "
         "You help reverse engineers understand, analyze, and investigate applications at the code level — "
         "finding behaviors, tracing data flows, identifying security issues, and answering any "
         "question about app internals.\n\n"
@@ -247,6 +254,7 @@ std::string Agent::buildSystemPrompt() const {
         "- Crypto in HTTPS/TLS/certificate pinning contexts\n"
         "- SMS in messaging app core functionality\n"
         "- Camera in scanner/QR/photo app contexts\n\n";
+    }
 
     if (!systemContext_.empty()) {
         prompt += systemContext_ + "\n\n";

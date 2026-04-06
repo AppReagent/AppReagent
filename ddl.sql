@@ -64,19 +64,31 @@ CREATE INDEX IF NOT EXISTS idx_method_calls_caller ON method_calls (run_id, call
 CREATE INDEX IF NOT EXISTS idx_method_calls_callee ON method_calls (run_id, callee_class, callee_method);
 
 CREATE TABLE IF NOT EXISTS method_findings (
-    id          BIGSERIAL PRIMARY KEY,
-    run_id      TEXT NOT NULL,
-    file_path   TEXT NOT NULL,
-    file_hash   TEXT NOT NULL DEFAULT '',
-    class_name  TEXT NOT NULL DEFAULT '',
-    method_name TEXT NOT NULL DEFAULT '',
-    api_calls   TEXT NOT NULL DEFAULT '',
-    findings    TEXT NOT NULL DEFAULT '',
-    reasoning   TEXT NOT NULL DEFAULT '',
-    relevant    BOOLEAN NOT NULL DEFAULT false,
-    confidence  DOUBLE PRECISION NOT NULL DEFAULT 0,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    id               BIGSERIAL PRIMARY KEY,
+    run_id           TEXT NOT NULL,
+    file_path        TEXT NOT NULL,
+    file_hash        TEXT NOT NULL DEFAULT '',
+    class_name       TEXT NOT NULL DEFAULT '',
+    method_name      TEXT NOT NULL DEFAULT '',
+    api_calls        TEXT NOT NULL DEFAULT '',
+    findings         TEXT NOT NULL DEFAULT '',
+    reasoning        TEXT NOT NULL DEFAULT '',
+    relevant         BOOLEAN NOT NULL DEFAULT false,
+    confidence       DOUBLE PRECISION NOT NULL DEFAULT 0,
+    threat_category  TEXT NOT NULL DEFAULT 'none',
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_method_findings_run ON method_findings (run_id);
 CREATE INDEX IF NOT EXISTS idx_method_findings_class ON method_findings (run_id, class_name);
+
+-- Migration: add threat_category column for existing databases
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'method_findings' AND column_name = 'threat_category'
+    ) THEN
+        ALTER TABLE method_findings ADD COLUMN threat_category TEXT NOT NULL DEFAULT 'none';
+    END IF;
+END $$;

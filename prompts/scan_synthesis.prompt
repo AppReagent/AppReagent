@@ -17,17 +17,27 @@ Critical: Look for patterns that SPAN multiple files. Malicious behavior is ofte
 
 Connect the dots across files. Name specific classes and methods as evidence.
 
+Additionally:
+- Classify the overall threat type (what kind of malware is this application, if any?)
+- Map all findings to MITRE ATT&CK Mobile techniques with T-numbers
+- Describe the kill chain: how do the components work together to achieve the adversary's goal?
+
 Output ONLY valid JSON:
 {
   "answer": "direct, comprehensive answer to the scan goal question",
+  "threat_type": "banking_trojan|spyware|ransomware|rat|sms_trojan|adware|miner|dropper|benign|unknown",
+  "threat_description": "1-2 sentence summary of the malware's purpose and behavior",
   "key_findings": [
     {
-      "category": "category of finding (e.g. 'File Encryption', 'C2 Communication')",
+      "category": "category of finding (e.g. 'Data Exfiltration', 'C2 Communication')",
       "files": ["file1.smali", "file2.smali"],
       "description": "what was found and how the files relate to each other",
-      "severity": "critical | high | medium | low | info"
+      "severity": "critical | high | medium | low | info",
+      "mitre_technique": "T-number — technique name"
     }
   ],
+  "mitre_techniques": ["T-number — technique name: brief evidence"],
+  "kill_chain": "how the attack flows from entry to impact, naming specific classes/methods at each stage",
   "cross_file_patterns": ["patterns observed across multiple files that are significant"],
   "risk_score": 0-100,
   "recommendation": "actionable recommendation based on the full picture"

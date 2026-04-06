@@ -53,7 +53,8 @@ public:
                           const std::string& findings,
                           const std::string& reasoning,
                           bool relevant,
-                          double confidence);
+                          double confidence,
+                          const std::string& threat_category = "none");
 
     // Delete all data for a run_id from scan_results, llm_calls, and method_calls
     void deleteRun(const std::string& run_id);

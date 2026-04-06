@@ -108,7 +108,8 @@ std::optional<ToolResult> FindBehaviorTool::tryExecute(const std::string& action
         }
         whereClauses << "lower(api_calls) LIKE '%" << likeKw << "%'"
                      << " OR lower(findings) LIKE '%" << likeKw << "%'"
-                     << " OR lower(reasoning) LIKE '%" << likeKw << "%'";
+                     << " OR lower(reasoning) LIKE '%" << likeKw << "%'"
+                     << " OR lower(threat_category) LIKE '%" << likeKw << "%'";
     }
 
     // Count how many keywords match for ranking
@@ -127,7 +128,7 @@ std::optional<ToolResult> FindBehaviorTool::tryExecute(const std::string& action
 
     std::string sql =
         "SELECT file_path, class_name, method_name, api_calls, findings, "
-        "reasoning, relevant, confidence, (" + rankExpr.str() + ") AS match_rank "
+        "reasoning, relevant, confidence, threat_category, (" + rankExpr.str() + ") AS match_rank "
         "FROM method_findings "
         "WHERE run_id = '" + ScanLog::escape(runId) + "' "
         "AND (" + whereClauses.str() + ") "
@@ -207,12 +208,16 @@ std::optional<ToolResult> FindBehaviorTool::tryExecute(const std::string& action
         std::string reasoning = row[5];
         std::string relevant = row[6] == "t" ? "yes" : "no";
         std::string confidence = row[7];
-        std::string matchRank = row[8];
+        std::string threatCategory = row.size() > 8 ? row[8] : "none";
+        std::string matchRank = row.size() > 9 ? row[9] : "0";
 
         out << (i + 1) << ". " << className << "::" << methodName << "\n"
             << "   file: " << filePath << "\n"
             << "   relevant: " << relevant << " (confidence=" << confidence << ")\n";
 
+        if (threatCategory != "none" && !threatCategory.empty()) {
+            out << "   threat_category: " << threatCategory << "\n";
+        }
         if (!apiCalls.empty()) {
             out << "   api_calls: " << apiCalls.substr(0, 200) << "\n";
         }

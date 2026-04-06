@@ -22,14 +22,30 @@ Perform a detailed analysis of HOW this code relates to the scan goal. Focus on:
 2. What data flows through this code (sources, sinks, transformations)
 3. What API/system calls or operations directly relate to the goal
 4. Whether the behavior is definitive evidence or merely circumstantial
+5. What the INTENT behind this code is — what is the developer trying to achieve?
+6. Whether the behavior pattern matches known malware families (e.g., banking trojans use overlays + SMS interception; spyware harvests contacts + location; ransomware encrypts files + locks device)
 
 Be precise and evidence-based. Only report what the code ACTUALLY does, not what it "could potentially" do.
+
+For MITRE ATT&CK mapping, match observed behavior to techniques:
+- Reading contacts/SMS/call logs → T1636 (Protected User Data), T1432 (Access Contacts)
+- Sending SMS → T1582 (SMS Control)
+- Network connections to hardcoded endpoints → T1437 (Application Layer Protocol)
+- Reflection/dynamic loading → T1406 (Obfuscated Files)
+- BOOT_COMPLETED receiver → T1398 (Boot or Logon Initialization)
+- Accessibility service abuse → T1626 (Abuse Elevation Control)
+- Camera/mic access → T1512 (Video Capture), T1429 (Audio Capture)
+- Crypto operations on user files → T1471 (Data Encrypted for Impact)
+- Device admin → T1401 (Device Administrator Permissions)
 
 Output ONLY valid JSON:
 {
   "detailed_findings": ["specific findings relevant to the scan goal"],
   "evidence": ["concrete code-level evidence (API calls, string constants, references)"],
   "data_flows": ["description of relevant data flow paths"],
+  "threat_type": "banking_trojan|spyware|ransomware|rat|sms_trojan|adware|miner|dropper|unknown",
+  "mitre_techniques": ["T-number: technique name — evidence"],
+  "adversary_intent": "what the code is trying to accomplish from the attacker's perspective",
   "relevance_score": 0-100,
   "reasoning": "thorough explanation of how this code relates to the scan goal"
 }

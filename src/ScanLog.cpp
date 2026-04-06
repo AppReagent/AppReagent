@@ -151,15 +151,17 @@ void ScanLog::logMethodFinding(const std::string& run_id,
                                const std::string& findings,
                                const std::string& reasoning,
                                bool relevant,
-                               double confidence) {
+                               double confidence,
+                               const std::string& threat_category) {
     std::string sql = "INSERT INTO method_findings "
         "(run_id, file_path, file_hash, class_name, method_name, "
-        "api_calls, findings, reasoning, relevant, confidence) VALUES ('" +
+        "api_calls, findings, reasoning, relevant, confidence, threat_category) VALUES ('" +
         escape(run_id) + "', '" + escape(file_path) + "', '" + escape(file_hash) +
         "', '" + escape(class_name) + "', '" + escape(method_name) +
         "', '" + escape(api_calls) + "', '" + escape(findings) +
         "', '" + escape(reasoning) + "', " + (relevant ? "true" : "false") +
-        ", " + std::to_string(confidence) + ")";
+        ", " + std::to_string(confidence) +
+        ", '" + escape(threat_category) + "')";
     db_.execute(sql);
 }
 

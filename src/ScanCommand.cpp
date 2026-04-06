@@ -331,9 +331,11 @@ ScanSummary ScanCommand::run(const std::string& target_path, const std::string& 
                 std::string reasoning = j.value("reasoning", "");
                 bool relevant = j.value("relevant", false);
                 double confidence = j.value("confidence", 0.0);
+                std::string threatCategory = j.value("threat_category", "none");
 
                 log_.logMethodFinding(runId, fp, fh, className, methodName,
-                                      apiCalls, findings, reasoning, relevant, confidence);
+                                      apiCalls, findings, reasoning, relevant, confidence,
+                                      threatCategory);
             } catch (...) {
                 // Non-fatal: findings extraction failure doesn't block the scan
             }

@@ -18,11 +18,24 @@ IMPORTANT guidelines:
 - Mark as relevant (confidence 0.5-0.7) if it uses security-sensitive APIs that COULD be abused: network requests (HTTP/sockets), location access, camera/microphone, SMS, file downloads, push notification handling, analytics/tracking, device identifiers. These are worth deeper analysis even if they appear legitimate.
 - Mark as NOT relevant (confidence >= 0.9) ONLY for code that has NO security-sensitive operations: pure UI rendering, data models, string utilities, date formatting, view adapters, serialization, constructors, getters/setters, toString, equals, hashCode.
 
+When marking as relevant, also identify the threat category:
+- "c2" — Command-and-control communication (sockets, HTTP to hardcoded IPs/domains, polling loops)
+- "data_theft" — Reading contacts, SMS, call logs, location, clipboard, browser data
+- "sms_abuse" — Sending premium SMS, deleting SMS evidence, intercepting SMS
+- "credential_theft" — Overlay attacks, keylogging, phishing WebViews, accessibility abuse
+- "persistence" — BOOT_COMPLETED receivers, alarm/job scheduling, device admin
+- "evasion" — Reflection, dynamic class loading, string obfuscation, anti-emulator checks
+- "ransomware" — File encryption, device locking, external storage traversal
+- "surveillance" — Camera/mic capture, screen recording, location tracking
+- "dropper" — DexClassLoader, APK download + install, staged payloads
+- "other" — Doesn't fit the above categories
+
 Output ONLY valid JSON with these fields:
 {
   "relevant": boolean - true if this code is relevant to the scan goal,
   "confidence": 0.0-1.0,
   "api_calls": ["list of API/system calls found"],
   "findings": ["list of specific findings relevant to the scan goal"],
+  "threat_category": "c2|data_theft|sms_abuse|credential_theft|persistence|evasion|ransomware|surveillance|dropper|other|none",
   "reasoning": "brief explanation of why this code is or is not relevant to the goal"
 }

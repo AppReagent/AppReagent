@@ -158,7 +158,6 @@ ChatSession& AreaServer::getOrCreateChat(const std::string& id, const std::strin
         session->tools->add(std::make_unique<CallGraphTool>(db_));
         session->tools->add(std::make_unique<FindBehaviorTool>(db_));
         session->tools->add(std::make_unique<PermissionsTool>());
-        session->tools->add(std::make_unique<DecompileTool>(session->sandbox.get()));
         session->tools->add(std::make_unique<DisasmTool>());
         session->tools->add(std::make_unique<ReportTool>(db_));
         session->tools->add(std::make_unique<ImproveTool>(&config_, db_,

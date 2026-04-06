@@ -116,7 +116,6 @@ static int runTui(area::Config& config, area::Database& db) {
     tools.add(std::make_unique<area::CallGraphTool>(db));
     tools.add(std::make_unique<area::FindBehaviorTool>(db));
     tools.add(std::make_unique<area::PermissionsTool>());
-    tools.add(std::make_unique<area::DecompileTool>(&sandbox));
     tools.add(std::make_unique<area::DisasmTool>());
     tools.add(std::make_unique<area::ReportTool>(db));
     tools.add(std::make_unique<area::ImproveTool>(&config, db, fs::current_path().string()));

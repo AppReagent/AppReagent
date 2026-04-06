@@ -64,6 +64,12 @@ Harness Harness::createDefault() {
         "- After finding a suspicious method, trace its callers and callees\n"
         "- Cross-reference across multiple files before concluding\n"
         "- If a scan finds nothing, READ the code directly — the scan may have missed context\n"
+        "\n"
+        "CONVERGENCE — know when you have enough evidence:\n"
+        "- Once you have 2+ independent evidence sources pointing the same way, you can answer\n"
+        "- If 3+ tool calls return no results for a behavior, it likely doesn't exist — say so\n"
+        "- Don't repeat the same tool with the same input — try a different approach\n"
+        "- Cite specific evidence (class names, method names, API calls) in every answer\n"
     });
 
     h.addGuide({"tool_strategy",
@@ -103,99 +109,33 @@ Harness Harness::createDefault() {
         "  No results: try different search terms, broader patterns, or a different tool\n"
     });
 
-    h.addGuide({"malware_knowledge",
-        "ANDROID MALWARE KNOWLEDGE — use this to classify threats and reason about malware.\n"
+    h.addGuide({"investigation_depth",
+        "DEEP INVESTIGATION — avoid shallow answers.\n"
         "\n"
-        "Malware Families & Behavioral Signatures:\n"
-        "- Banking Trojans (Anubis, Cerberus, SharkBot, Vultur): Overlay attacks via "
-        "AccessibilityService, SMS interception for 2FA theft, screen recording/VNC, "
-        "keylogging, credential phishing via injected WebViews.\n"
-        "- SMS Trojans (Joker/Bread, Etinu): Premium SMS sending via SmsManager, WAP billing "
-        "fraud, silent subscription to paid services, SMS deletion to hide evidence.\n"
-        "- Spyware (Pegasus, Predator, stalkerware): Contact/call log/SMS harvesting, "
-        "location tracking, camera/microphone capture, clipboard monitoring, notification "
-        "reading, browser history theft.\n"
-        "- Ransomware (DoubleLocker, Koler, Simplocker): File encryption via javax.crypto.Cipher, "
-        "DeviceAdminReceiver for lock/wipe, ransom note display, external storage traversal.\n"
-        "- RATs (AhMyth, SpyNote, AndroRAT): Reverse shell, C2 via Socket/HTTP, remote file "
-        "management, camera/mic activation, SMS sending on command, app install/uninstall.\n"
-        "- Adware/Clickers (HiddenAds, Clicker): Background WebView ad loading, invisible "
-        "click fraud, aggressive notification ads, shortcut hijacking.\n"
-        "- Crypto Miners (HiddenMiner, CoinHive): CPU-intensive loops, process forking, "
-        "battery/thermal abuse, WebView-based mining scripts.\n"
-        "- Droppers/Loaders (Sharkbot, Vultur, Brunhilda): DexClassLoader for secondary "
-        "payload, APK download + PackageManager install, staged execution.\n"
+        "COMMON MISTAKES TO AVOID:\n"
+        "1. Answering after only one tool call. Most questions need 3-5 tool calls minimum.\n"
+        "2. Reporting scan summary without querying method_findings for details.\n"
+        "3. Saying 'no malicious behavior found' without checking STRINGS, MANIFEST, and GREP.\n"
+        "4. Stopping at the first suspicious method without tracing its callers via XREFS.\n"
+        "5. Scanning a whole directory when the user asked about one specific behavior — use GREP first.\n"
         "\n"
-        "MITRE ATT&CK Mobile Techniques (reference when classifying findings):\n"
-        "- Initial Access: T1474 (supply chain), T1476 (app store), T1444 (masquerade)\n"
-        "- Execution: T1575 (native code), T1623 (command interpreter)\n"
-        "- Persistence: T1398 (boot init — BOOT_COMPLETED receiver), T1624 (event trigger)\n"
-        "- Privilege Escalation: T1626 (abuse elevation), T1404 (exploit for privesc)\n"
-        "- Defense Evasion: T1406 (obfuscation — string encoding, reflection, packing), "
-        "T1628 (hide artifacts), T1627 (execution guardrails — emulator/debugger checks)\n"
-        "- Credential Access: T1417 (input capture — keylogging, overlay), T1634 (credential stores)\n"
-        "- Discovery: T1426 (system info — Build.*, TelephonyManager), T1418 (software discovery), "
-        "T1422 (network config)\n"
-        "- Collection: T1432 (contacts), T1430 (location), T1429 (audio), T1512 (video/camera), "
-        "T1636 (protected user data — SMS, call log, calendar)\n"
-        "- C2: T1437 (application layer protocol — HTTP/HTTPS), T1481 (web service — Firebase, "
-        "Telegram bots), T1509 (non-standard port — raw sockets)\n"
-        "- Exfiltration: T1646 (over C2 channel), T1639 (over alternative protocol — SMS, email)\n"
-        "- Impact: T1447 (delete data), T1471 (encrypt for impact — ransomware), T1582 (SMS control)\n"
+        "AFTER A SCAN COMPLETES — always do this before answering:\n"
+        "  SQL: SELECT class_name, method_name, threat_category, findings, confidence FROM method_findings WHERE run_id = '<run_id>' AND relevant = true ORDER BY confidence DESC\n"
+        "  SQL: SELECT risk_score, recommendation, risk_profile FROM scan_results WHERE run_id = '<run_id>'\n"
+        "  Then: DECOMPILE the top suspicious methods to verify findings with actual code.\n"
         "\n"
-        "Key Android APIs by Threat Category:\n"
-        "- C2/Networking: java.net.Socket, java.net.URL, HttpURLConnection, OkHttpClient, "
-        "WebSocket, SSLSocket\n"
-        "- Data Theft: ContactsContract, CallLog.Calls, Telephony.Sms, MediaStore, "
-        "CalendarContract, ClipboardManager\n"
-        "- SMS Abuse: SmsManager.sendTextMessage, sendMultipartTextMessage, "
-        "ContentResolver.delete on content://sms\n"
-        "- Persistence: BroadcastReceiver+BOOT_COMPLETED, AlarmManager, JobScheduler, WorkManager\n"
-        "- Evasion: DexClassLoader, PathClassLoader, Class.forName, Method.invoke, "
-        "Runtime.exec, ProcessBuilder\n"
-        "- Privilege: DeviceAdminReceiver, AccessibilityService, UsageStatsManager, "
-        "REQUEST_INSTALL_PACKAGES\n"
-        "- Device Fingerprinting: TelephonyManager (getDeviceId/getImei/getSubscriberId), "
-        "Settings.Secure.ANDROID_ID, Build.SERIAL/MODEL/MANUFACTURER\n"
-        "- Crypto: javax.crypto.Cipher, SecretKeySpec, KeyGenerator (ransomware or encrypted C2)\n"
-        "- Surveillance: Camera/CameraManager, MediaRecorder, AudioRecord, "
-        "LocationManager, FusedLocationProviderClient\n"
-    });
-
-    h.addGuide({"malware_reasoning",
-        "MALWARE ANALYSIS REASONING — follow this when answering malware questions.\n"
+        "WHEN STUCK or results are inconclusive:\n"
+        "1. Try a different tool (GREP for patterns SCAN might miss, STRINGS for hardcoded data)\n"
+        "2. Broaden the search (XREFS on the suspicious class, not just the method)\n"
+        "3. Check related files (use FIND_FILES to find other classes in the same package)\n"
+        "4. Query past scans (SQL on method_findings for similar threat_category)\n"
+        "5. If nothing works, clearly state what was checked and what was NOT found — don't guess.\n"
         "\n"
-        "When analyzing scan results or answering about malware:\n"
-        "1. CLASSIFY: What type of malware? (banking trojan, spyware, ransomware, RAT, "
-        "SMS trojan, adware, miner, dropper). Name the closest known family if patterns match.\n"
-        "2. MAP TO ATT&CK: Which MITRE ATT&CK Mobile techniques are exhibited? Cite T-numbers.\n"
-        "3. IDENTIFY INTENT: What is the adversary's goal? (steal credentials, exfiltrate data, "
-        "monetize via SMS/ads/mining, gain persistent control, encrypt for ransom)\n"
-        "4. TRACE THE KILL CHAIN: How does the attack flow? "
-        "(entry point → persistence → privilege escalation → collection → exfiltration)\n"
-        "5. ASSESS SEVERITY: Rate based on: data sensitivity, stealth level, persistence "
-        "mechanism, scope of access, reversibility.\n"
-        "6. RECOMMEND: What should the analyst do? (deeper analysis of specific classes, "
-        "IOC extraction, dynamic analysis, containment steps)\n"
-        "\n"
-        "Distinguishing malicious from legitimate:\n"
-        "- PERMISSIONS: Legitimate apps request permissions matching their purpose; malware "
-        "requests excessive/unrelated permissions (e.g., a calculator requesting SMS access)\n"
-        "- NETWORK: Legitimate apps call their own documented backends; malware connects to "
-        "hardcoded IPs, dynamic DNS, or known C2 infrastructure\n"
-        "- DATA ACCESS: Legitimate apps access data for their core function; malware harvests "
-        "data unrelated to the app's stated purpose\n"
-        "- STEALTH: Legitimate apps operate visibly; malware hides activities (background "
-        "services, suppressed notifications, process names disguised as system)\n"
-        "- CRYPTO: Legitimate crypto protects user data in transit/at rest; malware crypto "
-        "encrypts user files for ransom or obfuscates C2 traffic\n"
-        "\n"
-        "When the user asks GENERAL malware questions (not about a specific file):\n"
-        "- Draw on the malware knowledge above to give informed, technical answers\n"
-        "- Reference specific APIs and smali patterns that characterize the behavior\n"
-        "- Suggest scan goals that would detect the behavior they're asking about\n"
-        "- Offer to scan files if they have samples to analyze\n"
-        "- Use SQL queries to find examples in previously scanned data\n"
+        "EVIDENCE QUALITY — rank your evidence:\n"
+        "- STRONG: Direct API call to malicious sink (SmsManager.sendTextMessage with hardcoded number)\n"
+        "- MODERATE: Security-sensitive API in suspicious context (HTTP POST in a Service started at boot)\n"
+        "- WEAK: API that could be benign (HttpURLConnection in a class without other suspicious calls)\n"
+        "- Report the evidence strength in your answer.\n"
     });
 
     h.addGuide({"improve_tool",
@@ -267,42 +207,53 @@ Harness Harness::createDefault() {
         }
     });
 
-    // Answer quality: check that answers cite concrete evidence
     h.addSensor({"answer_evidence", "answer",
         [](const std::string& answer, const std::string&) -> std::string {
-            // Skip short answers, confirmations, and clarification questions
-            if (answer.size() < 200) return "";
-            if (answer.find("?") != std::string::npos && answer.size() < 400) return "";
+            // Check if the answer discusses scan results without citing specifics
+            bool mentionsScan = answer.find("scan") != std::string::npos ||
+                                answer.find("Scan") != std::string::npos ||
+                                answer.find("SCAN") != std::string::npos;
+            bool mentionsResults = answer.find("result") != std::string::npos ||
+                                  answer.find("found") != std::string::npos ||
+                                  answer.find("detected") != std::string::npos;
+            bool citesEvidence = answer.find("class") != std::string::npos ||
+                                answer.find("method") != std::string::npos ||
+                                answer.find("Class") != std::string::npos ||
+                                answer.find("Method") != std::string::npos ||
+                                answer.find("->") != std::string::npos ||
+                                answer.find("invoke") != std::string::npos ||
+                                answer.find("Lcom/") != std::string::npos ||
+                                answer.find("Ljava/") != std::string::npos ||
+                                answer.find("Landroid/") != std::string::npos;
+            bool citesScore = answer.find("risk_score") != std::string::npos ||
+                              answer.find("risk score") != std::string::npos ||
+                              answer.find("confidence") != std::string::npos ||
+                              answer.find("relevant") != std::string::npos ||
+                              answer.find("not_relevant") != std::string::npos;
+            bool isNegative = answer.find("no malicious") != std::string::npos ||
+                              answer.find("no suspicious") != std::string::npos ||
+                              answer.find("benign") != std::string::npos ||
+                              answer.find("not_relevant") != std::string::npos;
 
-            // Check for evidence markers: class/method names, file paths, API calls
-            bool hasEvidence = false;
-            // Smali class references (Lcom/... or Ljava/...)
-            if (answer.find("L") != std::string::npos &&
-                (answer.find("/") != std::string::npos && answer.find(";") != std::string::npos))
-                hasEvidence = true;
-            // File paths
-            if (answer.find(".smali") != std::string::npos ||
-                answer.find("/") != std::string::npos)
-                hasEvidence = true;
-            // Method signatures or API calls
-            if (answer.find("->") != std::string::npos ||
-                answer.find("()") != std::string::npos ||
-                answer.find("invoke") != std::string::npos)
-                hasEvidence = true;
-            // SQL results or scan references
-            if (answer.find("run_id") != std::string::npos ||
-                answer.find("scan_results") != std::string::npos ||
-                answer.find("risk_score") != std::string::npos)
-                hasEvidence = true;
-            // Score or classification references
-            if (answer.find("relevant") != std::string::npos ||
-                answer.find("score") != std::string::npos)
-                hasEvidence = true;
+            if (mentionsScan && mentionsResults && !citesEvidence && !citesScore && !isNegative) {
+                return "Your answer mentions scan results but doesn't cite specific classes, methods, "
+                       "or risk scores. Query method_findings and scan_results for the run_id to get "
+                       "concrete evidence before answering.";
+            }
+            return "";
+        }
+    });
 
-            if (!hasEvidence) {
-                return "Your answer lacks concrete evidence. Cite specific class names, "
-                       "method signatures, API calls, file paths, or database results. "
-                       "Use tools to gather evidence before answering.";
+    h.addSensor({"scan_followup", "scan",
+        [](const std::string&, const std::string& observation) -> std::string {
+            // After a scan completes, remind the agent to query results
+            if (observation.find("Scan complete") != std::string::npos ||
+                observation.find("run_id:") != std::string::npos) {
+                // Extract run_id hint
+                return "REMINDER: Scan complete. Before answering, query the database:\n"
+                       "1. SQL: SELECT class_name, method_name, threat_category, findings FROM method_findings WHERE run_id = '<run_id>' AND relevant = true\n"
+                       "2. SQL: SELECT risk_score, recommendation FROM scan_results WHERE run_id = '<run_id>'\n"
+                       "Then cite specific findings in your answer.";
             }
             return "";
         }

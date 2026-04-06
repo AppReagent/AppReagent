@@ -215,7 +215,9 @@ std::string Agent::buildSystemPrompt() const {
 
     prompt += tools_.describeAll();
     prompt += "\nAlways use absolute paths. Expand ~ to the user's home directory.\n";
-    prompt += "If the user refers to code without a path, use FIND_FILES to locate it first.\n\n";
+    prompt += "If the user refers to code without a path, use FIND_FILES to locate it first.\n";
+    prompt += "When you have gathered sufficient evidence from multiple sources, provide your ANSWER with specific citations.\n";
+    prompt += "Never answer about scan results without first querying method_findings and scan_results tables.\n\n";
 
     std::string guides = harness_.guideText();
     if (!guides.empty()) {

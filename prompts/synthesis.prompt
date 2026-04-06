@@ -11,6 +11,9 @@ Per-function analyses:
 Based on all the analyses above, produce a comprehensive answer to the scan goal question for this file.
 
 Cross-reference findings across functions -- behavior is often split across multiple code units.
+Look for KILL CHAINS: data source (contacts, SMS, location) → processing (encoding, encryption) → exfiltration (network, SMS send).
+A method that reads contacts is only suspicious if another method in the same file sends data over the network.
+Deduplicate: if multiple methods report the same API call or finding, consolidate into one entry.
 
 Classification guidelines:
 - "relevant": The code contains DEFINITIVE malicious behavior — e.g., data theft, C2 communication, unauthorized access, privilege escalation, covert operations, crypto mining, covert camera/microphone access combined with hidden storage or exfiltration. Risk score should be 70-100.

@@ -44,6 +44,8 @@ Common threat-category expansions:
 - Data theft: ContentResolver.query on ContactsContract/CallLog/SMS URIs, TelephonyManager.getDeviceId/getSubscriberId/getLine1Number, AccountManager.getAccounts, followed by HTTP POST or SMS exfiltration of collected data
 - Spyware: LocationManager/FusedLocationProviderClient for GPS tracking, AudioRecord/MediaRecorder for audio capture, Camera/CameraManager for photo capture, KeyEvent monitoring, AccessibilityService abuse
 - Obfuscation: DexClassLoader/InMemoryDexClassLoader for dynamic loading, Class.forName + Method.invoke for reflection, native method calls via JNI, encrypted string tables with runtime decryption
+- SMS abuse: SmsManager.sendTextMessage/sendMultipartTextMessage for premium SMS, ContentResolver.delete on content://sms for evidence destruction, BroadcastReceiver intercepting SMS_RECEIVED for 2FA theft
+- Credential theft: WebView.loadUrl with JavaScript injection for overlay attacks, AccessibilityService.onAccessibilityEvent for keylogging, custom login screens mimicking legitimate apps
 - Banking trojan: overlay attacks via TYPE_APPLICATION_OVERLAY or WindowManager.addView, WebView injection with JavaScript interfaces, SMS interception (RECEIVE_SMS + abortBroadcast), accessibility service monitoring EditText fields, clipboard hooking
 - RAT (Remote Access Trojan): bi-directional socket/WebSocket channels, command parsing loops (switch/if-else on server messages), shell command execution via Runtime.exec, screen capture via MediaProjection, file upload/download handlers
 - SMS trojan: SmsManager.sendTextMessage to premium numbers, BroadcastReceiver for SMS_RECEIVED with abortBroadcast, SMS content reading + forwarding, WAP push message interception

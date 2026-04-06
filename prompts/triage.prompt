@@ -13,10 +13,37 @@ Method body:
 
 Analyze this code with respect to the scan goal above. Determine whether it contains behavior RELEVANT to answering the goal question.
 
-IMPORTANT guidelines:
-- Mark as relevant (confidence >= 0.8) if it contains CONCRETE evidence of malicious behavior: data theft, C2 communication, unauthorized access, covert operations, crypto mining (hash computation loops, nonce manipulation, difficulty checking, thread pool exhaustion), resource abuse, or hidden file storage.
-- Mark as relevant (confidence 0.5-0.7) if it uses security-sensitive APIs that COULD be abused: network requests (HTTP/sockets), location access, camera/microphone, SMS, file downloads, push notification handling, analytics/tracking, device identifiers, MessageDigest/hashing with loops, Runtime.exec, thread pools consuming all CPU cores. These are worth deeper analysis even if they appear legitimate.
-- Mark as NOT relevant (confidence >= 0.9) ONLY for code that has NO security-sensitive operations: pure UI rendering, data models, string utilities, date formatting, view adapters, serialization, constructors, getters/setters, toString, equals, hashCode.
+Decision framework — evaluate in order:
+
+1. DEFINITELY RELEVANT (relevant=true, confidence 0.85-1.0):
+   Code contains CONCRETE evidence of security-critical behavior directly related to the scan goal:
+   - Data exfiltration: reading contacts/SMS/call logs/location then sending over network
+   - C2 communication: sockets/HTTP to hardcoded IPs, polling loops, command parsing
+   - SMS abuse: SmsManager.sendTextMessage with hardcoded or dynamically resolved numbers
+   - Credential theft: overlay attacks, keylogging, accessibility abuse
+   - Persistence: BOOT_COMPLETED receivers starting services, alarm-based scheduling
+   - Evasion: reflection chains (Class.forName→getMethod→invoke), DexClassLoader, string decryption
+   - Crypto abuse: file encryption of external storage, mining loops (hash computation + nonce)
+   - Privilege escalation: DeviceAdminReceiver, root exploits, Runtime.exec("su")
+
+2. POSSIBLY RELEVANT (relevant=true, confidence 0.5-0.75):
+   Code uses security-sensitive APIs in a context that warrants deeper analysis:
+   - Network requests (HTTP/sockets) — especially in background services
+   - Location/camera/microphone access — especially without visible UI
+   - File downloads or dynamic code loading
+   - Device identifier collection (IMEI, ANDROID_ID, subscriber ID)
+   - MessageDigest/hashing in loops (potential mining)
+   - Runtime.exec or ProcessBuilder
+   These need deep analysis to determine if usage is malicious or legitimate.
+
+3. NOT RELEVANT (relevant=false, confidence 0.9-1.0):
+   Code has NO security-sensitive operations whatsoever:
+   - Pure UI: Activity/Fragment lifecycle, View inflation, RecyclerView adapters, animations
+   - Data models: POJOs, getters/setters, toString, equals, hashCode, Parcelable
+   - Utilities: string formatting, date parsing, math helpers, color conversion
+   - Standard framework: Application.onCreate (without suspicious initialization), BuildConfig
+
+   IMPORTANT: If in doubt, mark as relevant with lower confidence. False negatives (missing real threats) are much worse than false positives (flagging benign code for review).
 
 When marking as relevant, also identify the threat category:
 - "c2" — Command-and-control communication (sockets, HTTP to hardcoded IPs/domains, polling loops, command parsing)

@@ -33,6 +33,8 @@ Perform a detailed analysis of HOW this code relates to the scan goal. Focus on:
    - Miners: CPU-intensive loops + pool connections + wallet addresses (e.g., CoinHive, HiddenMiner)
 
 Be precise and evidence-based. Only report what the code ACTUALLY does, not what it "could potentially" do.
+Do NOT invent API calls or behaviors not present in the code. If a method is short or trivial, say so.
+When referencing code, quote the actual instruction (e.g., "invoke-virtual {v0}, Landroid/telephony/SmsManager;->sendTextMessage").
 
 For MITRE ATT&CK Mobile mapping, match observed behavior to techniques:
 

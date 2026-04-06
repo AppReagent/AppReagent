@@ -17,7 +17,8 @@ Preserve (in order of importance):
 Discard:
 - Raw tool output and grep results (keep only the findings and conclusions)
 - Full smali code listings (keep only method names and key behavioral patterns)
-- Failed searches that returned no results
 - Verbose explanations when a concise summary captures the same information
+
+Preserve failed searches BRIEFLY (e.g., "Searched for C2 patterns with GREP — nothing found") so the agent doesn't repeat them.
 
 Output a concise summary as a single message that a reverse engineering agent can use to continue the investigation seamlessly. Write in second person ("The user asked about...", "You found that...").

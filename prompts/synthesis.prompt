@@ -24,6 +24,17 @@ Look for KILL CHAINS: data source (contacts, SMS, location) -> processing (encod
 A method that reads contacts is only suspicious if another method in the same file sends data over the network.
 Deduplicate: if multiple methods report the same API call or finding, consolidate into one entry.
 
+### Hidden behavior reconstruction
+Malware authors deliberately fragment operations. Actively look for:
+1. **Obfuscation chains**: One method decodes/decrypts a string, another uses the decoded value as a URL, class name, or command. Connect the decoder to the consumer. Report the decoded values if analysis recovered them.
+2. **Split data flows**: Data source in method A (e.g., reads contacts) stored in field/collection, method B retrieves and transmits it. Neither method alone looks malicious. The COMBINATION reveals the exfiltration pipeline.
+3. **Staged execution**: Initialization method registers receivers/alarms/jobs, trigger fires later, handler method executes payload. Connect the setup to the payload. Report the full trigger chain.
+4. **Layered indirection**: Method a() calls b() calls c() which finally invokes the sensitive API. Each wrapper adds nothing but obscurity. Collapse the chain and report what actually happens.
+5. **Conditional malware**: Code that checks environment (emulator detection, debugger, date/time, network state) before activating. Report BOTH the benign path and the hidden malicious path. The conditional gate IS the evasion technique.
+6. **IPC-based decomposition**: Functionality split across Service/BroadcastReceiver/ContentProvider boundaries within the same app. One component collects data, sends via Intent to another component that exfiltrates. Trace across component boundaries.
+
+If individual method analyses show fragments that combine into a coherent malicious operation, the file should be classified as "relevant" even if no single method scored highly on its own.
+
 ### Multi-vector threat detection
 If multiple threat types are present in the same class (e.g., data theft + C2 + persistence), identify ALL of them and classify by the PRIMARY threat. A class that reads contacts AND sends SMS AND connects to a C2 server is a more severe threat than any one behavior alone.
 

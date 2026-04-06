@@ -186,6 +186,127 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
         return items;
     });
 
+    // Pre-triage obfuscation analysis: extract indicators the LLM should know about
+    auto obfuscation_enrich = g.add<CodeNode>("obfuscation_enrich", [](TaskContext ctx) {
+        if (!ctx.has("method_body")) return ctx;
+        std::string body = ctx.get("method_body").get<std::string>();
+
+        // Convert to lowercase for matching
+        std::string bodyLower = body;
+        for (auto& c : bodyLower) c = std::tolower(static_cast<unsigned char>(c));
+
+        std::vector<std::string> indicators;
+
+        // XOR operations — common string decryption pattern
+        if (bodyLower.find("xor-int") != std::string::npos) {
+            indicators.push_back("XOR arithmetic operations detected — common in string decryption/obfuscation routines");
+        }
+
+        // Reflection chain
+        bool hasForName = bodyLower.find("class;->forname") != std::string::npos;
+        bool hasGetMethod = bodyLower.find("getmethod") != std::string::npos ||
+                            bodyLower.find("getdeclaredmethod") != std::string::npos;
+        bool hasInvoke = bodyLower.find("method;->invoke") != std::string::npos;
+        if (hasForName || hasGetMethod || hasInvoke) {
+            std::string detail = "Reflection chain:";
+            if (hasForName) detail += " Class.forName()";
+            if (hasGetMethod) detail += " getMethod/getDeclaredMethod()";
+            if (hasInvoke) detail += " Method.invoke()";
+            detail += " — hides actual API being called";
+            indicators.push_back(detail);
+        }
+
+        // Dynamic class loading
+        if (bodyLower.find("dexclassloader") != std::string::npos ||
+            bodyLower.find("pathclassloader") != std::string::npos ||
+            bodyLower.find("inmemorydexclassloader") != std::string::npos) {
+            indicators.push_back("Dynamic class loader usage — can load arbitrary code at runtime");
+        }
+
+        // StringBuilder chains (URL/string construction)
+        {
+            size_t appendCount = 0;
+            size_t pos = 0;
+            while ((pos = bodyLower.find("append", pos)) != std::string::npos) {
+                appendCount++;
+                pos += 6;
+            }
+            if (appendCount >= 3) {
+                indicators.push_back("Multiple StringBuilder.append() calls (" +
+                    std::to_string(appendCount) + ") — may be constructing URLs, class names, or commands from fragments");
+            }
+        }
+
+        // Byte array → String conversion (encrypted string pattern)
+        if ((bodyLower.find("new-array") != std::string::npos || bodyLower.find("fill-array") != std::string::npos) &&
+            bodyLower.find("ljava/lang/string;-><init>") != std::string::npos) {
+            indicators.push_back("Byte/char array converted to String — pattern used in string decryption routines");
+        }
+
+        // Native method bridge
+        if (bodyLower.find("loadlibrary") != std::string::npos) {
+            indicators.push_back("System.loadLibrary() — native code bridge, behavior hidden in .so binary");
+        }
+
+        // Anti-analysis checks
+        {
+            std::vector<std::string> antiChecks;
+            if (bodyLower.find("build;->fingerprint") != std::string::npos ||
+                bodyLower.find("build;->model") != std::string::npos ||
+                bodyLower.find("build;->product") != std::string::npos)
+                antiChecks.push_back("device fingerprint checks");
+            if (bodyLower.find("isdebuggerconnected") != std::string::npos)
+                antiChecks.push_back("debugger detection");
+            if (bodyLower.find("tracerpid") != std::string::npos)
+                antiChecks.push_back("ptrace detection");
+            if (!antiChecks.empty()) {
+                std::string detail = "Anti-analysis techniques: ";
+                for (size_t i = 0; i < antiChecks.size(); i++) {
+                    if (i > 0) detail += ", ";
+                    detail += antiChecks[i];
+                }
+                detail += " — code may behave differently under analysis";
+                indicators.push_back(detail);
+            }
+        }
+
+        // setAccessible — bypassing access control
+        if (bodyLower.find("setaccessible") != std::string::npos) {
+            indicators.push_back("setAccessible(true) — bypassing Java access control to invoke private/hidden APIs");
+        }
+
+        // Intent-based data passing with custom actions
+        if (bodyLower.find("sendbroadcast") != std::string::npos ||
+            bodyLower.find("startservice") != std::string::npos) {
+            if (bodyLower.find("putextra") != std::string::npos) {
+                indicators.push_back("Data packed into Intent extras and sent via broadcast/service — potential IPC-based exfiltration");
+            }
+        }
+
+        // Time-delayed execution
+        if (bodyLower.find("postdelayed") != std::string::npos ||
+            bodyLower.find("alarmmanager") != std::string::npos ||
+            bodyLower.find("jobscheduler") != std::string::npos) {
+            indicators.push_back("Delayed/scheduled execution — payload may activate after a time delay");
+        }
+
+        if (!indicators.empty()) {
+            std::ostringstream enrichment;
+            enrichment << "\n\n⚠ OBFUSCATION INDICATORS DETECTED in this method:\n";
+            for (auto& ind : indicators) {
+                enrichment << "• " << ind << "\n";
+            }
+            enrichment << "\nThese patterns suggest the method is HIDING its true behavior. "
+                       << "Analyze the obfuscation carefully and try to determine what the code actually does when executed.\n";
+
+            // Append to method_body so the triage LLM sees it
+            std::string existingBody = ctx.get("method_body").get<std::string>();
+            ctx.set("method_body", existingBody + enrichment.str());
+        }
+
+        return ctx;
+    });
+
     std::string triagePrompt = loadPrompt(prompts_dir + "/triage.prompt");
     std::string triageSupervisorPrompt = loadPrompt(prompts_dir + "/triage_supervisor.prompt");
 
@@ -370,8 +491,9 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
     g.branch(detect_format, "elf", split_methods);
     g.branch(detect_format, "unsupported", unsupported);
 
-    g.edge(split_methods, triage);
+    g.edge(split_methods, obfuscation_enrich);
     g.branch(split_methods, "collect", collector);
+    g.edge(obfuscation_enrich, triage);
 
     g.edge(triage, filter);
     g.branch(filter, "pass", rag_enrich);

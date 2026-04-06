@@ -60,7 +60,44 @@ Does the behavior match known malware patterns?
 - **Dropper**: downloads payload from C2 -> writes to storage -> loads via DexClassLoader or installs APK
 - **Stalkerware**: continuous location tracking + call recording + message interception + hidden from launcher
 
-### 6. Cross-method context
+### 6. Deobfuscation analysis
+When you encounter obfuscation, actively reason through it:
+
+A. STRING DECRYPTION: If the code contains XOR loops, byte array transformations, or custom decode methods:
+   - Trace the algorithm step by step (e.g., XOR with key 0x42, Caesar shift, Base64 then XOR)
+   - If possible, mentally execute the decryption to recover the plaintext string
+   - Report both the obfuscated and decoded values in evidence
+   - Common patterns: xor-int/lit8 in a loop over a byte array -> String init; Base64.decode() -> AES decrypt with hardcoded key
+
+B. REFLECTION TARGET RESOLUTION: If the code uses Class.forName() or getMethod():
+   - Trace what class name and method name strings are passed (even if built from parts)
+   - Report the ACTUAL API being invoked via reflection (e.g., "reflects Runtime.exec()")
+   - If the class/method names are themselves decoded, chain the analysis: first decode the string, then resolve the reflection target
+
+C. BEHAVIORAL CHAIN RECONSTRUCTION: Malware splits operations across methods/classes:
+   - Method A reads contacts -> stores in field -> Method B reads field -> posts to URL
+   - Method A decodes C2 URL -> Method B uses decoded URL for HTTP request
+   - Method A checks if emulator -> sets flag -> Method B only runs payload if flag is clear
+   Identify these chains even when each individual method looks incomplete or benign.
+
+D. INTENT/IPC DATA TRACING: Track data flowing through Android IPC:
+   - Intent.putExtra("key", sensitive_data) -> sendBroadcast/startService -> receiver reads getStringExtra("key")
+   - ContentProvider.insert() with sensitive data -> another app queries it
+   - Identify the COMPLETE path: data source -> IPC mechanism -> data sink
+
+E. ENCRYPTED COMMUNICATION PATTERNS: Look for:
+   - Cipher.getInstance() + SecretKeySpec with hardcoded key bytes -> encrypt data -> send via HTTP
+   - Custom XOR/substitution applied to POST body before network send
+   - Base64 encoding of stolen data before transmission
+   Report what data is encrypted and where it's sent.
+
+F. DELAYED EXECUTION ANALYSIS: For time-triggered or conditional code:
+   - What is the trigger? (AlarmManager, JobScheduler, Handler.postDelayed, broadcast receiver)
+   - What code runs when triggered? (trace the PendingIntent/Runnable target)
+   - What conditions gate the execution? (SharedPreferences flags, date checks, network state)
+   Report the complete trigger->payload chain.
+
+### 7. Cross-method context
 If call graph context is provided, analyze how this method fits into the broader execution flow:
 - Who calls this method? From what component (Activity, Service, BroadcastReceiver)?
 - What methods does this call? Do they form an attack chain?

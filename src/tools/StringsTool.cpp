@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <set>
 #include <sstream>
 #include <vector>
@@ -14,6 +15,46 @@
 namespace fs = std::filesystem;
 
 namespace area {
+
+// Base64 decode (returns empty string on invalid input)
+static std::string base64Decode(const std::string& encoded) {
+    static const std::string chars =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    if (encoded.size() < 8) return "";
+
+    // Validate
+    for (char c : encoded) {
+        if (c != '=' && chars.find(c) == std::string::npos) return "";
+    }
+
+    std::string result;
+    int val = 0, bits = -8;
+    for (char c : encoded) {
+        if (c == '=') break;
+        auto pos = chars.find(c);
+        if (pos == std::string::npos) return "";
+        val = (val << 6) | (int)pos;
+        bits += 6;
+        if (bits >= 0) {
+            result += char((val >> bits) & 0xFF);
+            bits -= 8;
+        }
+    }
+
+    // Validate decoded output is printable text
+    for (char c : result) {
+        if (c != '\n' && c != '\r' && c != '\t' && (c < 0x20 || c > 0x7e))
+            return ""; // binary content, not useful as decoded string
+    }
+    return result;
+}
+
+// Detect obfuscation-related smali patterns in a line
+struct ObfuscationIndicator {
+    std::string type;   // "xor_cipher", "string_building", "reflection_setup", "native_bridge", "anti_analysis"
+    std::string detail;
+    int line;
+};
 
 static std::string toLowerST(const std::string& s) {
     std::string out = s;
@@ -187,6 +228,15 @@ static bool isInteresting(const std::string& s) {
         if (allAlnum) return true;
     }
 
+    // Hex-encoded strings (potential encrypted payloads or keys)
+    if (s.size() >= 16 && s.size() % 2 == 0) {
+        bool allHex = true;
+        for (char c : s) {
+            if (!std::isxdigit(c)) { allHex = false; break; }
+        }
+        if (allHex) return true;
+    }
+
     // Any string longer than 10 chars could be interesting
     if (s.size() > 10) return true;
 
@@ -240,6 +290,8 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
     auto startTime = std::chrono::steady_clock::now();
     bool truncated = false;
 
+    std::vector<ObfuscationIndicator> obfuscationIndicators;
+
     auto processFile = [&](const fs::path& filePath) {
         if ((int)strings.size() >= MAX_STRINGS) { truncated = true; return; }
 
@@ -263,6 +315,46 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
             std::string lineLower = toLowerST(line);
 
             if (ext == ".smali") {
+                // Detect obfuscation patterns in smali
+                if (lineLower.find("xor-int") != std::string::npos) {
+                    obfuscationIndicators.push_back({"xor_cipher",
+                        "XOR operation: " + line, lineNum});
+                }
+                if (lineLower.find("invoke-virtual") != std::string::npos &&
+                    (lineLower.find("class;->forname") != std::string::npos ||
+                     lineLower.find("method;->invoke") != std::string::npos ||
+                     lineLower.find("->setaccessible") != std::string::npos)) {
+                    obfuscationIndicators.push_back({"reflection_setup",
+                        "Reflection call: " + line, lineNum});
+                }
+                if (lineLower.find("invoke-static") != std::string::npos &&
+                    lineLower.find("class;->forname") != std::string::npos) {
+                    obfuscationIndicators.push_back({"reflection_setup",
+                        "Dynamic class loading via forName: " + line, lineNum});
+                }
+                if (lineLower.find(".method") != std::string::npos &&
+                    lineLower.find("native") != std::string::npos) {
+                    obfuscationIndicators.push_back({"native_bridge",
+                        "Native method declaration: " + line, lineNum});
+                }
+                if (lineLower.find("loadlibrary") != std::string::npos ||
+                    lineLower.find("dexclassloader") != std::string::npos ||
+                    lineLower.find("inmemorydexclassloader") != std::string::npos) {
+                    obfuscationIndicators.push_back({"dynamic_loading",
+                        "Dynamic code loading: " + line, lineNum});
+                }
+                if (lineLower.find("build;->fingerprint") != std::string::npos ||
+                    lineLower.find("isdebuggerconnected") != std::string::npos ||
+                    lineLower.find("tracerpid") != std::string::npos) {
+                    obfuscationIndicators.push_back({"anti_analysis",
+                        "Anti-analysis check: " + line, lineNum});
+                }
+                if (lineLower.find("stringbuilder") != std::string::npos &&
+                    lineLower.find("append") != std::string::npos) {
+                    obfuscationIndicators.push_back({"string_building",
+                        "String construction via StringBuilder: " + line, lineNum});
+                }
+
                 // Extract const-string values
                 if (lineLower.find("const-string") != std::string::npos) {
                     std::string val = extractConstString(line);
@@ -444,7 +536,53 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
                    lower.ends_with(".so") || lower.ends_with(".locked") || lower.ends_with(".encrypted")) {
             addToCategory("Suspicious File Extensions", &s);
         } else {
-            addToCategory("Other", &s);
+            // Try Base64 decode for long alphanumeric strings
+            bool categorized = false;
+            if (s.value.size() >= 12) {
+                bool looksBase64 = true;
+                for (char c : s.value) {
+                    if (!std::isalnum(c) && c != '+' && c != '/' && c != '=') {
+                        looksBase64 = false;
+                        break;
+                    }
+                }
+                if (looksBase64) {
+                    std::string decoded = base64Decode(s.value);
+                    if (!decoded.empty() && decoded.size() >= 4) {
+                        s.context += " [Base64 decoded: \"" + decoded.substr(0, 120) + "\"]";
+                        // Re-check if decoded content reveals a URL, IP, or other indicator
+                        std::string decodedLower = toLowerST(decoded);
+                        if (decodedLower.starts_with("http://") || decodedLower.starts_with("https://") ||
+                            decodedLower.find(".com") != std::string::npos ||
+                            decodedLower.find(".net") != std::string::npos) {
+                            addToCategory("Encoded URLs (Base64)", &s);
+                        } else if (decodedLower.find("/bin/") != std::string::npos ||
+                                   decodedLower.find("chmod") != std::string::npos ||
+                                   decodedLower == "su") {
+                            addToCategory("Encoded Commands (Base64)", &s);
+                        } else {
+                            addToCategory("Encoded Strings (Base64)", &s);
+                        }
+                        categorized = true;
+                    }
+                }
+            }
+
+            // Check for hex-encoded strings (potential keys, encrypted payloads)
+            if (!categorized && s.value.size() >= 32 && s.value.size() % 2 == 0) {
+                bool allHex = true;
+                for (char c : s.value) {
+                    if (!std::isxdigit(c)) { allHex = false; break; }
+                }
+                if (allHex) {
+                    addToCategory("Hex-Encoded Data", &s);
+                    categorized = true;
+                }
+            }
+
+            if (!categorized) {
+                addToCategory("Other", &s);
+            }
         }
     }
 
@@ -460,6 +598,40 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
             if (display.size() > 150) display = display.substr(0, 150) + "...";
             out << "  \"" << display << "\"\n";
             out << "    " << s->file << ":" << s->line << " (" << s->context << ")\n";
+        }
+        out << "\n";
+    }
+
+    // Output obfuscation indicators if any were found
+    if (!obfuscationIndicators.empty()) {
+        // Deduplicate by type
+        std::map<std::string, std::vector<ObfuscationIndicator*>> byType;
+        for (auto& ind : obfuscationIndicators) {
+            byType[ind.type].push_back(&ind);
+        }
+        out << "== Obfuscation Indicators ==\n";
+        for (auto& [type, indicators] : byType) {
+            std::string label = type;
+            if (type == "xor_cipher") label = "XOR Cipher Operations";
+            else if (type == "reflection_setup") label = "Reflection/Dynamic Dispatch";
+            else if (type == "native_bridge") label = "Native Method Bridges";
+            else if (type == "dynamic_loading") label = "Dynamic Code Loading";
+            else if (type == "anti_analysis") label = "Anti-Analysis Checks";
+            else if (type == "string_building") label = "Runtime String Construction";
+
+            out << "  " << label << " (" << indicators.size() << " occurrence"
+                << (indicators.size() > 1 ? "s" : "") << "):\n";
+            int shown = 0;
+            for (auto* ind : indicators) {
+                if (shown >= 5) {
+                    out << "    ... and " << (indicators.size() - shown) << " more\n";
+                    break;
+                }
+                std::string detail = ind->detail;
+                if (detail.size() > 120) detail = detail.substr(0, 120) + "...";
+                out << "    line " << ind->line << ": " << detail << "\n";
+                shown++;
+            }
         }
         out << "\n";
     }

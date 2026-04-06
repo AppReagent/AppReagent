@@ -64,6 +64,20 @@ Mark as not relevant ONLY for code with NO security-sensitive operations:
 - Logging wrappers (Log.d, Log.i)
 - Navigation / fragment transactions
 
+## Obfuscation-aware analysis
+Malware authors hide malicious behavior. Look for these HIDING PATTERNS and mark as relevant (confidence >= 0.7) when found:
+
+1. **String obfuscation**: XOR operations (xor-int, xor-int/lit8), byte array manipulation followed by String construction, charAt()/getBytes() loops, custom decryption methods. Even if the decoded value is unknown, the PATTERN of decode-then-use is suspicious.
+2. **Reflection chains**: Class.forName(), getMethod()/getDeclaredMethod(), Method.invoke(), getDeclaredField(), setAccessible(true). A method that builds a class name from parts or decodes it, then reflects on it, is hiding its true target.
+3. **Dynamic loading**: DexClassLoader, PathClassLoader, InMemoryDexClassLoader, loadClass(), defineClass(). Code that downloads/reads a file then loads it as code.
+4. **Indirect data flow**: Methods that receive sensitive data via Intent extras, Bundle arguments, ContentProvider queries, or SharedPreferences rather than direct API calls.
+5. **String building**: Constructing URLs, class names, or API names by concatenating fragments: StringBuilder.append() chains, String.concat(), array-of-chars. This hides C2 domains and reflection targets from static string extraction.
+6. **Time-delayed / conditional execution**: AlarmManager.set(), Handler.postDelayed(), JobScheduler.schedule(), Timer.schedule() combined with PendingIntent. Also: SharedPreferences checks that gate malicious behavior.
+7. **Native bridge**: Methods declared "native" with System.loadLibrary(), or JNI_OnLoad patterns. Always mark native methods that interact with sensitive data as relevant.
+8. **Intent-based exfiltration**: sendBroadcast(), startService(), or bindService() with data packed into Intent extras. Especially suspicious with custom action strings or explicit component targets.
+9. **Anti-analysis**: Build.FINGERPRINT/MODEL checks for "sdk"/"emulator"/"generic", Debug.isDebuggerConnected(), ptrace self-attachment, TracerPid checks, installed package checks for analysis tools.
+10. **Wrapper/proxy patterns**: Small methods that forward calls through layers of indirection. If a method delegates to another method with an obfuscated name, mark it relevant.
+
 ## Threat categories
 When marking as relevant, classify the primary threat:
 - "c2" -- Command-and-control communication (hardcoded endpoints, polling, command dispatch, beacon intervals)

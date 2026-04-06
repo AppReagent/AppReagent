@@ -1,0 +1,26 @@
+Scan goal: {{scan_goal}}
+Run ID: {{run_id}}
+
+Per-method RAG-augmented analyses:
+{{collected}}
+
+Files analyzed: {{files_analyzed}}
+
+Produce a comprehensive analysis report that synthesizes all per-method findings with their cross-application pattern matches.
+
+Focus on:
+1. What malicious patterns were confirmed by matching against the broader corpus
+2. What novel patterns were found that don't match known samples
+3. Overall threat assessment with confidence level
+4. Priority-ordered recommendations for analysts
+
+Output ONLY valid JSON:
+{
+  "summary": "executive summary of the analysis",
+  "confirmed_patterns": [{"pattern": "name", "evidence": "what confirmed it", "severity": "critical|high|medium|low"}],
+  "novel_findings": [{"finding": "description", "reason_novel": "why this is new"}],
+  "threat_level": "critical" | "high" | "medium" | "low" | "benign",
+  "confidence": 0-100,
+  "recommendations": ["priority-ordered analyst recommendations"],
+  "risk_score": 0-100
+}

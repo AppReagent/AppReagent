@@ -5,6 +5,7 @@ build/
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
+_deps/
 .cache/
 
 # Binary
@@ -22,6 +23,22 @@ area
 
 # Generated files
 compile_commands.json
+
+# Config
+config.json
+convo.txt
+state.json
+scan-outputs/
+ca-certificate.crt
+
+# Claude
+.claude/
+
+# Improve output
+.improve-output/
+
+# Test output
+area_tests
 
 # OS files
 .DS_Store

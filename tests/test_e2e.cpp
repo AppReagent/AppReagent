@@ -1,0 +1,621 @@
+#include <gtest/gtest.h>
+#include <atomic>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <poll.h>
+#include <sys/socket.h>
+#include <thread>
+#include <unistd.h>
+
+#include "Agent.h"
+#include "AreaServer.h"
+#include "IPC.h"
+#include "LLMBackend.h"
+#include "ScanLog.h"
+#include "tools/ToolRegistry.h"
+#include "tools/GenerateRunIdTool.h"
+#include "tools/SqlTool.h"
+
+namespace fs = std::filesystem;
+
+// ---------------------------------------------------------------------------
+// ScriptedMockBackend: responds based on prompt content to simulate real LLM
+// ---------------------------------------------------------------------------
+
+class ScriptedMockBackend : public area::LLMBackend {
+public:
+    explicit ScriptedMockBackend(const area::AiEndpoint& ep) : LLMBackend(ep) {}
+
+    std::string chat(const std::string& system,
+                     const std::vector<area::ChatMessage>& messages) override {
+        callCount_++;
+        if (messages.empty()) return "ANSWER: no input";
+
+        std::string lastMsg = messages.back().content;
+        std::string allHistory;
+        for (auto& m : messages) allHistory += m.content + "\n";
+
+        // If we already sent SQL and got results back, answer
+        if (allHistory.find("I ran your SQL") != std::string::npos ||
+            allHistory.find("rows):\n") != std::string::npos) {
+            return "ANSWER: Based on the query results, there are records in the database.";
+        }
+
+        // If we got a scan result feedback
+        if (allHistory.find("Scan completed") != std::string::npos ||
+            allHistory.find("scan completed") != std::string::npos) {
+            return "ANSWER: The scan completed successfully.";
+        }
+
+        // If asked about tables or schema
+        if (lastMsg.find("table") != std::string::npos ||
+            lastMsg.find("schema") != std::string::npos) {
+            return "SQL: SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'";
+        }
+
+        // If asked to count something
+        if (lastMsg.find("count") != std::string::npos ||
+            lastMsg.find("how many") != std::string::npos) {
+            return "SQL: SELECT COUNT(*) FROM scan_results";
+        }
+
+        // If asked to scan
+        if (lastMsg.find("scan") != std::string::npos &&
+            lastMsg.find("/") != std::string::npos) {
+            auto slash = lastMsg.find('/');
+            auto end = lastMsg.find(' ', slash);
+            std::string path = (end != std::string::npos)
+                ? lastMsg.substr(slash, end - slash) : lastMsg.substr(slash);
+            return "SCAN: " + path;
+        }
+
+        // If asked to generate run ID
+        if (lastMsg.find("run id") != std::string::npos ||
+            lastMsg.find("run_id") != std::string::npos) {
+            return "GENERATE_RUN_ID:";
+        }
+
+        // If asked with SQL: prefix already in the prompt (markdown wrapped)
+        if (lastMsg.find("```sql") != std::string::npos) {
+            return "ANSWER: I see SQL in the message.";
+        }
+
+        // Default answer
+        return "ANSWER: " + lastMsg;
+    }
+
+    int callCount() const { return callCount_.load(); }
+
+private:
+    std::atomic<int> callCount_{0};
+};
+
+// ---------------------------------------------------------------------------
+// Test fixture: sets up an Agent with ScriptedMockBackend + ToolRegistry
+// ---------------------------------------------------------------------------
+
+class AgentE2E : public ::testing::Test {
+protected:
+    area::Database db_; // not connected — only for Agent construction
+    area::AiEndpoint ep_{"test", "mock", "", "auto"};
+
+    struct Result {
+        std::vector<area::AgentMessage> messages;
+        std::string lastAnswer() const {
+            for (int i = (int)messages.size() - 1; i >= 0; i--) {
+                if (messages[i].type == area::AgentMessage::ANSWER)
+                    return messages[i].content;
+            }
+            return "";
+        }
+        bool hasType(area::AgentMessage::Type t) const {
+            for (auto& m : messages) if (m.type == t) return true;
+            return false;
+        }
+        std::string firstOfType(area::AgentMessage::Type t) const {
+            for (auto& m : messages) if (m.type == t) return m.content;
+            return "";
+        }
+    };
+
+    Result runAgent(const std::string& query,
+                    area::ConfirmCallback confirm = nullptr) {
+        auto backend = std::make_unique<ScriptedMockBackend>(ep_);
+        area::ToolRegistry tools;
+        tools.add(std::make_unique<area::GenerateRunIdTool>());
+        tools.add(std::make_unique<area::SqlTool>(db_));
+        area::Agent agent(std::move(backend), tools);
+        Result result;
+        agent.process(query, [&](const area::AgentMessage& msg) {
+            result.messages.push_back(msg);
+        }, confirm);
+        return result;
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Agent tool routing tests
+// ---------------------------------------------------------------------------
+
+TEST_F(AgentE2E, DirectAnswerForSimpleQuery) {
+    auto r = runAgent("hello");
+    EXPECT_TRUE(r.hasType(area::AgentMessage::ANSWER));
+    EXPECT_FALSE(r.lastAnswer().empty());
+}
+
+TEST_F(AgentE2E, RoutesToSqlForTableQuery) {
+    // The scripted backend returns SQL: for "table" queries
+    // But since DB isn't connected, execute will fail
+    // Agent should emit SQL message then ERROR
+    auto r = runAgent("what tables exist?");
+    EXPECT_TRUE(r.hasType(area::AgentMessage::SQL));
+    EXPECT_TRUE(r.hasType(area::AgentMessage::ERROR));
+}
+
+TEST_F(AgentE2E, RoutesToGenerateRunId) {
+    auto r = runAgent("generate a run_id for me");
+    // GENERATE_RUN_ID tool generates an ID and returns RESULT
+    EXPECT_TRUE(r.hasType(area::AgentMessage::RESULT));
+    auto result = r.firstOfType(area::AgentMessage::RESULT);
+    EXPECT_TRUE(result.find("Generated run ID") != std::string::npos);
+}
+
+TEST_F(AgentE2E, ConfirmCallbackApprove) {
+    int confirmCount = 0;
+    auto r = runAgent("generate a run_id for me",
+        [&](const std::string& desc) -> area::ConfirmResult {
+            confirmCount++;
+            return {area::ConfirmResult::APPROVE, ""};
+        });
+    EXPECT_GT(confirmCount, 0);
+    EXPECT_TRUE(r.hasType(area::AgentMessage::RESULT));
+}
+
+TEST_F(AgentE2E, ConfirmCallbackDeny) {
+    auto r = runAgent("generate a run_id for me",
+        [](const std::string& desc) -> area::ConfirmResult {
+            return {area::ConfirmResult::DENY, ""};
+        });
+    // Denied — should get an answer (the mock sees "User denied" feedback)
+    EXPECT_TRUE(r.hasType(area::AgentMessage::ANSWER));
+    // Should NOT have a RESULT (the tool was denied)
+    EXPECT_FALSE(r.firstOfType(area::AgentMessage::RESULT).find("Generated run ID") != std::string::npos);
+}
+
+TEST_F(AgentE2E, ConfirmCallbackCustom) {
+    auto r = runAgent("generate a run_id for me",
+        [](const std::string& desc) -> area::ConfirmResult {
+            return {area::ConfirmResult::CUSTOM, "Actually, just use run123"};
+        });
+    // Custom text fed back to agent as user message -> agent answers
+    EXPECT_TRUE(r.hasType(area::AgentMessage::ANSWER));
+}
+
+TEST_F(AgentE2E, SqlMarkdownStripping) {
+    // Test that extractSql strips ```sql ... ``` wrapping
+    auto backend = std::make_unique<area::MockBackend>(ep_);
+    backend->setResponses({
+        "SQL: ```sql\nSELECT 1\n```",
+        "ANSWER: done"
+    });
+    area::ToolRegistry tools;
+    tools.add(std::make_unique<area::SqlTool>(db_));
+    area::Agent agent(std::move(backend), tools);
+
+    std::vector<area::AgentMessage> msgs;
+    agent.process("test", [&](const area::AgentMessage& msg) {
+        msgs.push_back(msg);
+    });
+
+    // Should have extracted "SELECT 1" from the markdown
+    bool foundSql = false;
+    for (auto& m : msgs) {
+        if (m.type == area::AgentMessage::SQL) {
+            // The SQL content should NOT contain backticks
+            EXPECT_EQ(m.content.find("```"), std::string::npos);
+            foundSql = true;
+        }
+    }
+    EXPECT_TRUE(foundSql);
+}
+
+TEST_F(AgentE2E, SqlEmbeddedInText) {
+    // Test that SQL: found in the middle of text is extracted
+    auto backend = std::make_unique<area::MockBackend>(ep_);
+    backend->setResponses({
+        "Let me check the database.\n\nSQL: SELECT COUNT(*) FROM scan_results",
+        "ANSWER: found it"
+    });
+    area::ToolRegistry tools;
+    tools.add(std::make_unique<area::SqlTool>(db_));
+    area::Agent agent(std::move(backend), tools);
+
+    std::vector<area::AgentMessage> msgs;
+    agent.process("check", [&](const area::AgentMessage& msg) {
+        msgs.push_back(msg);
+    });
+
+    bool foundSql = false;
+    for (auto& m : msgs) {
+        if (m.type == area::AgentMessage::SQL) {
+            EXPECT_TRUE(m.content.find("SELECT") != std::string::npos);
+            foundSql = true;
+        }
+    }
+    EXPECT_TRUE(foundSql);
+}
+
+TEST_F(AgentE2E, MaxIterationsReached) {
+    // Agent should stop after MAX_ITERATIONS
+    auto backend = std::make_unique<area::MockBackend>(ep_);
+    // Always return SQL so agent never answers
+    backend->setResponse("SQL: SELECT 1");
+    area::ToolRegistry tools;
+    tools.add(std::make_unique<area::SqlTool>(db_));
+    area::Agent agent(std::move(backend), tools);
+
+    std::vector<area::AgentMessage> msgs;
+    agent.process("infinite loop", [&](const area::AgentMessage& msg) {
+        msgs.push_back(msg);
+    });
+
+    // Should eventually get an answer about max iterations
+    bool gotAnswer = false;
+    for (auto& m : msgs) {
+        if (m.type == area::AgentMessage::ANSWER) {
+            gotAnswer = true;
+        }
+    }
+    EXPECT_TRUE(gotAnswer);
+}
+
+// ---------------------------------------------------------------------------
+// IPC tests
+// ---------------------------------------------------------------------------
+
+class IPCE2E : public ::testing::Test {
+protected:
+    std::string sockPath_;
+
+    void SetUp() override {
+        sockPath_ = "/tmp/area_test_" + std::to_string(getpid()) + ".sock";
+        area::ipc::removeSock(sockPath_);
+    }
+
+    void TearDown() override {
+        area::ipc::removeSock(sockPath_);
+    }
+};
+
+TEST_F(IPCE2E, ListenAndConnect) {
+    int listenFd = area::ipc::createListener(sockPath_);
+    ASSERT_GE(listenFd, 0);
+
+    int clientFd = area::ipc::connectTo(sockPath_);
+    ASSERT_GE(clientFd, 0);
+
+    area::ipc::closeFd(clientFd);
+    area::ipc::closeFd(listenFd);
+}
+
+TEST_F(IPCE2E, SendAndReceive) {
+    int listenFd = area::ipc::createListener(sockPath_);
+    ASSERT_GE(listenFd, 0);
+
+    int clientFd = area::ipc::connectTo(sockPath_);
+    ASSERT_GE(clientFd, 0);
+
+    int serverFd = accept(listenFd, nullptr, nullptr);
+    ASSERT_GE(serverFd, 0);
+
+    // Client sends, server receives
+    nlohmann::json msg = {{"type", "test"}, {"value", 42}};
+    EXPECT_TRUE(area::ipc::sendLine(clientFd, msg));
+
+    // Small delay for data to arrive
+    usleep(10000);
+
+    auto received = area::ipc::readLine(serverFd);
+    ASSERT_TRUE(received.has_value());
+    EXPECT_EQ(received->value("type", ""), "test");
+    EXPECT_EQ(received->value("value", 0), 42);
+
+    area::ipc::closeFd(serverFd);
+    area::ipc::closeFd(clientFd);
+    area::ipc::closeFd(listenFd);
+}
+
+TEST_F(IPCE2E, MultipleMessages) {
+    int listenFd = area::ipc::createListener(sockPath_);
+    int clientFd = area::ipc::connectTo(sockPath_);
+    int serverFd = accept(listenFd, nullptr, nullptr);
+
+    for (int i = 0; i < 10; i++) {
+        EXPECT_TRUE(area::ipc::sendLine(clientFd, {{"i", i}}));
+    }
+
+    usleep(10000);
+
+    for (int i = 0; i < 10; i++) {
+        auto msg = area::ipc::readLine(serverFd);
+        ASSERT_TRUE(msg.has_value());
+        EXPECT_EQ(msg->value("i", -1), i);
+    }
+
+    area::ipc::closeFd(serverFd);
+    area::ipc::closeFd(clientFd);
+    area::ipc::closeFd(listenFd);
+}
+
+TEST_F(IPCE2E, ConnectToNonexistent) {
+    int fd = area::ipc::connectTo("/tmp/nonexistent_area_test.sock");
+    EXPECT_LT(fd, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Server E2E tests (full round-trip: server + IPC + agent)
+// ---------------------------------------------------------------------------
+
+class ServerE2E : public ::testing::Test {
+protected:
+    std::string dataDir_;
+    std::unique_ptr<area::AreaServer> server_;
+    std::thread serverThread_;
+
+    void SetUp() override {
+        dataDir_ = "/tmp/area_e2e_" + std::to_string(getpid());
+        fs::create_directories(dataDir_);
+
+        // Write minimal config
+        nlohmann::json cfg;
+        cfg["postgres_url"] = "";
+        cfg["postgres_cert"] = "";
+        cfg["ai_endpoints"] = nlohmann::json::array({
+            {{"id", "mock"}, {"provider", "mock"}, {"url", ""}, {"model", "auto"}}
+        });
+        cfg["theme"] = "dark";
+        std::ofstream(dataDir_ + "/config.json") << cfg.dump(2);
+
+        // Write ddl.sql (empty, no DB)
+        std::ofstream(dataDir_ + "/ddl.sql") << "";
+
+        area::Config config;
+        config.ai_endpoints.push_back({"mock", "mock", "", "auto"});
+        config.theme = "dark";
+
+        server_ = std::make_unique<area::AreaServer>(std::move(config), dataDir_);
+    }
+
+    void TearDown() override {
+        server_->shutdown();
+        if (serverThread_.joinable()) serverThread_.join();
+        fs::remove_all(dataDir_);
+    }
+
+    void startServer() {
+        serverThread_ = std::thread([this]() { server_->run(); });
+        // Wait for socket
+        for (int i = 0; i < 50; i++) {
+            if (fs::exists(dataDir_ + "/area.sock")) break;
+            usleep(50000);
+        }
+    }
+
+    std::string sockPath() { return dataDir_ + "/area.sock"; }
+
+    // Send a message and collect responses until "done" state
+    std::vector<nlohmann::json> roundTrip(int fd, const std::string& query,
+                                           const std::string& chatId = "default",
+                                           int timeoutMs = 5000) {
+        area::ipc::sendLine(fd, {{"type", "user_input"}, {"chat_id", chatId}, {"content", query}});
+
+        std::vector<nlohmann::json> responses;
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+        while (std::chrono::steady_clock::now() < deadline) {
+            struct pollfd pfd = {fd, POLLIN, 0};
+            int remaining = (int)std::chrono::duration_cast<std::chrono::milliseconds>(
+                deadline - std::chrono::steady_clock::now()).count();
+            if (remaining <= 0) break;
+            if (poll(&pfd, 1, std::min(remaining, 100)) > 0) {
+                while (auto msg = area::ipc::readLine(fd)) {
+                    responses.push_back(*msg);
+                    if (msg->value("type", "") == "state" && !msg->value("processing", true)) {
+                        return responses;
+                    }
+                }
+            }
+        }
+        return responses;
+    }
+};
+
+TEST_F(ServerE2E, StartAndStop) {
+    startServer();
+    EXPECT_TRUE(fs::exists(sockPath()));
+    server_->shutdown();
+    serverThread_.join();
+    // Socket should be cleaned up
+    usleep(200000);
+}
+
+TEST_F(ServerE2E, ConnectAndAttach) {
+    startServer();
+    int fd = area::ipc::connectTo(sockPath());
+    ASSERT_GE(fd, 0);
+
+    area::ipc::sendLine(fd, {{"type", "attach"}, {"chat_id", "default"}});
+
+    // Wait for responses with poll
+    bool gotHistory = false, gotState = false;
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < deadline) {
+        struct pollfd pfd = {fd, POLLIN, 0};
+        if (poll(&pfd, 1, 200) > 0) {
+            while (auto msg = area::ipc::readLine(fd)) {
+                if (msg->value("type", "") == "history") gotHistory = true;
+                if (msg->value("type", "") == "state") gotState = true;
+            }
+            if (gotHistory && gotState) break;
+        }
+    }
+    EXPECT_TRUE(gotHistory);
+    EXPECT_TRUE(gotState);
+
+    area::ipc::closeFd(fd);
+}
+
+TEST_F(ServerE2E, SendQueryGetAnswer) {
+    startServer();
+    int fd = area::ipc::connectTo(sockPath());
+    ASSERT_GE(fd, 0);
+
+    // Attach and drain
+    area::ipc::sendLine(fd, {{"type", "attach"}, {"chat_id", "default"}});
+    { struct pollfd p = {fd, POLLIN, 0}; poll(&p, 1, 500); }
+    while (area::ipc::readLine(fd)) {}
+
+    auto responses = roundTrip(fd, "hello");
+
+    bool gotAnswer = false;
+    for (auto& r : responses) {
+        if (r.value("type", "") == "agent_msg") {
+            if (r["msg"].value("type", "") == "answer") {
+                gotAnswer = true;
+                EXPECT_FALSE(r["msg"].value("content", "").empty());
+            }
+        }
+    }
+    EXPECT_TRUE(gotAnswer);
+
+    area::ipc::closeFd(fd);
+}
+
+TEST_F(ServerE2E, ListChats) {
+    startServer();
+    int fd = area::ipc::connectTo(sockPath());
+    ASSERT_GE(fd, 0);
+
+    area::ipc::sendLine(fd, {{"type", "list_chats"}});
+    struct pollfd p = {fd, POLLIN, 0}; poll(&p, 1, 1000);
+
+    auto msg = area::ipc::readLine(fd);
+    ASSERT_TRUE(msg.has_value());
+    EXPECT_EQ(msg->value("type", ""), "chat_list");
+    auto chats = (*msg)["chats"];
+    EXPECT_GE(chats.size(), 1);
+
+    area::ipc::closeFd(fd);
+}
+
+TEST_F(ServerE2E, CreateAndAttachChat) {
+    startServer();
+    int fd = area::ipc::connectTo(sockPath());
+    ASSERT_GE(fd, 0);
+
+    area::ipc::sendLine(fd, {{"type", "create_chat"}, {"name", "test chat"}});
+    { struct pollfd p = {fd, POLLIN, 0}; poll(&p, 1, 1000); }
+
+    auto created = area::ipc::readLine(fd);
+    ASSERT_TRUE(created.has_value());
+    EXPECT_EQ(created->value("type", ""), "chat_created");
+    std::string chatId = created->value("chat_id", "");
+    EXPECT_FALSE(chatId.empty());
+
+    area::ipc::sendLine(fd, {{"type", "attach"}, {"chat_id", chatId}});
+
+    bool gotHistory = false;
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (std::chrono::steady_clock::now() < deadline) {
+        struct pollfd p = {fd, POLLIN, 0};
+        if (poll(&p, 1, 200) > 0) {
+            while (auto msg = area::ipc::readLine(fd)) {
+                if (msg->value("type", "") == "history") {
+                    gotHistory = true;
+                    EXPECT_EQ((*msg)["messages"].size(), 0);
+                }
+            }
+            if (gotHistory) break;
+        }
+    }
+    EXPECT_TRUE(gotHistory);
+
+    area::ipc::closeFd(fd);
+}
+
+TEST_F(ServerE2E, DangerousMode) {
+    startServer();
+    int fd = area::ipc::connectTo(sockPath());
+    ASSERT_GE(fd, 0);
+
+    area::ipc::sendLine(fd, {{"type", "attach"}, {"chat_id", "default"}});
+    area::ipc::sendLine(fd, {{"type", "set_dangerous"}, {"chat_id", "default"}, {"enabled", true}});
+    { struct pollfd p = {fd, POLLIN, 0}; poll(&p, 1, 500); }
+    while (area::ipc::readLine(fd)) {}
+
+    // With dangerous mode, tool calls should auto-execute (no confirm_req)
+    auto responses = roundTrip(fd, "generate a run_id for me");
+
+    bool gotConfirm = false;
+    for (auto& r : responses) {
+        if (r.value("type", "") == "confirm_req") gotConfirm = true;
+    }
+    EXPECT_FALSE(gotConfirm); // should not get confirm in dangerous mode
+
+    area::ipc::closeFd(fd);
+}
+
+TEST_F(ServerE2E, SessionPersistsAfterDisconnect) {
+    startServer();
+
+    // First connection: send a query
+    {
+        int fd = area::ipc::connectTo(sockPath());
+        ASSERT_GE(fd, 0);
+        area::ipc::sendLine(fd, {{"type", "attach"}, {"chat_id", "default"}});
+        { struct pollfd p = {fd, POLLIN, 0}; poll(&p, 1, 500); }
+        while (area::ipc::readLine(fd)) {}
+
+        auto responses = roundTrip(fd, "hello from first session");
+        area::ipc::closeFd(fd);
+    }
+
+    usleep(500000);
+
+    // Second connection: should see history
+    {
+        int fd = area::ipc::connectTo(sockPath());
+        ASSERT_GE(fd, 0);
+        area::ipc::sendLine(fd, {{"type", "attach"}, {"chat_id", "default"}});
+
+        bool gotHistoryWithContent = false;
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+        while (std::chrono::steady_clock::now() < deadline) {
+            struct pollfd p = {fd, POLLIN, 0};
+            if (poll(&p, 1, 200) > 0) {
+                while (auto msg = area::ipc::readLine(fd)) {
+                    if (msg->value("type", "") == "history") {
+                        if ((*msg)["messages"].size() >= 2) gotHistoryWithContent = true;
+                    }
+                }
+                if (gotHistoryWithContent) break;
+            }
+        }
+        EXPECT_TRUE(gotHistoryWithContent);
+
+        area::ipc::closeFd(fd);
+    }
+}
+
+TEST_F(ServerE2E, ShutdownViaSocket) {
+    startServer();
+    int fd = area::ipc::connectTo(sockPath());
+    ASSERT_GE(fd, 0);
+
+    area::ipc::sendLine(fd, {{"type", "shutdown"}});
+    usleep(200000); // let server process before closing
+    area::ipc::closeFd(fd);
+
+    serverThread_.join();
+    // Server should have exited
+}

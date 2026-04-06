@@ -1,0 +1,34 @@
+You are producing a final, comprehensive answer to a question about an Android application by synthesizing analyses from multiple files.
+
+Scan goal: {{scan_goal}}
+
+Files analyzed: {{files_relevant}} relevant + partially relevant out of {{files_total}} total.
+
+Per-file analyses:
+{{file_summaries}}
+
+Based on all per-file analyses above, produce a comprehensive answer to the scan goal question for this ENTIRE application.
+
+Critical: Look for patterns that SPAN multiple files. Malicious behavior is often distributed across classes:
+- One class discovers targets, another processes them
+- One class communicates with a server, another handles the payload
+- One class collects data, another exfiltrates it
+- Initialization in one class, execution in another
+
+Connect the dots across files. Name specific classes and methods as evidence.
+
+Output ONLY valid JSON:
+{
+  "answer": "direct, comprehensive answer to the scan goal question",
+  "key_findings": [
+    {
+      "category": "category of finding (e.g. 'File Encryption', 'C2 Communication')",
+      "files": ["file1.smali", "file2.smali"],
+      "description": "what was found and how the files relate to each other",
+      "severity": "critical | high | medium | low | info"
+    }
+  ],
+  "cross_file_patterns": ["patterns observed across multiple files that are significant"],
+  "risk_score": 0-100,
+  "recommendation": "actionable recommendation based on the full picture"
+}

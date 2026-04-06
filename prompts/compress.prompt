@@ -1,0 +1,16 @@
+You are summarizing a conversation between a user and a PostgreSQL database assistant.
+
+The conversation has grown too long and must be compressed to continue.
+
+Preserve:
+- The database schema context and any tables/columns the user has been working with
+- Key facts learned from query results that inform follow-up questions
+- The user's current line of inquiry and any unanswered questions
+- Important query patterns or filters the user established
+
+Discard:
+- Raw query result rows (keep only aggregate findings)
+- Failed query attempts that were already corrected
+- Intermediate reasoning that led to a final answer
+
+Output a concise summary as a single message that a database assistant can use to continue helping the user seamlessly. Write in second person ("The user asked about...", "You found that...").

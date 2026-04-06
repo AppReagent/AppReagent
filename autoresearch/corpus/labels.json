@@ -1,0 +1,127 @@
+{
+  "malware/SmsExfil.smali": {
+    "expected_class": "relevant",
+    "min_risk_score": 70,
+    "must_mention": ["sms", "exfil", "contact"],
+    "must_not_mention": []
+  },
+  "malware/ContactHarvester.smali": {
+    "expected_class": "relevant",
+    "min_risk_score": 70,
+    "must_mention": ["contact", "exfil"],
+    "must_not_mention": []
+  },
+  "malware/C2Receiver.smali": {
+    "expected_class": "relevant",
+    "min_risk_score": 70,
+    "must_mention": ["command", "exec"],
+    "must_not_mention": []
+  },
+  "malware/KeyLogger.smali": {
+    "expected_class": "relevant",
+    "min_risk_score": 70,
+    "must_mention": ["key", "log"],
+    "must_not_mention": []
+  },
+  "malware/CryptoMiner.smali": {
+    "expected_class": "relevant",
+    "min_risk_score": 70,
+    "must_mention": ["hash", "mine"],
+    "must_not_mention": []
+  },
+  "malware/CameraSpyware.smali": {
+    "expected_class": "relevant",
+    "min_risk_score": 70,
+    "must_mention": ["camera", "photo"],
+    "must_not_mention": []
+  },
+  "malware/ClipboardHijack.smali": {
+    "expected_class": "relevant",
+    "min_risk_score": 70,
+    "must_mention": ["clipboard", "replace"],
+    "must_not_mention": []
+  },
+  "malware/LocationExfil.smali": {
+    "expected_class": "relevant",
+    "min_risk_score": 70,
+    "must_mention": ["location", "exfil"],
+    "must_not_mention": []
+  },
+  "benign/BenignActivity.smali": {
+    "expected_class": "not_relevant",
+    "max_risk_score": 20,
+    "must_mention": [],
+    "must_not_mention": ["malware", "exfiltrat", "malicious"]
+  },
+  "benign/RecyclerAdapter.smali": {
+    "expected_class": "not_relevant",
+    "max_risk_score": 20,
+    "must_mention": [],
+    "must_not_mention": ["malware", "exfiltrat", "malicious"]
+  },
+  "benign/UserModel.smali": {
+    "expected_class": "not_relevant",
+    "max_risk_score": 20,
+    "must_mention": [],
+    "must_not_mention": ["malware", "exfiltrat", "malicious"]
+  },
+  "benign/StringUtils.smali": {
+    "expected_class": "not_relevant",
+    "max_risk_score": 20,
+    "must_mention": [],
+    "must_not_mention": ["malware", "exfiltrat", "malicious"]
+  },
+  "benign/DateFormatter.smali": {
+    "expected_class": "not_relevant",
+    "max_risk_score": 20,
+    "must_mention": [],
+    "must_not_mention": ["malware", "exfiltrat", "malicious"]
+  },
+  "benign/CustomView.smali": {
+    "expected_class": "not_relevant",
+    "max_risk_score": 20,
+    "must_mention": [],
+    "must_not_mention": ["malware", "exfiltrat", "malicious"]
+  },
+  "benign/PrefsWrapper.smali": {
+    "expected_class": "not_relevant",
+    "max_risk_score": 20,
+    "must_mention": [],
+    "must_not_mention": ["malware", "exfiltrat", "malicious"]
+  },
+  "suspicious/NetworkHelper.smali": {
+    "expected_class": "partially_relevant",
+    "min_risk_score": 20,
+    "max_risk_score": 60,
+    "must_mention": ["network", "http"],
+    "must_not_mention": []
+  },
+  "suspicious/FileDownloader.smali": {
+    "expected_class": "partially_relevant",
+    "min_risk_score": 15,
+    "max_risk_score": 55,
+    "must_mention": ["download"],
+    "must_not_mention": []
+  },
+  "suspicious/PushHandler.smali": {
+    "expected_class": "partially_relevant",
+    "min_risk_score": 10,
+    "max_risk_score": 50,
+    "must_mention": ["notification"],
+    "must_not_mention": []
+  },
+  "suspicious/AnalyticsTracker.smali": {
+    "expected_class": "partially_relevant",
+    "min_risk_score": 15,
+    "max_risk_score": 55,
+    "must_mention": ["analytics", "track"],
+    "must_not_mention": []
+  },
+  "suspicious/LocationService.smali": {
+    "expected_class": "partially_relevant",
+    "min_risk_score": 15,
+    "max_risk_score": 55,
+    "must_mention": ["location"],
+    "must_not_mention": []
+  }
+}

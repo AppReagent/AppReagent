@@ -1,0 +1,35 @@
+{{format_context}}
+
+Scan goal: {{scan_goal}}
+
+Class: {{class_name}}
+Method: {{method_name}}
+
+Method body:
+```
+{{method_body}}
+```
+
+Initial triage: {{llm_response}}
+
+Context:
+{{fields_summary}}
+
+{{rag_context}}
+
+Perform a detailed analysis of HOW this code relates to the scan goal. Focus on:
+1. What specific behavior is relevant to the goal
+2. What data flows through this code (sources, sinks, transformations)
+3. What API/system calls or operations directly relate to the goal
+4. Whether the behavior is definitive evidence or merely circumstantial
+
+Be precise and evidence-based. Only report what the code ACTUALLY does, not what it "could potentially" do.
+
+Output ONLY valid JSON:
+{
+  "detailed_findings": ["specific findings relevant to the scan goal"],
+  "evidence": ["concrete code-level evidence (API calls, string constants, references)"],
+  "data_flows": ["description of relevant data flow paths"],
+  "relevance_score": 0-100,
+  "reasoning": "thorough explanation of how this code relates to the scan goal"
+}

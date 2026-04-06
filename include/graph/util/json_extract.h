@@ -1,0 +1,31 @@
+#pragma once
+
+#include <string>
+
+namespace area::graph {
+
+inline std::string extractJson(const std::string& text) {
+    auto start = text.find("```json");
+    if (start != std::string::npos) {
+        start = text.find('\n', start) + 1;
+        auto end = text.find("```", start);
+        if (end != std::string::npos) return text.substr(start, end - start);
+    }
+    start = text.find("```");
+    if (start != std::string::npos) {
+        start = text.find('\n', start) + 1;
+        auto end = text.find("```", start);
+        if (end != std::string::npos) return text.substr(start, end - start);
+    }
+    start = text.find('{');
+    if (start != std::string::npos) {
+        int depth = 0;
+        for (size_t i = start; i < text.size(); i++) {
+            if (text[i] == '{') depth++;
+            else if (text[i] == '}') { depth--; if (depth == 0) return text.substr(start, i - start + 1); }
+        }
+    }
+    return text;
+}
+
+} // namespace area::graph

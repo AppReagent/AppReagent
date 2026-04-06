@@ -1,0 +1,26 @@
+Scan goal: {{scan_goal}}
+
+File: {{file_path}}
+Class: {{class_name}}
+Method: {{method_name}}
+
+Original scan finding:
+{{finding}}
+
+Similar methods from other scans (RAG context):
+{{rag_context}}
+
+Using the original finding AND the similar code patterns above, produce a deeper analysis:
+1. Does this method match known malicious patterns seen in other analyzed applications?
+2. What cross-application patterns emerge from similar code?
+3. How confident are you that this behavior is malicious vs benign, given the broader corpus?
+4. What additional indicators should analysts look for in related code?
+
+Output ONLY valid JSON:
+{
+  "assessment": "detailed assessment of this method in context of similar patterns",
+  "pattern_matches": [{"similar_method": "class::method from RAG", "similarity": "what makes them similar", "implication": "what this similarity means"}],
+  "confidence": 0-100,
+  "threat_indicators": ["specific indicators found"],
+  "recommendation": "actionable recommendation"
+}

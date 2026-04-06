@@ -27,15 +27,9 @@ void JobQueue::ensureTable() {
 }
 
 int64_t JobQueue::enqueue(const std::string& type, const std::string& payload, int tier) {
-    std::string escaped_type, escaped_payload;
-    for (char c : type) { if (c == '\'') escaped_type += "''"; else escaped_type += c; }
-    for (char c : payload) { if (c == '\'') escaped_payload += "''"; else escaped_payload += c; }
-
-    std::string sql = "INSERT INTO jobs (type, tier, payload) VALUES ('" +
-                      escaped_type + "', " + std::to_string(tier) + ", '" +
-                      escaped_payload + "') RETURNING id";
-
-    auto result = db_.execute(sql);
+    auto result = db_.executeParams(
+        "INSERT INTO jobs (type, tier, payload) VALUES ($1, $2, $3) RETURNING id",
+        {type, std::to_string(tier), payload});
     if (!result.ok()) throw std::runtime_error("enqueue failed: " + result.error);
     if (result.rows.empty() || result.rows[0].empty())
         throw std::runtime_error("enqueue failed: no id returned");
@@ -43,20 +37,18 @@ int64_t JobQueue::enqueue(const std::string& type, const std::string& payload, i
 }
 
 std::vector<Job> JobQueue::dequeue(int tier, int batch_size) {
-    std::string sql = R"(
+    auto result = db_.executeParams(R"(
         UPDATE jobs
         SET status = 'in_progress', updated_at = now()
         WHERE id IN (
             SELECT id FROM jobs
-            WHERE status = 'pending' AND tier = )" + std::to_string(tier) + R"(
+            WHERE status = 'pending' AND tier = $1
             ORDER BY created_at
             FOR UPDATE SKIP LOCKED
-            LIMIT )" + std::to_string(batch_size) + R"(
+            LIMIT $2
         )
         RETURNING id, type, payload, status, output, assigned_to, tier
-    )";
-
-    auto result = db_.execute(sql);
+    )", {std::to_string(tier), std::to_string(batch_size)});
     std::vector<Job> jobs;
 
     if (!result.ok()) {
@@ -80,20 +72,18 @@ std::vector<Job> JobQueue::dequeue(int tier, int batch_size) {
 std::vector<Job> JobQueue::dequeueAtOrBelow(int tier, int batch_size) {
     // Grab pending jobs at this tier or any lower tier, prioritizing
     // the server's own tier first, then lower tiers by descending order
-    std::string sql = R"(
+    auto result = db_.executeParams(R"(
         UPDATE jobs
         SET status = 'in_progress', updated_at = now()
         WHERE id IN (
             SELECT id FROM jobs
-            WHERE status = 'pending' AND tier <= )" + std::to_string(tier) + R"(
+            WHERE status = 'pending' AND tier <= $1
             ORDER BY tier DESC, created_at
             FOR UPDATE SKIP LOCKED
-            LIMIT )" + std::to_string(batch_size) + R"(
+            LIMIT $2
         )
         RETURNING id, type, payload, status, output, assigned_to, tier
-    )";
-
-    auto result = db_.execute(sql);
+    )", {std::to_string(tier), std::to_string(batch_size)});
     std::vector<Job> jobs;
 
     if (!result.ok()) {
@@ -115,51 +105,33 @@ std::vector<Job> JobQueue::dequeueAtOrBelow(int tier, int batch_size) {
 }
 
 void JobQueue::requeue(int64_t job_id) {
-    std::string sql = "UPDATE jobs SET status = 'pending', assigned_to = NULL, "
-                      "updated_at = now() WHERE id = " + std::to_string(job_id);
-    db_.execute(sql);
+    db_.executeParams("UPDATE jobs SET status = 'pending', assigned_to = NULL, "
+                      "updated_at = now() WHERE id = $1",
+                      {std::to_string(job_id)});
 }
 
 void JobQueue::updateOutput(int64_t job_id, const std::string& chunk, bool append) {
-    std::string escaped;
-    for (char c : chunk) {
-        if (c == '\'') escaped += "''";
-        else escaped += c;
-    }
-
-    std::string sql;
     if (append) {
-        sql = "UPDATE jobs SET output = output || '" + escaped +
-              "', updated_at = now() WHERE id = " + std::to_string(job_id);
+        db_.executeParams("UPDATE jobs SET output = output || $1, "
+                          "updated_at = now() WHERE id = $2",
+                          {chunk, std::to_string(job_id)});
     } else {
-        sql = "UPDATE jobs SET output = '" + escaped +
-              "', updated_at = now() WHERE id = " + std::to_string(job_id);
+        db_.executeParams("UPDATE jobs SET output = $1, "
+                          "updated_at = now() WHERE id = $2",
+                          {chunk, std::to_string(job_id)});
     }
-    db_.execute(sql);
 }
 
 void JobQueue::complete(int64_t job_id, const std::string& final_output) {
-    std::string escaped;
-    for (char c : final_output) {
-        if (c == '\'') escaped += "''";
-        else escaped += c;
-    }
-
-    std::string sql = "UPDATE jobs SET status = 'completed', output = '" + escaped +
-                      "', updated_at = now() WHERE id = " + std::to_string(job_id);
-    db_.execute(sql);
+    db_.executeParams("UPDATE jobs SET status = 'completed', output = $1, "
+                      "updated_at = now() WHERE id = $2",
+                      {final_output, std::to_string(job_id)});
 }
 
 void JobQueue::fail(int64_t job_id, const std::string& error) {
-    std::string escaped;
-    for (char c : error) {
-        if (c == '\'') escaped += "''";
-        else escaped += c;
-    }
-
-    std::string sql = "UPDATE jobs SET status = 'failed', output = '" + escaped +
-                      "', updated_at = now() WHERE id = " + std::to_string(job_id);
-    db_.execute(sql);
+    db_.executeParams("UPDATE jobs SET status = 'failed', output = $1, "
+                      "updated_at = now() WHERE id = $2",
+                      {error, std::to_string(job_id)});
 }
 
 } // namespace area

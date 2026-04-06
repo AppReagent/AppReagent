@@ -11,15 +11,6 @@ namespace area {
 
 ScanLog::ScanLog(Database& db) : db_(db) {}
 
-std::string ScanLog::escape(const std::string& s) {
-    std::string out;
-    for (char c : s) {
-        if (c == '\'') out += "''";
-        else out += c;
-    }
-    return out;
-}
-
 std::string ScanLog::sha256(const std::string& data) {
     unsigned char hash[SHA256_DIGEST_LENGTH];
     SHA256(reinterpret_cast<const unsigned char*>(data.c_str()), data.size(), hash);
@@ -77,16 +68,16 @@ std::string ScanLog::loadDDL() {
 }
 
 bool ScanLog::fileCompleted(const std::string& run_id, const std::string& file_hash) {
-    auto result = db_.execute(
-        "SELECT 1 FROM scan_results WHERE run_id = '" + escape(run_id) +
-        "' AND file_hash = '" + escape(file_hash) + "' LIMIT 1");
+    auto result = db_.executeParams(
+        "SELECT 1 FROM scan_results WHERE run_id = $1 AND file_hash = $2 LIMIT 1",
+        {run_id, file_hash});
     return result.ok() && !result.rows.empty();
 }
 
 std::string ScanLog::findCachedPrompt(const std::string& run_id, const std::string& prompt_hash) {
-    auto result = db_.execute(
-        "SELECT response FROM llm_calls WHERE run_id = '" + escape(run_id) +
-        "' AND prompt_hash = '" + escape(prompt_hash) + "' LIMIT 1");
+    auto result = db_.executeParams(
+        "SELECT response FROM llm_calls WHERE run_id = $1 AND prompt_hash = $2 LIMIT 1",
+        {run_id, prompt_hash});
     if (result.ok() && !result.rows.empty() && !result.rows[0].empty()
         && result.rows[0][0] != "NULL") {
         return result.rows[0][0];
@@ -103,12 +94,12 @@ void ScanLog::logLLMCall(const std::string& run_id,
                          const std::string& prompt_hash,
                          const std::string& response,
                          double latency_ms) {
-    std::string sql = "INSERT INTO llm_calls (run_id, file_path, file_hash, node_name, tier, prompt, prompt_hash, response, latency_ms) VALUES ('" +
-        escape(run_id) + "', '" + escape(file_path) + "', '" + escape(file_hash) +
-        "', '" + escape(node_name) + "', " + std::to_string(tier) + ", '" +
-        escape(prompt) + "', '" + escape(prompt_hash) + "', '" +
-        escape(response) + "', " + std::to_string(latency_ms) + ")";
-    db_.execute(sql);
+    db_.executeParams(
+        "INSERT INTO llm_calls (run_id, file_path, file_hash, node_name, tier, "
+        "prompt, prompt_hash, response, latency_ms) "
+        "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        {run_id, file_path, file_hash, node_name, std::to_string(tier),
+         prompt, prompt_hash, response, std::to_string(latency_ms)});
 }
 
 void ScanLog::logScanResult(const std::string& run_id,
@@ -117,11 +108,11 @@ void ScanLog::logScanResult(const std::string& run_id,
                             const std::string& risk_profile_json,
                             const std::string& recommendation,
                             int risk_score) {
-    std::string sql = "INSERT INTO scan_results (run_id, file_path, file_hash, risk_profile, recommendation, risk_score) VALUES ('" +
-        escape(run_id) + "', '" + escape(file_path) + "', '" + escape(file_hash) +
-        "', '" + escape(risk_profile_json) + "', '" + escape(recommendation) +
-        "', " + std::to_string(risk_score) + ")";
-    db_.execute(sql);
+    db_.executeParams(
+        "INSERT INTO scan_results (run_id, file_path, file_hash, risk_profile, "
+        "recommendation, risk_score) VALUES ($1, $2, $3, $4, $5, $6)",
+        {run_id, file_path, file_hash, risk_profile_json, recommendation,
+         std::to_string(risk_score)});
 }
 
 void ScanLog::logMethodCall(const std::string& run_id,
@@ -132,14 +123,12 @@ void ScanLog::logMethodCall(const std::string& run_id,
                             const std::string& callee_class,
                             const std::string& callee_method,
                             const std::string& invoke_type) {
-    std::string sql = "INSERT INTO method_calls "
-        "(run_id, file_path, file_hash, caller_class, caller_method, "
-        "callee_class, callee_method, invoke_type) VALUES ('" +
-        escape(run_id) + "', '" + escape(file_path) + "', '" + escape(file_hash) +
-        "', '" + escape(caller_class) + "', '" + escape(caller_method) +
-        "', '" + escape(callee_class) + "', '" + escape(callee_method) +
-        "', '" + escape(invoke_type) + "')";
-    db_.execute(sql);
+    db_.executeParams(
+        "INSERT INTO method_calls (run_id, file_path, file_hash, caller_class, "
+        "caller_method, callee_class, callee_method, invoke_type) "
+        "VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+        {run_id, file_path, file_hash, caller_class, caller_method,
+         callee_class, callee_method, invoke_type});
 }
 
 void ScanLog::logMethodFinding(const std::string& run_id,
@@ -153,23 +142,20 @@ void ScanLog::logMethodFinding(const std::string& run_id,
                                bool relevant,
                                double confidence,
                                const std::string& threat_category) {
-    std::string sql = "INSERT INTO method_findings "
-        "(run_id, file_path, file_hash, class_name, method_name, "
-        "api_calls, findings, reasoning, relevant, confidence, threat_category) VALUES ('" +
-        escape(run_id) + "', '" + escape(file_path) + "', '" + escape(file_hash) +
-        "', '" + escape(class_name) + "', '" + escape(method_name) +
-        "', '" + escape(api_calls) + "', '" + escape(findings) +
-        "', '" + escape(reasoning) + "', " + (relevant ? "true" : "false") +
-        ", " + std::to_string(confidence) +
-        ", '" + escape(threat_category) + "')";
-    db_.execute(sql);
+    db_.executeParams(
+        "INSERT INTO method_findings (run_id, file_path, file_hash, class_name, "
+        "method_name, api_calls, findings, reasoning, relevant, confidence, "
+        "threat_category) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+        {run_id, file_path, file_hash, class_name, method_name,
+         api_calls, findings, reasoning, std::string(relevant ? "true" : "false"),
+         std::to_string(confidence), threat_category});
 }
 
 void ScanLog::deleteRun(const std::string& run_id) {
-    db_.execute("DELETE FROM scan_results WHERE run_id = '" + escape(run_id) + "'");
-    db_.execute("DELETE FROM llm_calls WHERE run_id = '" + escape(run_id) + "'");
-    db_.execute("DELETE FROM method_calls WHERE run_id = '" + escape(run_id) + "'");
-    db_.execute("DELETE FROM method_findings WHERE run_id = '" + escape(run_id) + "'");
+    db_.executeParams("DELETE FROM scan_results WHERE run_id = $1", {run_id});
+    db_.executeParams("DELETE FROM llm_calls WHERE run_id = $1", {run_id});
+    db_.executeParams("DELETE FROM method_calls WHERE run_id = $1", {run_id});
+    db_.executeParams("DELETE FROM method_findings WHERE run_id = $1", {run_id});
 }
 
 } // namespace area

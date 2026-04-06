@@ -62,7 +62,6 @@ public:
     static std::string sha256(const std::string& data);
     static std::string generateRunId();
     static std::string loadDDL();
-    static std::string escape(const std::string& s);
 
 private:
     Database& db_;

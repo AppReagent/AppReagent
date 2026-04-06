@@ -27,6 +27,7 @@ public:
     bool isConnected() const { return conn_ != nullptr; }
     std::string getSchema();
     QueryResult execute(const std::string& sql);
+    QueryResult executeParams(const std::string& sql, const std::vector<std::string>& params);
 
 private:
     PGconn* conn_ = nullptr;

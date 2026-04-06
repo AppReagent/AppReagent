@@ -1,7 +1,6 @@
 #include "tools/FindBehaviorTool.h"
 #include "tools/ToolContext.h"
 #include "Agent.h"
-#include "ScanLog.h"
 
 #include <algorithm>
 #include <sstream>
@@ -94,48 +93,45 @@ std::optional<ToolResult> FindBehaviorTool::tryExecute(const std::string& action
         keywords.push_back(query);
     }
 
-    // Build WHERE clause: match any keyword against api_calls, findings, or reasoning
-    std::ostringstream whereClauses;
-    for (size_t i = 0; i < keywords.size(); i++) {
-        if (i > 0) whereClauses << " OR ";
-        std::string kw = ScanLog::escape(keywords[i]);
-        // Also escape LIKE wildcards
-        std::string likeKw;
-        for (char c : kw) {
-            if (c == '%') likeKw += "%%";
-            else if (c == '_') likeKw += "\\_";
-            else likeKw += c;
-        }
-        whereClauses << "lower(api_calls) LIKE '%" << likeKw << "%'"
-                     << " OR lower(findings) LIKE '%" << likeKw << "%'"
-                     << " OR lower(reasoning) LIKE '%" << likeKw << "%'"
-                     << " OR lower(threat_category) LIKE '%" << likeKw << "%'";
-    }
+    // Build WHERE clause with parameterized LIKE patterns
+    std::vector<std::string> params;
+    params.push_back(runId);  // $1
 
-    // Count how many keywords match for ranking
+    std::ostringstream whereClauses;
     std::ostringstream rankExpr;
     rankExpr << "0";
-    for (auto& kw : keywords) {
+
+    for (size_t i = 0; i < keywords.size(); i++) {
+        if (i > 0) whereClauses << " OR ";
+        // Escape LIKE metacharacters in keyword
         std::string likeKw;
-        for (char c : ScanLog::escape(kw)) {
+        for (char c : keywords[i]) {
             if (c == '%') likeKw += "%%";
             else if (c == '_') likeKw += "\\_";
             else likeKw += c;
         }
+        params.push_back("%" + likeKw + "%");
+        std::string p = "$" + std::to_string(params.size());
+
+        whereClauses << "lower(api_calls) LIKE " << p
+                     << " OR lower(findings) LIKE " << p
+                     << " OR lower(reasoning) LIKE " << p
+                     << " OR lower(threat_category) LIKE " << p;
+
         rankExpr << " + CASE WHEN lower(api_calls || ' ' || findings || ' ' || reasoning) "
-                 << "LIKE '%" << likeKw << "%' THEN 1 ELSE 0 END";
+                 << "LIKE " << p << " THEN 1 ELSE 0 END";
     }
 
     std::string sql =
         "SELECT file_path, class_name, method_name, api_calls, findings, "
         "reasoning, relevant, confidence, threat_category, (" + rankExpr.str() + ") AS match_rank "
         "FROM method_findings "
-        "WHERE run_id = '" + ScanLog::escape(runId) + "' "
+        "WHERE run_id = $1 "
         "AND (" + whereClauses.str() + ") "
         "ORDER BY (" + rankExpr.str() + ") DESC, relevant DESC, confidence DESC "
         "LIMIT 25";
 
-    auto qr = db_.execute(sql);
+    auto qr = db_.executeParams(sql, params);
 
     if (!qr.ok()) {
         // Table might not exist yet if no scans have been run since the update
@@ -150,24 +146,29 @@ std::optional<ToolResult> FindBehaviorTool::tryExecute(const std::string& action
 
     if (qr.rows.empty()) {
         // Try a broader search on scan_results risk_profile
+        std::vector<std::string> profileParams;
+        profileParams.push_back(runId);  // $1
+
         std::ostringstream profileWhere;
         for (size_t i = 0; i < keywords.size(); i++) {
             if (i > 0) profileWhere << " OR ";
             std::string likeKw;
-            for (char c : ScanLog::escape(keywords[i])) {
+            for (char c : keywords[i]) {
                 if (c == '%') likeKw += "%%";
                 else if (c == '_') likeKw += "\\_";
                 else likeKw += c;
             }
-            profileWhere << "lower(risk_profile::text) LIKE '%" << likeKw << "%'";
+            profileParams.push_back("%" + likeKw + "%");
+            profileWhere << "lower(risk_profile::text) LIKE $" << profileParams.size();
         }
 
-        auto profileQr = db_.execute(
+        auto profileQr = db_.executeParams(
             "SELECT file_path, risk_profile->>'answer' AS answer, "
             "risk_profile->>'overall_relevance' AS relevance, risk_score "
-            "FROM scan_results WHERE run_id = '" + ScanLog::escape(runId) + "' "
+            "FROM scan_results WHERE run_id = $1 "
             "AND (" + profileWhere.str() + ") "
-            "ORDER BY risk_score DESC LIMIT 10");
+            "ORDER BY risk_score DESC LIMIT 10",
+            profileParams);
 
         if (profileQr.ok() && !profileQr.rows.empty()) {
             std::ostringstream out;

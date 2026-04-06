@@ -47,9 +47,10 @@ std::string AnalyzeCommand::resolveRunId(const std::string& run_id) {
 
 std::string AnalyzeCommand::loadScanGoal(const std::string& run_id) {
     // Try to extract goal from llm_calls metadata (the triage prompts contain the goal)
-    auto result = db_.execute(
-        "SELECT prompt FROM llm_calls WHERE run_id = '" + run_id +
-        "' AND node_name = 'scan_synthesis' LIMIT 1");
+    auto result = db_.executeParams(
+        "SELECT prompt FROM llm_calls WHERE run_id = $1 "
+        "AND node_name = 'scan_synthesis' LIMIT 1",
+        {run_id});
     if (result.ok() && !result.rows.empty() && !result.rows[0].empty()) {
         // Extract goal from the synthesis prompt — it starts with "Scan goal: ..."
         auto& prompt = result.rows[0][0];
@@ -75,8 +76,9 @@ AnalysisResult AnalyzeCommand::run(const std::string& run_id) {
     result.run_id = resolvedId;
 
     // Check that scan results exist
-    auto check = db_.execute(
-        "SELECT COUNT(*) FROM scan_results WHERE run_id = '" + resolvedId + "' AND risk_score > 0");
+    auto check = db_.executeParams(
+        "SELECT COUNT(*) FROM scan_results WHERE run_id = $1 AND risk_score > 0",
+        {resolvedId});
     if (!check.ok() || check.rows.empty() || check.rows[0].empty() || check.rows[0][0] == "0") {
         emitLog("No relevant findings in run " + resolvedId + " (nothing to analyze)");
         return result;
@@ -116,11 +118,11 @@ AnalysisResult AnalyzeCommand::run(const std::string& run_id) {
             auto response = ctx.get("llm_response").get<std::string>();
             auto promptHash = ScanLog::sha256(prompt);
             // Log analyze LLM calls to the same llm_calls table
-            db_.execute(
-                "INSERT INTO llm_calls (run_id, file_path, file_hash, node_name, tier, prompt, prompt_hash, response, latency_ms) VALUES ('" +
-                resolvedId + "', '', '', 'analyze:" + nodeName + "', 0, '" +
-                ScanLog::escape(prompt) + "', '" + promptHash + "', '" +
-                ScanLog::escape(response) + "', 0)");
+            db_.executeParams(
+                "INSERT INTO llm_calls (run_id, file_path, file_hash, node_name, "
+                "tier, prompt, prompt_hash, response, latency_ms) "
+                "VALUES ($1, '', '', $2, 0, $3, $4, $5, 0)",
+                {resolvedId, "analyze:" + nodeName, prompt, promptHash, response});
         }
     });
 

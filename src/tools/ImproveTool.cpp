@@ -23,16 +23,6 @@ namespace fs = std::filesystem;
 
 namespace area {
 
-// Escape a string for use in SQL single-quoted literals (prevent SQL injection).
-static std::string escapeSql(const std::string& s) {
-    std::string out;
-    for (char c : s) {
-        if (c == '\'') out += "''";
-        else out += c;
-    }
-    return out;
-}
-
 // Escape a string for safe inclusion in a single-quoted shell argument.
 static std::string escapeShell(const std::string& s) {
     std::string out;
@@ -328,9 +318,10 @@ ImproveTool::EvalResult ImproveTool::evaluate() {
     auto summary = scan.run(corpusDir_, runId);
 
     // Query results
-    std::string sql = "SELECT file_path, risk_score, risk_profile::text "
-                      "FROM scan_results WHERE run_id = '" + escapeSql(runId) + "'";
-    auto qr = db_.execute(sql);
+    auto qr = db_.executeParams(
+        "SELECT file_path, risk_score, risk_profile::text "
+        "FROM scan_results WHERE run_id = $1",
+        {runId});
 
     if (!qr.ok() || qr.rows.empty()) {
         result.failReason = "NO_RESULTS";
@@ -339,7 +330,7 @@ ImproveTool::EvalResult ImproveTool::evaluate() {
     }
 
     // Count LLM calls
-    auto countQr = db_.execute("SELECT COUNT(*) FROM llm_calls WHERE run_id = '" + escapeSql(runId) + "'");
+    auto countQr = db_.executeParams("SELECT COUNT(*) FROM llm_calls WHERE run_id = $1", {runId});
     if (countQr.ok() && !countQr.rows.empty() && !countQr.rows[0].empty())
         result.llmCalls = std::stoi(countQr.rows[0][0]);
 

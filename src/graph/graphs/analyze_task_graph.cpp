@@ -23,13 +23,14 @@ TaskGraph buildAnalyzeTaskGraph(const TierBackends& backends,
         std::string runId = ctx.get("run_id").get<std::string>();
 
         // Query scan_results + llm_calls for deep_analysis responses
-        auto sr = db.execute(
+        auto sr = db.executeParams(
             "SELECT sr.file_path, sr.file_hash, sr.risk_profile, sr.risk_score, "
             "sr.recommendation "
             "FROM scan_results sr "
-            "WHERE sr.run_id = '" + runId + "' "
+            "WHERE sr.run_id = $1 "
             "AND sr.risk_score > 0 "
-            "ORDER BY sr.risk_score DESC");
+            "ORDER BY sr.risk_score DESC",
+            {runId});
 
         if (!sr.ok() || sr.rows.empty()) {
             ctx.discarded = true;

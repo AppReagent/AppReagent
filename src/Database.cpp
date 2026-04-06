@@ -139,4 +139,69 @@ QueryResult Database::execute(const std::string& sql) {
     return result;
 }
 
+QueryResult Database::executeParams(const std::string& sql, const std::vector<std::string>& params) {
+    std::lock_guard lk(mu_);
+    QueryResult result;
+
+    if (!conn_) {
+        result.error = "database not connected";
+        return result;
+    }
+
+    std::vector<const char*> values;
+    values.reserve(params.size());
+    for (auto& p : params) {
+        values.push_back(p.c_str());
+    }
+
+    auto start = std::chrono::high_resolution_clock::now();
+    PGresult* res = PQexecParams(conn_, sql.c_str(),
+                                  static_cast<int>(params.size()),
+                                  nullptr,      // let PG infer param types
+                                  values.data(),
+                                  nullptr,      // text format, null-terminated
+                                  nullptr,      // all text format
+                                  0);           // text result format
+    auto end = std::chrono::high_resolution_clock::now();
+
+    result.duration_ms = std::chrono::duration<double, std::milli>(end - start).count();
+
+    ExecStatusType status = PQresultStatus(res);
+    if (status != PGRES_TUPLES_OK && status != PGRES_COMMAND_OK) {
+        result.error = PQerrorMessage(conn_);
+        PQclear(res);
+        return result;
+    }
+
+    if (status == PGRES_COMMAND_OK) {
+        std::string affected = PQcmdTuples(res);
+        result.columns = {"affected_rows"};
+        result.rows = {{affected}};
+        PQclear(res);
+        return result;
+    }
+
+    int ncols = PQnfields(res);
+    int nrows = PQntuples(res);
+
+    for (int c = 0; c < ncols; c++) {
+        result.columns.push_back(PQfname(res, c));
+    }
+
+    for (int r = 0; r < nrows; r++) {
+        std::vector<std::string> row;
+        for (int c = 0; c < ncols; c++) {
+            if (PQgetisnull(res, r, c)) {
+                row.push_back("NULL");
+            } else {
+                row.push_back(PQgetvalue(res, r, c));
+            }
+        }
+        result.rows.push_back(std::move(row));
+    }
+
+    PQclear(res);
+    return result;
+}
+
 } // namespace area

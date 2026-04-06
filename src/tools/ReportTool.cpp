@@ -12,15 +12,6 @@ namespace fs = std::filesystem;
 
 namespace area {
 
-static std::string escape(const std::string& s) {
-    std::string out;
-    for (char c : s) {
-        if (c == '\'') out += "''";
-        else out += c;
-    }
-    return out;
-}
-
 static std::string resolveRunId(Database& db, const std::string& input) {
     if (input.empty() || input == "latest") {
         auto qr = db.execute(
@@ -81,13 +72,14 @@ std::optional<ToolResult> ReportTool::tryExecute(const std::string& action, Tool
 
     // Executive Summary — scan_results
     {
-        auto qr = db_.execute(
+        auto qr = db_.executeParams(
             "SELECT file_path, risk_score, "
             "risk_profile->>'overall_relevance' AS relevance, "
             "risk_profile->>'answer' AS answer, "
             "risk_profile->>'recommendation' AS recommendation "
-            "FROM scan_results WHERE run_id = '" + escape(runId) + "' "
-            "ORDER BY risk_score DESC");
+            "FROM scan_results WHERE run_id = $1 "
+            "ORDER BY risk_score DESC",
+            {runId});
 
         if (qr.ok() && !qr.rows.empty()) {
             // Compute aggregate stats
@@ -143,12 +135,13 @@ std::optional<ToolResult> ReportTool::tryExecute(const std::string& action, Tool
 
     // Method-level findings
     {
-        auto qr = db_.execute(
+        auto qr = db_.executeParams(
             "SELECT class_name, method_name, file_path, api_calls, findings, reasoning, "
             "relevant, confidence "
-            "FROM method_findings WHERE run_id = '" + escape(runId) + "' "
+            "FROM method_findings WHERE run_id = $1 "
             "AND relevant = true "
-            "ORDER BY confidence DESC LIMIT 50");
+            "ORDER BY confidence DESC LIMIT 50",
+            {runId});
 
         if (qr.ok() && !qr.rows.empty()) {
             report << "## Relevant Methods (" << qr.rows.size() << ")\n\n"
@@ -179,15 +172,16 @@ std::optional<ToolResult> ReportTool::tryExecute(const std::string& action, Tool
 
     // Call graph edges for relevant methods
     {
-        auto qr = db_.execute(
+        auto qr = db_.executeParams(
             "SELECT DISTINCT mc.caller_class, mc.caller_method, "
             "mc.callee_class, mc.callee_method, mc.invoke_type "
             "FROM method_calls mc "
             "INNER JOIN method_findings mf ON mc.run_id = mf.run_id "
             "  AND (mc.caller_class = mf.class_name OR mc.callee_class = mf.class_name) "
-            "WHERE mc.run_id = '" + escape(runId) + "' "
+            "WHERE mc.run_id = $1 "
             "AND mf.relevant = true "
-            "ORDER BY mc.caller_class LIMIT 50");
+            "ORDER BY mc.caller_class LIMIT 50",
+            {runId});
 
         if (qr.ok() && !qr.rows.empty()) {
             report << "## Call Graph (relevant methods)\n\n"
@@ -203,12 +197,13 @@ std::optional<ToolResult> ReportTool::tryExecute(const std::string& action, Tool
 
     // LLM call stats
     {
-        auto qr = db_.execute(
+        auto qr = db_.executeParams(
             "SELECT node_name, tier, COUNT(*), "
             "ROUND(AVG(latency_ms)::numeric, 0), "
             "ROUND(SUM(latency_ms)::numeric / 1000, 1) "
-            "FROM llm_calls WHERE run_id = '" + escape(runId) + "' "
-            "GROUP BY node_name, tier ORDER BY tier, node_name");
+            "FROM llm_calls WHERE run_id = $1 "
+            "GROUP BY node_name, tier ORDER BY tier, node_name",
+            {runId});
 
         if (qr.ok() && !qr.rows.empty()) {
             report << "## Analysis Statistics\n\n"

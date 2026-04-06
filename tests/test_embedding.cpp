@@ -4,54 +4,12 @@
 
 using namespace area;
 
-// --- EmbeddingStore helper tests (static methods accessed via subclass) ---
-
-class TestableEmbeddingStore : public EmbeddingStore {
-public:
-    using EmbeddingStore::EmbeddingStore;
-
-    // Expose private helpers for testing
-    static std::string testEscape(const std::string& s) { return escape(s); }
-    static std::string testVectorToSql(const std::vector<float>& v) { return vectorToSql(v); }
-};
+// --- EmbeddingStore without backend ---
 
 class EmbeddingHelperTest : public ::testing::Test {
 protected:
-    // Minimal Database stub — not connected, just for construction
     Database db_;
 };
-
-TEST_F(EmbeddingHelperTest, EscapeSingleQuotes) {
-    EXPECT_EQ(TestableEmbeddingStore::testEscape("hello"), "hello");
-    EXPECT_EQ(TestableEmbeddingStore::testEscape("it's"), "it''s");
-    EXPECT_EQ(TestableEmbeddingStore::testEscape("a'b'c"), "a''b''c");
-    EXPECT_EQ(TestableEmbeddingStore::testEscape(""), "");
-}
-
-TEST_F(EmbeddingHelperTest, VectorToSqlEmpty) {
-    std::vector<float> v;
-    std::string sql = TestableEmbeddingStore::testVectorToSql(v);
-    EXPECT_EQ(sql, "'[]'");
-}
-
-TEST_F(EmbeddingHelperTest, VectorToSqlSingleElement) {
-    std::vector<float> v = {1.5f};
-    std::string sql = TestableEmbeddingStore::testVectorToSql(v);
-    EXPECT_EQ(sql, "'[1.5]'");
-}
-
-TEST_F(EmbeddingHelperTest, VectorToSqlMultipleElements) {
-    std::vector<float> v = {0.1f, 0.2f, 0.3f};
-    std::string sql = TestableEmbeddingStore::testVectorToSql(v);
-    EXPECT_TRUE(sql.front() == '\'');
-    EXPECT_TRUE(sql.back() == '\'');
-    // Should contain comma-separated values inside brackets
-    EXPECT_NE(sql.find('['), std::string::npos);
-    EXPECT_NE(sql.find(']'), std::string::npos);
-    EXPECT_NE(sql.find(','), std::string::npos);
-}
-
-// --- EmbeddingStore without backend ---
 
 TEST_F(EmbeddingHelperTest, StoreWithoutBackendReturnsEmpty) {
     EmbeddingStore store(db_);

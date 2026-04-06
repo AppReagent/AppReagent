@@ -91,10 +91,6 @@ public:
     // Delete all embeddings for a run_id.
     void deleteRun(const std::string& run_id);
 
-protected:
-    static std::string escape(const std::string& s);
-    static std::string vectorToSql(const std::vector<float>& v);
-
 private:
     Database& db_;
     EmbeddingBackend* backend_;

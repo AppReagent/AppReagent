@@ -141,23 +141,14 @@ std::vector<float> OpenAIEmbeddingBackend::embed(const std::string& text) {
 EmbeddingStore::EmbeddingStore(Database& db, EmbeddingBackend* backend)
     : db_(db), backend_(backend) {}
 
-std::string EmbeddingStore::escape(const std::string& s) {
-    std::string out;
-    for (char c : s) {
-        if (c == '\'') out += "''";
-        else out += c;
-    }
-    return out;
-}
-
-std::string EmbeddingStore::vectorToSql(const std::vector<float>& v) {
+static std::string vectorToParam(const std::vector<float>& v) {
     std::ostringstream ss;
-    ss << "'[";
+    ss << "[";
     for (size_t i = 0; i < v.size(); i++) {
         if (i > 0) ss << ',';
         ss << v[i];
     }
-    ss << "]'";
+    ss << "]";
     return ss.str();
 }
 
@@ -168,13 +159,12 @@ void EmbeddingStore::store(const std::string& run_id,
                            const std::string& method_name,
                            const std::string& content,
                            const std::vector<float>& embedding) {
-    std::string sql = "INSERT INTO method_embeddings "
+    auto result = db_.executeParams(
+        "INSERT INTO method_embeddings "
         "(run_id, file_path, file_hash, class_name, method_name, content, embedding) "
-        "VALUES ('" +
-        escape(run_id) + "', '" + escape(file_path) + "', '" + escape(file_hash) +
-        "', '" + escape(class_name) + "', '" + escape(method_name) +
-        "', '" + escape(content) + "', " + vectorToSql(embedding) + ")";
-    auto result = db_.execute(sql);
+        "VALUES ($1, $2, $3, $4, $5, $6, $7::vector)",
+        {run_id, file_path, file_hash, class_name, method_name, content,
+         vectorToParam(embedding)});
     if (!result.ok()) {
         std::cerr << "[embedding] store failed: " << result.error << std::endl;
     }
@@ -184,20 +174,25 @@ std::vector<EmbeddingStore::SearchResult>
 EmbeddingStore::search(const std::vector<float>& query_embedding,
                        int top_k,
                        const std::string& exclude_run_id) {
-    std::string vecSql = vectorToSql(query_embedding);
-    std::string where;
-    if (!exclude_run_id.empty()) {
-        where = " WHERE run_id != '" + escape(exclude_run_id) + "'";
-    }
+    std::vector<std::string> params;
+    params.push_back(vectorToParam(query_embedding));  // $1
 
     std::string sql =
         "SELECT run_id, file_path, class_name, method_name, content, "
-        "1 - (embedding <=> " + vecSql + "::vector) AS similarity "
-        "FROM method_embeddings" + where +
-        " ORDER BY embedding <=> " + vecSql + "::vector"
-        " LIMIT " + std::to_string(top_k);
+        "1 - (embedding <=> $1::vector) AS similarity "
+        "FROM method_embeddings";
 
-    auto result = db_.execute(sql);
+    if (!exclude_run_id.empty()) {
+        params.push_back(exclude_run_id);
+        sql += " WHERE run_id != $" + std::to_string(params.size());
+    }
+
+    sql += " ORDER BY embedding <=> $1::vector";
+
+    params.push_back(std::to_string(top_k));
+    sql += " LIMIT $" + std::to_string(params.size());
+
+    auto result = db_.executeParams(sql, params);
     std::vector<SearchResult> results;
     if (!result.ok()) {
         std::cerr << "[embedding] search failed: " << result.error << std::endl;
@@ -243,7 +238,7 @@ void EmbeddingStore::embedAndStore(const std::string& run_id,
 }
 
 void EmbeddingStore::deleteRun(const std::string& run_id) {
-    db_.execute("DELETE FROM method_embeddings WHERE run_id = '" + escape(run_id) + "'");
+    db_.executeParams("DELETE FROM method_embeddings WHERE run_id = $1", {run_id});
 }
 
 } // namespace area

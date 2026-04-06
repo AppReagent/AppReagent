@@ -6,15 +6,6 @@
 
 namespace area {
 
-static std::string escape(const std::string& s) {
-    std::string out;
-    for (char c : s) {
-        if (c == '\'') out += "''";
-        else out += c;
-    }
-    return out;
-}
-
 static std::string resolveRunId(Database& db, const std::string& input) {
     if (input == "latest") {
         auto qr = db.execute(
@@ -61,25 +52,34 @@ std::optional<ToolResult> CallGraphTool::tryExecute(const std::string& action, T
     ctx.cb({AgentMessage::THINKING, "Querying call graph (" + direction + ") for " + target});
 
     std::string sql;
+    std::vector<std::string> params;
+    params.push_back(runId);  // $1
+
     if (direction == "callers") {
         // Who calls this method?
         sql = "SELECT caller_class, caller_method, invoke_type, file_path "
-              "FROM method_calls WHERE run_id = '" + escape(runId) + "'";
-        if (!targetClass.empty())
-            sql += " AND callee_class = '" + escape(targetClass) + "'";
-        sql += " AND callee_method = '" + escape(targetMethod) + "'"
-               " ORDER BY caller_class, caller_method";
+              "FROM method_calls WHERE run_id = $1";
+        if (!targetClass.empty()) {
+            params.push_back(targetClass);
+            sql += " AND callee_class = $" + std::to_string(params.size());
+        }
+        params.push_back(targetMethod);
+        sql += " AND callee_method = $" + std::to_string(params.size());
+        sql += " ORDER BY caller_class, caller_method";
     } else {
         // What does this method call?
         sql = "SELECT callee_class, callee_method, invoke_type, file_path "
-              "FROM method_calls WHERE run_id = '" + escape(runId) + "'";
-        if (!targetClass.empty())
-            sql += " AND caller_class = '" + escape(targetClass) + "'";
-        sql += " AND caller_method = '" + escape(targetMethod) + "'"
-               " ORDER BY callee_class, callee_method";
+              "FROM method_calls WHERE run_id = $1";
+        if (!targetClass.empty()) {
+            params.push_back(targetClass);
+            sql += " AND caller_class = $" + std::to_string(params.size());
+        }
+        params.push_back(targetMethod);
+        sql += " AND caller_method = $" + std::to_string(params.size());
+        sql += " ORDER BY callee_class, callee_method";
     }
 
-    auto qr = db_.execute(sql);
+    auto qr = db_.executeParams(sql, params);
     if (!qr.ok()) {
         return ToolResult{"OBSERVATION: Query failed: " + qr.error};
     }

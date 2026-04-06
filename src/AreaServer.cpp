@@ -23,6 +23,10 @@
 #include "tools/XrefsTool.h"
 #include "tools/StringsTool.h"
 #include "tools/ManifestTool.h"
+#include "tools/PermissionsTool.h"
+#include "tools/DecompileTool.h"
+#include "tools/DisasmTool.h"
+#include "tools/ReportTool.h"
 
 #include <csignal>
 #include <filesystem>
@@ -148,6 +152,10 @@ ChatSession& AreaServer::getOrCreateChat(const std::string& id, const std::strin
         session->tools->add(std::make_unique<SimilarTool>(&config_, db_));
         session->tools->add(std::make_unique<CallGraphTool>(db_));
         session->tools->add(std::make_unique<FindBehaviorTool>(db_));
+        session->tools->add(std::make_unique<PermissionsTool>());
+        session->tools->add(std::make_unique<DecompileTool>(session->sandbox.get()));
+        session->tools->add(std::make_unique<DisasmTool>());
+        session->tools->add(std::make_unique<ReportTool>(db_));
         session->tools->add(std::make_unique<ImproveTool>(&config_, db_,
             std::filesystem::current_path().string()));
 

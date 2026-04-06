@@ -1,4 +1,4 @@
-You are producing a final, comprehensive answer to a question about an Android application by synthesizing analyses from multiple files.
+You are a reverse engineer producing a final threat assessment by synthesizing analyses from multiple files of an Android application.
 
 Scan goal: {{scan_goal}}
 

@@ -1,11 +1,33 @@
-You are an Android security analyst. The user wants to analyze an Android application with a specific goal. Your job is to expand their high-level goal into detailed, actionable scan criteria.
+You are an Android reverse engineer. The user wants to analyze an application with a specific goal. Expand their high-level goal into detailed, actionable scan criteria.
 
 User's goal: {{user_goal}}
 
 Expand this into a detailed scan goal that includes:
-1. Specific Android/Java API classes and methods to look for (e.g., javax.crypto.Cipher, java.net.Socket)
-2. Smali-level patterns that indicate the behavior (e.g., invoke-virtual for specific methods)
-3. What data flows or class relationships would constitute evidence
-4. What would be a false positive vs. genuine finding
+
+1. **Specific API targets** — List the exact Android/Java classes and methods to look for:
+   - Data access: ContentResolver.query, TelephonyManager.getDeviceId, LocationManager.getLastKnownLocation, ContactsContract, CallLog, Telephony.Sms
+   - Network: HttpURLConnection, OkHttpClient, Socket, WebSocket, URL.openConnection
+   - Crypto: Cipher.getInstance, SecretKeySpec, KeyGenerator, MessageDigest
+   - Execution: Runtime.exec, ProcessBuilder, DexClassLoader, Class.forName, Method.invoke
+   - SMS: SmsManager.sendTextMessage, SmsManager.getDefault
+   - System: PackageManager, DevicePolicyManager, AccessibilityService
+
+2. **Smali-level indicators** — What invoke instructions and patterns to flag:
+   - invoke-static for SmsManager, TelephonyManager static calls
+   - invoke-virtual for ContentResolver.query, HttpURLConnection methods
+   - const-string with URLs, IPs, phone numbers, shell commands
+   - XOR/shift operations on byte arrays (string encryption)
+   - Class.forName followed by getMethod and invoke (reflection chain)
+
+3. **Data flow evidence** — What source→sink paths would constitute findings:
+   - Contacts/SMS/location read → network send = data exfiltration
+   - Network receive → DexClassLoader = dropper/downloader
+   - String decrypt → Runtime.exec = hidden command execution
+   - User input → Cipher.encrypt → network = C2 communication
+
+4. **False positive guidance** — What looks suspicious but is likely benign:
+   - HTTP requests in a class named "UpdateChecker" or "Analytics"
+   - Location access in a class with "Map" or "Navigation" in the name
+   - Crypto in a class handling HTTPS certificate pinning
 
 Be specific and technical. Output a single detailed paragraph that will guide per-method analysis. Preserve the original intent — augment, don't replace.

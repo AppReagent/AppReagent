@@ -42,6 +42,10 @@
 #include "tools/XrefsTool.h"
 #include "tools/StringsTool.h"
 #include "tools/ManifestTool.h"
+#include "tools/PermissionsTool.h"
+#include "tools/DecompileTool.h"
+#include "tools/DisasmTool.h"
+#include "tools/ReportTool.h"
 #include "tools/ToolContext.h"
 
 namespace fs = std::filesystem;
@@ -106,6 +110,10 @@ static int runTui(area::Config& config, area::Database& db) {
     tools.add(std::make_unique<area::SimilarTool>(&config, db));
     tools.add(std::make_unique<area::CallGraphTool>(db));
     tools.add(std::make_unique<area::FindBehaviorTool>(db));
+    tools.add(std::make_unique<area::PermissionsTool>());
+    tools.add(std::make_unique<area::DecompileTool>(&sandbox));
+    tools.add(std::make_unique<area::DisasmTool>());
+    tools.add(std::make_unique<area::ReportTool>(db));
     tools.add(std::make_unique<area::ImproveTool>(&config, db, fs::current_path().string()));
 
     area::Agent agent(pool.get(), tools);

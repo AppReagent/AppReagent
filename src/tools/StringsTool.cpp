@@ -327,6 +327,28 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
                    lower.find("insert ") != std::string::npos ||
                    lower.find("create table") != std::string::npos) {
             addToCategory("SQL", &s);
+        } else if ([&]() {
+            int digits = 0;
+            for (char c : s.value) if (std::isdigit(c)) digits++;
+            if (digits < 7) return false;
+            for (char c : s.value)
+                if (!std::isdigit(c) && c != '+' && c != '-' && c != '(' && c != ')' && c != ' ')
+                    return false;
+            return true;
+        }()) {
+            addToCategory("Phone Numbers", &s);
+        } else if (lower.find("java.lang.runtime") != std::string::npos ||
+                   lower.find("java.lang.processbuilder") != std::string::npos ||
+                   lower.find("java.lang.class") != std::string::npos ||
+                   lower.find("java.lang.reflect") != std::string::npos ||
+                   lower.find("dalvik.system.dexclassloader") != std::string::npos ||
+                   lower.find("dalvik.system.pathclassloader") != std::string::npos) {
+            addToCategory("Reflection Targets", &s);
+        } else if (lower.find("aes") != std::string::npos || lower.find("rsa") != std::string::npos ||
+                   lower.find("des/") != std::string::npos || lower.find("pkcs") != std::string::npos ||
+                   lower.find("hmac") != std::string::npos || lower.find("sha1") != std::string::npos ||
+                   lower.find("sha256") != std::string::npos || lower.find("md5") != std::string::npos) {
+            addToCategory("Crypto/Encoding", &s);
         } else {
             addToCategory("Other", &s);
         }

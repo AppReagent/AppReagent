@@ -5,6 +5,7 @@
 #include <iostream>
 #include <map>
 #include <poll.h>
+#include <sys/resource.h>
 #include <unistd.h>
 #include <curl/curl.h>
 
@@ -158,6 +159,16 @@ int main(int argc, char* argv[]) {
     // Ignore SIGPIPE so writing to a disconnected socket returns EPIPE
     // instead of killing the process.
     signal(SIGPIPE, SIG_IGN);
+
+    // Raise file descriptor limit to avoid "too many open files" during
+    // concurrent scans (many parallel curl connections + file reads).
+    {
+        struct rlimit rl;
+        if (getrlimit(RLIMIT_NOFILE, &rl) == 0) {
+            rl.rlim_cur = rl.rlim_max;
+            setrlimit(RLIMIT_NOFILE, &rl);
+        }
+    }
 
     curl_global_init(CURL_GLOBAL_DEFAULT);
 

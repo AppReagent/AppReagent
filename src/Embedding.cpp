@@ -8,6 +8,22 @@
 
 namespace area {
 
+// RAII wrapper (same as LLMBackend.cpp)
+struct EmbCurlHandle {
+    CURL* curl = nullptr;
+    struct curl_slist* headers = nullptr;
+
+    EmbCurlHandle() : curl(curl_easy_init()) {
+        if (!curl) throw std::runtime_error("curl init failed");
+    }
+    ~EmbCurlHandle() {
+        if (headers) curl_slist_free_all(headers);
+        if (curl) curl_easy_cleanup(curl);
+    }
+    EmbCurlHandle(const EmbCurlHandle&) = delete;
+    EmbCurlHandle& operator=(const EmbCurlHandle&) = delete;
+};
+
 // --- HTTP helper (same pattern as LLMBackend.cpp) ---
 
 static size_t embCurlWriteCb(char* data, size_t size, size_t nmemb, std::string* out) {
@@ -19,28 +35,24 @@ static size_t embCurlWriteCb(char* data, size_t size, size_t nmemb, std::string*
 static std::string embHttpPost(const std::string& url,
                                const std::string& body,
                                const std::string& api_key = "") {
-    CURL* curl = curl_easy_init();
-    if (!curl) throw std::runtime_error("curl init failed");
+    EmbCurlHandle ch;
 
-    struct curl_slist* headers = nullptr;
-    headers = curl_slist_append(headers, "Content-Type: application/json");
+    ch.headers = curl_slist_append(ch.headers, "Content-Type: application/json");
     if (!api_key.empty()) {
-        headers = curl_slist_append(headers,
+        ch.headers = curl_slist_append(ch.headers,
             ("Authorization: Bearer " + api_key).c_str());
     }
 
     std::string response;
-    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, embCurlWriteCb);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
+    curl_easy_setopt(ch.curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(ch.curl, CURLOPT_HTTPHEADER, ch.headers);
+    curl_easy_setopt(ch.curl, CURLOPT_POSTFIELDS, body.c_str());
+    curl_easy_setopt(ch.curl, CURLOPT_WRITEFUNCTION, embCurlWriteCb);
+    curl_easy_setopt(ch.curl, CURLOPT_WRITEDATA, &response);
+    curl_easy_setopt(ch.curl, CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(ch.curl, CURLOPT_CONNECTTIMEOUT, 5L);
 
-    CURLcode res = curl_easy_perform(curl);
-    curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
+    CURLcode res = curl_easy_perform(ch.curl);
 
     if (res != CURLE_OK) {
         throw std::runtime_error(std::string("embedding HTTP request failed: ") + curl_easy_strerror(res));

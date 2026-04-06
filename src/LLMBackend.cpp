@@ -9,6 +9,21 @@
 
 namespace area {
 
+// RAII wrapper to prevent curl handle/slist leaks on any code path
+struct CurlHandle {
+    CURL* curl = nullptr;
+    struct curl_slist* headers = nullptr;
+
+    CurlHandle() : curl(curl_easy_init()) {
+        if (!curl) throw std::runtime_error("curl init failed");
+    }
+    ~CurlHandle() {
+        if (headers) curl_slist_free_all(headers);
+        if (curl) curl_easy_cleanup(curl);
+    }
+    CurlHandle(const CurlHandle&) = delete;
+    CurlHandle& operator=(const CurlHandle&) = delete;
+};
 
 std::unique_ptr<LLMBackend> LLMBackend::create(const AiEndpoint& ep) {
     if (ep.provider == "ollama")   return std::make_unique<OllamaBackend>(ep);
@@ -35,34 +50,30 @@ static std::string httpPost(const std::string& url,
                             const std::string& api_key = "",
                             long timeoutSec = 60,
                             std::atomic<bool>* cancelFlag = nullptr) {
-    CURL* curl = curl_easy_init();
-    if (!curl) throw std::runtime_error("curl init failed");
+    CurlHandle ch;
 
-    struct curl_slist* headers = nullptr;
-    headers = curl_slist_append(headers, "Content-Type: application/json");
+    ch.headers = curl_slist_append(ch.headers, "Content-Type: application/json");
     if (!api_key.empty()) {
-        headers = curl_slist_append(headers,
+        ch.headers = curl_slist_append(ch.headers,
             ("Authorization: Bearer " + api_key).c_str());
     }
 
     std::string response;
-    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteCb);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeoutSec);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 3L);
+    curl_easy_setopt(ch.curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(ch.curl, CURLOPT_HTTPHEADER, ch.headers);
+    curl_easy_setopt(ch.curl, CURLOPT_POSTFIELDS, body.c_str());
+    curl_easy_setopt(ch.curl, CURLOPT_WRITEFUNCTION, curlWriteCb);
+    curl_easy_setopt(ch.curl, CURLOPT_WRITEDATA, &response);
+    curl_easy_setopt(ch.curl, CURLOPT_TIMEOUT, timeoutSec);
+    curl_easy_setopt(ch.curl, CURLOPT_CONNECTTIMEOUT, 3L);
 
     if (cancelFlag) {
-        curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
-        curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, cancelProgressCb);
-        curl_easy_setopt(curl, CURLOPT_XFERINFODATA, cancelFlag);
+        curl_easy_setopt(ch.curl, CURLOPT_NOPROGRESS, 0L);
+        curl_easy_setopt(ch.curl, CURLOPT_XFERINFOFUNCTION, cancelProgressCb);
+        curl_easy_setopt(ch.curl, CURLOPT_XFERINFODATA, cancelFlag);
     }
 
-    CURLcode res = curl_easy_perform(curl);
-    curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
+    CURLcode res = curl_easy_perform(ch.curl);
 
     if (res == CURLE_ABORTED_BY_CALLBACK) {
         throw std::runtime_error("interrupted");

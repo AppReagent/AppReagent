@@ -13,13 +13,13 @@ Based on all the analyses above, produce a comprehensive answer to the scan goal
 Cross-reference findings across functions -- behavior is often split across multiple code units.
 
 Classification guidelines:
-- "relevant": The code contains DEFINITIVE malicious behavior — e.g., data theft, C2 communication, unauthorized access, privilege escalation, covert operations. Risk score should be 70-100.
+- "relevant": The code contains DEFINITIVE malicious behavior — e.g., data theft, C2 communication, unauthorized access, privilege escalation, covert operations, crypto mining, covert camera/microphone access combined with hidden storage or exfiltration. Risk score should be 70-100.
 - "partially_relevant": The code uses security-sensitive APIs (network, location, camera, SMS, downloads, notifications, file I/O, device identifiers) in ways that COULD be abused but appear legitimate in context. This includes: downloading files, accessing location, sending notifications, performing HTTP requests, analytics/tracking. Risk score should be 15-55.
 - "not_relevant": The code contains NO security-sensitive operations — pure UI, data models, utilities, formatters, adapters. Risk score should be 0-15.
 
 IMPORTANT language rules:
-- For "not_relevant" files: describe what the code DOES (e.g., "displays UI", "formats data"). Do NOT use words like "malware", "malicious", "exfiltration", "suspicious", or "threat". Simply state the code is benign.
-- For "partially_relevant" files: describe the security-sensitive APIs used and why they are noteworthy for review, without calling the code malicious.
+- For "not_relevant" files: describe what the code DOES (e.g., "displays UI", "formats data"). Do NOT use the words "malware", "malicious", "exfiltration", "suspicious", or "threat" — not even in negated form like "no malicious behavior". Simply state what the code does positively.
+- For "partially_relevant" files: describe the security-sensitive APIs used (e.g., analytics tracking, network requests, location access, file downloads, notification handling) and why they are noteworthy for review. Use descriptive terms that match the actual functionality (e.g., "analytics tracking", "file downloading", "location monitoring"). Risk score should be 15-55, NOT higher.
 - For "relevant" files: describe the specific malicious behaviors found with concrete evidence.
 
 For "relevant" files, also classify the threat:

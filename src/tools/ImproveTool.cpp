@@ -23,6 +23,26 @@ namespace fs = std::filesystem;
 
 namespace area {
 
+// Escape a string for use in SQL single-quoted literals (prevent SQL injection).
+static std::string escapeSql(const std::string& s) {
+    std::string out;
+    for (char c : s) {
+        if (c == '\'') out += "''";
+        else out += c;
+    }
+    return out;
+}
+
+// Escape a string for safe inclusion in a single-quoted shell argument.
+static std::string escapeShell(const std::string& s) {
+    std::string out;
+    for (char c : s) {
+        if (c == '\'') out += "'\\''";
+        else out += c;
+    }
+    return out;
+}
+
 ImproveTool::ImproveTool(Config* config, Database& db, const std::string& repoDir)
     : config_(config), db_(db), repoDir_(repoDir) {
     corpusDir_ = repoDir_ + "/autoresearch/corpus";
@@ -124,10 +144,10 @@ int ImproveTool::runAgentDocker(const std::string& prompt, bool headful,
     }
 
     // Build image if needed
-    std::string buildCmd = "sudo docker build -f " + repoDir_ + "/Dockerfile.improve"
-        + " -t " + image
-        + " --build-arg AGENT=" + agent
-        + " -q " + repoDir_;
+    std::string buildCmd = "sudo docker build -f '" + escapeShell(repoDir_) + "/Dockerfile.improve'"
+        + " -t '" + escapeShell(image) + "'"
+        + " --build-arg AGENT='" + escapeShell(agent) + "'"
+        + " -q '" + escapeShell(repoDir_) + "'";
     auto buildResult = exec(buildCmd);
     if (buildResult.exitCode != 0) {
         if (onLine) onLine("Docker build failed: " + buildResult.output);
@@ -137,26 +157,29 @@ int ImproveTool::runAgentDocker(const std::string& prompt, bool headful,
 
     // Launch container
     std::ostringstream runCmd;
+    // Truncate and escape prompt for use as env var
+    std::string taskSnippet = escapeShell(prompt.substr(0, 200));
+
     if (headful) {
         // Detached with TTY — user can docker attach to watch
         runCmd << "sudo docker run -dt --rm"
                << " --network host"
-               << " -v " << repoDir_ << ":/workspace"
-               << " -e AGENT=" << agent
+               << " -v '" << escapeShell(repoDir_) << ":/workspace'"
+               << " -e AGENT='" << escapeShell(agent) << "'"
                << " -e AGENT_MODE=interactive"
-               << " -e TASK=\"" << prompt.substr(0, 200) << "\""  // truncate for env var
+               << " -e TASK='" << taskSnippet << "'"
                << " -e ANTHROPIC_API_KEY -e OPENAI_API_KEY"
-               << " " << image;
+               << " '" << escapeShell(image) << "'";
     } else {
         // Headless — capture output directly
         runCmd << "sudo docker run --rm"
                << " --network host"
-               << " -v " << repoDir_ << ":/workspace"
-               << " -e AGENT=" << agent
+               << " -v '" << escapeShell(repoDir_) << ":/workspace'"
+               << " -e AGENT='" << escapeShell(agent) << "'"
                << " -e AGENT_MODE=headless"
-               << " -e TASK=\"" << prompt.substr(0, 200) << "\""
+               << " -e TASK='" << taskSnippet << "'"
                << " -e ANTHROPIC_API_KEY -e OPENAI_API_KEY"
-               << " " << image;
+               << " '" << escapeShell(image) << "'";
     }
 
     if (headful) {
@@ -173,7 +196,7 @@ int ImproveTool::runAgentDocker(const std::string& prompt, bool headful,
         if (onLine) onLine("Attach with: sudo docker attach " + containerId);
 
         // Follow logs until container exits
-        std::string logsCmd = "sudo docker logs --follow " + containerId + " 2>&1";
+        std::string logsCmd = "sudo docker logs --follow '" + escapeShell(containerId) + "' 2>&1";
         FILE* logFp = popen(logsCmd.c_str(), "r");
         if (logFp) {
             std::array<char, 4096> buf;
@@ -186,7 +209,7 @@ int ImproveTool::runAgentDocker(const std::string& prompt, bool headful,
         }
 
         // Get exit code
-        auto waitResult = exec("sudo docker wait " + containerId + " 2>/dev/null");
+        auto waitResult = exec("sudo docker wait '" + escapeShell(containerId) + "' 2>/dev/null");
         std::remove(promptFile.c_str());
         try { return std::stoi(waitResult.output); } catch (...) { return -1; }
     } else {
@@ -306,7 +329,7 @@ ImproveTool::EvalResult ImproveTool::evaluate() {
 
     // Query results
     std::string sql = "SELECT file_path, risk_score, risk_profile::text "
-                      "FROM scan_results WHERE run_id = '" + runId + "'";
+                      "FROM scan_results WHERE run_id = '" + escapeSql(runId) + "'";
     auto qr = db_.execute(sql);
 
     if (!qr.ok() || qr.rows.empty()) {
@@ -316,7 +339,7 @@ ImproveTool::EvalResult ImproveTool::evaluate() {
     }
 
     // Count LLM calls
-    auto countQr = db_.execute("SELECT COUNT(*) FROM llm_calls WHERE run_id = '" + runId + "'");
+    auto countQr = db_.execute("SELECT COUNT(*) FROM llm_calls WHERE run_id = '" + escapeSql(runId) + "'");
     if (countQr.ok() && !countQr.rows.empty() && !countQr.rows[0].empty())
         result.llmCalls = std::stoi(countQr.rows[0][0]);
 
@@ -376,19 +399,19 @@ ImproveTool::EvalResult ImproveTool::evaluate() {
 }
 
 void ImproveTool::gitCommit(const std::string& msg) {
-    exec("cd " + repoDir_ + " && git add prompts/ src/graph/graphs/scan_task_graph.cpp && git commit -m '" + msg + "'");
+    exec("cd '" + escapeShell(repoDir_) + "' && git add prompts/ src/graph/graphs/scan_task_graph.cpp && git commit -m '" + escapeShell(msg) + "'");
 }
 
 void ImproveTool::gitRevert() {
-    exec("cd " + repoDir_ + " && git checkout -- prompts/ src/graph/graphs/scan_task_graph.cpp");
+    exec("cd '" + escapeShell(repoDir_) + "' && git checkout -- prompts/ src/graph/graphs/scan_task_graph.cpp");
 }
 
 bool ImproveTool::agentAvailable() {
     std::string agent = agentName();
-    auto r = exec("command -v " + agent);
+    auto r = exec("command -v '" + escapeShell(agent) + "'");
     if (r.exitCode == 0 && !r.output.empty()) return true;
     // Also check if Docker image exists
-    auto dr = exec("sudo docker image inspect area-improve-" + agent + " >/dev/null 2>&1");
+    auto dr = exec("sudo docker image inspect 'area-improve-" + escapeShell(agent) + "' >/dev/null 2>&1");
     return dr.exitCode == 0;
 }
 
@@ -515,10 +538,10 @@ std::optional<ToolResult> ImproveTool::tryExecute(const std::string& action, Too
     }
 
     // 4. Rebuild if C++ was changed
-    auto diffResult = exec("cd " + repoDir_ + " && git diff --name-only -- src/ include/");
+    auto diffResult = exec("cd '" + escapeShell(repoDir_) + "' && git diff --name-only -- src/ include/");
     if (!diffResult.output.empty()) {
         ctx.cb({AgentMessage::THINKING, "C++ files changed, rebuilding..."});
-        auto buildResult = exec("cd " + repoDir_ + " && make -j$(nproc) 2>&1 | tail -5");
+        auto buildResult = exec("cd '" + escapeShell(repoDir_) + "' && make -j$(nproc) 2>&1 | tail -5");
         if (buildResult.exitCode != 0) {
             ctx.cb({AgentMessage::ERROR, "Build failed:\n" + buildResult.output});
             gitRevert();

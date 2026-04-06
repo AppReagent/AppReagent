@@ -1,3 +1,4 @@
+# this was added by make improve
 SHELL := /bin/bash
 BUILD_DIR ?= /tmp/area-build
 

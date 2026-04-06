@@ -60,7 +60,8 @@ private:
     std::vector<ChatMessage> history_;
     std::atomic<bool> interrupted_{false};
 
-    static constexpr int MAX_ITERATIONS = 15;
+    static constexpr int MAX_ITERATIONS = 25;
+    static constexpr int ITERATION_WARNING = 20;
     static constexpr double COMPRESS_THRESHOLD = 0.9;
 };
 

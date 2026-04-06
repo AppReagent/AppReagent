@@ -151,6 +151,28 @@ std::string Agent::buildSystemPrompt() const {
         "  → CLASSES for overview → XREFS to find connections → CALLGRAPH for method chains\n"
         "  → SCAN with a focused goal for LLM-powered cross-file analysis\n\n"
 
+        "=== REASONING STRATEGY ===\n"
+        "For every question, follow this mental framework:\n"
+        "1. HYPOTHESIZE — What behavior could explain the user's concern? Form 2-3 hypotheses.\n"
+        "2. GATHER — Use the cheapest tools first to test hypotheses (STRINGS, GREP, READ).\n"
+        "3. NARROW — Based on initial findings, focus on the most promising hypothesis.\n"
+        "4. DEEPEN — Use expensive tools (SCAN, DECOMPILE) only on high-value targets.\n"
+        "5. CORROBORATE — Cross-reference findings across multiple tools before concluding.\n"
+        "6. SYNTHESIZE — Combine evidence into a coherent answer with specific citations.\n\n"
+
+        "When stuck or findings are ambiguous:\n"
+        "- Try a different tool or search pattern — don't repeat the same failed approach.\n"
+        "- Check the database for prior scan results before re-scanning.\n"
+        "- READ the code directly — LLM scans can miss context that manual reading reveals.\n"
+        "- Trace both directions: who calls this code (XREFS) and what does it call (CALLGRAPH).\n"
+        "- Look for the data flow: where does data come from, how is it transformed, where does it go?\n\n"
+
+        "Multi-step investigations:\n"
+        "- Plan your investigation before starting. Identify which files/classes to examine.\n"
+        "- After each tool result, reassess: does this confirm or refute my hypothesis?\n"
+        "- Don't just accumulate tool outputs — synthesize findings as you go.\n"
+        "- If you've used 5+ tools without a clear picture, pause and summarize what you know.\n\n"
+
         "=== SMALI READING GUIDE ===\n"
         "Registers: p0 = 'this' (instance methods), p1..pN = parameters, v0..vN = locals.\n"
         "Types: L = object (Ljava/lang/String;), [ = array, V = void, I = int, Z = boolean.\n"
@@ -219,6 +241,14 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
             return;
         }
 
+        if (iter == ITERATION_WARNING) {
+            history_.push_back({"user",
+                "SYSTEM: You have used " + std::to_string(iter) + " of " +
+                std::to_string(MAX_ITERATIONS) + " iterations. "
+                "Wrap up your investigation and provide an ANSWER with the evidence gathered so far. "
+                "If you need more analysis, recommend specific follow-up steps the user can request."});
+        }
+
         std::string rawResponse;
         try {
             rawResponse = backend_->chat(systemPrompt, history_);
@@ -264,6 +294,31 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
 
         if (toolResult.has_value()) {
             history_.push_back({"assistant", rawResponse});
+
+            // Run generic sensors on all tool results for error recovery hints
+            std::string toolName;
+            for (auto& prefix : tools_.prefixes()) {
+                if (action.find(prefix) == 0) {
+                    toolName = prefix;
+                    // Remove trailing ':'
+                    if (!toolName.empty() && toolName.back() == ':')
+                        toolName.pop_back();
+                    // Lowercase for sensor trigger matching
+                    for (auto& c : toolName)
+                        c = std::tolower(static_cast<unsigned char>(c));
+                    break;
+                }
+            }
+            if (!toolName.empty()) {
+                std::string sensorFeedback = harness_.runSensors(
+                    toolName, action, toolResult->observation);
+                if (!sensorFeedback.empty()) {
+                    history_.push_back({"user", toolResult->observation +
+                        "\n\nSENSOR FEEDBACK:\n" + sensorFeedback});
+                    continue;
+                }
+            }
+
             history_.push_back({"user", toolResult->observation});
             continue;
         }

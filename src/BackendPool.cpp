@@ -29,7 +29,11 @@ static bool isTransient(const std::string& err) {
            err.find("rate limit") != std::string::npos ||
            err.find("Connection refused") != std::string::npos ||
            err.find("connection") != std::string::npos ||
-           err.find("Could not resolve") != std::string::npos;
+           err.find("Could not resolve") != std::string::npos ||
+           err.find("context length") != std::string::npos ||
+           err.find("context_length") != std::string::npos ||
+           err.find("maximum input length") != std::string::npos ||
+           err.find("input tokens") != std::string::npos;
 }
 
 BackendPool::BackendPool(const std::vector<AiEndpoint>& endpoints)
@@ -44,8 +48,10 @@ BackendPool::BackendPool(const std::vector<AiEndpoint>& endpoints)
 
 BackendPool::BackendPool(const std::vector<AiEndpoint>& endpoints, int tier)
     : LLMBackend(poolEndpoint(endpoints)) {
+    std::vector<AiEndpoint> filtered;
     for (auto& ep : endpoints) {
         if (ep.tier != tier) continue;
+        filtered.push_back(ep);
         auto slot = std::make_unique<Slot>();
         slot->maxConcurrent = ep.max_concurrent;
         slot->backend = LLMBackend::create(ep);
@@ -58,6 +64,9 @@ BackendPool::BackendPool(const std::vector<AiEndpoint>& endpoints, int tier)
             slot->backend = LLMBackend::create(ep);
             backends_.push_back(std::move(slot));
         }
+    } else {
+        // Update pool metadata to reflect actual backends, not all endpoints
+        endpoint_ = poolEndpoint(filtered);
     }
 }
 

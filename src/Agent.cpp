@@ -291,6 +291,11 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
             return;
         }
 
+        // Check context usage before every LLM call, not just at loop start
+        if (iter > 0 && contextPercent() >= (int)(COMPRESS_THRESHOLD * 100)) {
+            compressHistory(cb);
+        }
+
         if (iter == ITERATION_WARNING) {
             history_.push_back({"user",
                 "SYSTEM: You have used " + std::to_string(iter) + " of " +

@@ -129,7 +129,7 @@ ChatSession& AreaServer::getOrCreateChat(const std::string& id, const std::strin
 
     if (!config_.ai_endpoints.empty()) {
         if (!chatPool_) {
-            chatPool_ = std::make_unique<BackendPool>(config_.ai_endpoints);
+            chatPool_ = std::make_unique<BackendPool>(config_.ai_endpoints, 2);
         }
 
         session->sandbox = std::make_unique<Sandbox>(session->dataDir);

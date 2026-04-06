@@ -122,8 +122,11 @@ TEST_F(ServerRunnerTest, RequeuesOnFailure) {
 
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (std::chrono::steady_clock::now() < deadline) {
-        std::lock_guard<std::mutex> lk(mu);
-        if (!requeuedIds.empty()) break;
+        {
+            std::lock_guard<std::mutex> lk(mu);
+            if (!requeuedIds.empty()) break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     runner.stop();
 

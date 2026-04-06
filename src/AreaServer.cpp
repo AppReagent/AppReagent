@@ -28,6 +28,7 @@
 #include "tools/DisasmTool.h"
 #include "tools/ReportTool.h"
 #include "tools/ReadCodeTool.h"
+#include "tools/ClassesTool.h"
 
 #include <csignal>
 #include <filesystem>
@@ -147,6 +148,8 @@ ChatSession& AreaServer::getOrCreateChat(const std::string& id, const std::strin
         session->tools->add(std::make_unique<XrefsTool>());
         session->tools->add(std::make_unique<StringsTool>());
         session->tools->add(std::make_unique<ManifestTool>());
+        session->tools->add(std::make_unique<DecompileTool>());
+        session->tools->add(std::make_unique<ClassesTool>());
         session->tools->add(std::make_unique<ScanTool>(&config_, db_, &scanState_, id, &eventBus_));
         session->tools->add(std::make_unique<AnalyzeTool>(&config_, db_, &eventBus_));
         session->tools->add(std::make_unique<TuiTool>());

@@ -47,6 +47,7 @@
 #include "tools/DisasmTool.h"
 #include "tools/ReportTool.h"
 #include "tools/ReadCodeTool.h"
+#include "tools/ClassesTool.h"
 #include "tools/ToolContext.h"
 
 namespace fs = std::filesystem;
@@ -106,6 +107,8 @@ static int runTui(area::Config& config, area::Database& db) {
     tools.add(std::make_unique<area::XrefsTool>());
     tools.add(std::make_unique<area::StringsTool>());
     tools.add(std::make_unique<area::ManifestTool>());
+    tools.add(std::make_unique<area::DecompileTool>());
+    tools.add(std::make_unique<area::ClassesTool>());
     tools.add(std::make_unique<area::ScanTool>(&config, db, &scanState, "standalone"));
     tools.add(std::make_unique<area::AnalyzeTool>(&config, db));
     tools.add(std::make_unique<area::SqlTool>(db));

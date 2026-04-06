@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
+#include <poll.h>
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -66,7 +67,13 @@ bool sendLine(int fd, const nlohmann::json& j) {
     while (remaining > 0) {
         ssize_t n = write(fd, data, remaining);
         if (n < 0) {
-            if (errno == EINTR || errno == EAGAIN) continue;
+            if (errno == EINTR) continue;
+            if (errno == EAGAIN) {
+                // Wait up to 5s for the socket to become writable
+                struct pollfd pfd = {fd, POLLOUT, 0};
+                if (poll(&pfd, 1, 5000) <= 0) return false;
+                continue;
+            }
             return false;
         }
         data += n;

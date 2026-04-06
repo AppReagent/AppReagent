@@ -74,6 +74,7 @@ private:
         AgentMessage::Type type;
         std::string text;
         int addedAtFrame = 0;
+        bool isUser = false;
     };
 
     std::vector<DisplayLine> wrapMessage(const AgentMessage& msg, int width);
@@ -96,9 +97,9 @@ private:
 
     int scrollOffset_ = 0;
     int taskScrollOffset_ = 0;
-    int animFrame_ = 0;   // 60fps counter for wave bar
+    uint64_t animFrame_ = 0;   // 60fps counter for wave bar
     int noiseFrame_ = 0;  // slow counter for text noise, increments on full renders
-    int fadeStartFrame_ = 0; // animFrame_ when last new message arrived
+    uint64_t fadeStartFrame_ = 0; // animFrame_ when last new message arrived
     int layoutRows_ = 0, layoutCols_ = 0;
     bool layoutClusterDetail_ = false;
     bool layoutShowTaskPane_ = false;

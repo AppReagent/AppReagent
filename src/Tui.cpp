@@ -51,6 +51,17 @@ static double noise2d(double x, double y, double t) {
           + 1.0) * 0.5;
 }
 
+// Truncate a string to at most maxBytes, backing up to avoid splitting a
+// multi-byte UTF-8 character.
+static std::string truncateUTF8(const std::string& s, int maxBytes) {
+    if (maxBytes <= 0) return "";
+    if ((int)s.size() <= maxBytes) return s;
+    int end = maxBytes;
+    // Back up past any UTF-8 continuation bytes (10xxxxxx)
+    while (end > 0 && (s[end] & 0xC0) == 0x80) end--;
+    return s.substr(0, end);
+}
+
 using CT = Tui::ColorTheme;
 using RGB = CT::RGB;
 
@@ -541,10 +552,10 @@ void Tui::renderMessages(int startRow, int height, int width) {
                     }
                     int wrapAt = std::max(1, width - 4);
                     while ((int)line.size() > wrapAt) {
-                        cachedDisplayLines_.push_back({AgentMessage::THINKING, line.substr(0, wrapAt), msg.addedAtFrame});
+                        cachedDisplayLines_.push_back({AgentMessage::THINKING, line.substr(0, wrapAt), msg.addedAtFrame, true});
                         line = line.substr(wrapAt);
                     }
-                    cachedDisplayLines_.push_back({AgentMessage::THINKING, line, msg.addedAtFrame});
+                    cachedDisplayLines_.push_back({AgentMessage::THINKING, line, msg.addedAtFrame, true});
                 }
             } else {
                 AgentMessage am{msg.agentType, msg.content};
@@ -577,7 +588,10 @@ void Tui::renderMessages(int startRow, int height, int width) {
             auto& dl = cachedDisplayLines_[lineIdx];
             outputBuf_ += " ";
 
-            switch (dl.type) {
+            if (dl.isUser) {
+                setColor(COLOR_CYAN);
+                setBold();
+            } else switch (dl.type) {
                 case AgentMessage::THINKING:
                     setColor(COLOR_GRAY);
                     break;
@@ -597,7 +611,7 @@ void Tui::renderMessages(int startRow, int height, int width) {
             }
 
             std::string text = dl.text;
-            if (width > 2 && (int)text.size() > width - 2) text = text.substr(0, width - 2);
+            if (width > 2 && (int)text.size() > width - 2) text = truncateUTF8(text, width - 2);
             outputBuf_ += text;
             resetStyle();
         }
@@ -683,7 +697,7 @@ void Tui::renderTaskPane(int startRow, int height, int width) {
             setColor(COLOR_GRAY);
             std::string text = taskLines[lineIdx];
             int innerW = width - 5; // space + │ + space + ... + │ + space
-            if ((int)text.size() > innerW) text = text.substr(0, innerW);
+            if ((int)text.size() > innerW) text = truncateUTF8(text, innerW);
             outputBuf_ += text;
             // Pad to fill
             int pad = innerW - (int)text.size();
@@ -897,7 +911,7 @@ void Tui::renderConfirm(int row, int width) {
         resetStyle();
         setColor(COLOR_WHITE);
         std::string desc = confirmDescription_;
-        if ((int)desc.size() > width - 20) desc = desc.substr(0, width - 20) + "...";
+        if ((int)desc.size() > width - 20) desc = truncateUTF8(desc, width - 20) + "...";
         outputBuf_ += desc;
         resetStyle();
 
@@ -1348,6 +1362,24 @@ bool Tui::handleInput() {
     if (c >= 32 && c < 127) { // Printable ASCII
         inputBuffer_.insert(inputBuffer_.begin() + cursorPos_, c);
         cursorPos_++;
+        return true;
+    }
+
+    // UTF-8 multi-byte sequence: lead byte >= 0xC0
+    if ((unsigned char)c >= 0xC0) {
+        std::string mb(1, c);
+        // Count expected continuation bytes from lead byte
+        int expect = 0;
+        if      ((unsigned char)c >= 0xF0) expect = 3;
+        else if ((unsigned char)c >= 0xE0) expect = 2;
+        else                               expect = 1;
+        for (int i = 0; i < expect; i++) {
+            char cb;
+            if (read(STDIN_FILENO, &cb, 1) <= 0) break;
+            mb += cb;
+        }
+        inputBuffer_.insert(cursorPos_, mb);
+        cursorPos_ += (int)mb.size();
         return true;
     }
 
@@ -1815,7 +1847,11 @@ void Tui::run() {
             int waveRow = ts.rows;
             renderWaveBar(waveRow, ts.cols);
             if (!confirmPending_) {
-                int cursorCol = 3 + cursorPos_;
+                // Account for horizontal scroll (same logic as renderInput)
+                int available = ts.cols - 3;
+                int scrollStart = 0;
+                if (cursorPos_ > available) scrollStart = cursorPos_ - available;
+                int cursorCol = 3 + (cursorPos_ - scrollStart);
                 moveCursor(waveRow - 1, cursorCol);
                 outputBuf_ += "\033[?25h";
             }

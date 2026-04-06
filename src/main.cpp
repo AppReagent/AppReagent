@@ -1,4 +1,5 @@
 #include <chrono>
+#include <csignal>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -131,6 +132,10 @@ int main(int argc, char* argv[]) {
         std::cerr << "Failed to load config: " << e.what() << std::endl;
         return 1;
     }
+
+    // Ignore SIGPIPE so writing to a disconnected socket returns EPIPE
+    // instead of killing the process.
+    signal(SIGPIPE, SIG_IGN);
 
     curl_global_init(CURL_GLOBAL_DEFAULT);
 

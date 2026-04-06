@@ -334,6 +334,7 @@ void AreaServer::handleMessage(int clientFd, const nlohmann::json& msg) {
         });
 
         if (chat.confirmPending) {
+            std::lock_guard clk(chat.confirmMu);
             sendToClient(clientFd, nlohmann::json{
                 {"type", "confirm_req"},
                 {"chat_id", chatId},

@@ -23,6 +23,7 @@
 #include "Tui.h"
 #include "AreaServer.h"
 #include "IPC.h"
+#include "McpServer.h"
 #include "tools/ToolRegistry.h"
 #include "tools/GenerateRunIdTool.h"
 #include "tools/StateTool.h"
@@ -146,6 +147,14 @@ static int runTui(area::Config& config, area::Database& db) {
 int main(int argc, char* argv[]) {
     area::ArgParse args(argc, argv);
     args.parse();
+
+    // MCP server: lightweight protocol bridge — no config or DB needed.
+    // Must be checked before config/DB init so it works even without them.
+    if (args.getPositionalArg(1) == "mcp") {
+        signal(SIGPIPE, SIG_IGN);
+        area::McpServer mcp(getDataDir(), fs::current_path().string());
+        return mcp.run();
+    }
 
     area::Config config;
     try {
@@ -338,7 +347,7 @@ int main(int argc, char* argv[]) {
         exitCode = runTui(config, db);
     } else {
         std::cerr << "Unknown command: " << *command << std::endl;
-        std::cerr << "Usage: area [server | kill-server | chat | scan <path> | tui | test | evaluate | improve <task>]" << std::endl;
+        std::cerr << "Usage: area [server | kill-server | chat | scan <path> | tui | test | evaluate | improve <task> | mcp]" << std::endl;
         exitCode = 1;
     }
 

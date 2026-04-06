@@ -18,6 +18,38 @@ cd /workspace
 git add -A && git commit -m "baseline" --allow-empty -q
 BASELINE=$(git rev-parse HEAD)
 
+# Pre-build area so the MCP tools work immediately
+echo "[area] building..."
+if make all -j14 2>&1 | tail -5; then
+    echo "[area] build ok"
+else
+    echo "[area] build failed — use area_build MCP tool to retry"
+fi
+
+# Start the server in background (MCP area_chat needs it)
+if [ -x ./area ]; then
+    AREA_DATA_DIR="${AREA_DATA_DIR:-/opt/area}" ./area server &
+    _AREA_SERVER_PID=$!
+    for _i in $(seq 1 12); do
+        [ -S "${AREA_DATA_DIR:-/opt/area}/area.sock" ] && break
+        sleep 0.5
+    done
+    if [ -S "${AREA_DATA_DIR:-/opt/area}/area.sock" ]; then
+        echo "[area] server ready (PID $_AREA_SERVER_PID)"
+    else
+        echo "[area] server failed to start — use area_server_start MCP tool"
+    fi
+fi
+
+# Stop the area server if we started it
+stop_area_server() {
+    if [ -n "$_AREA_SERVER_PID" ] && kill -0 "$_AREA_SERVER_PID" 2>/dev/null; then
+        ./area kill-server 2>/dev/null || kill "$_AREA_SERVER_PID" 2>/dev/null
+        wait "$_AREA_SERVER_PID" 2>/dev/null
+        echo "[area] server stopped"
+    fi
+}
+
 # Emit a git patch covering everything the agent changed (committed or not)
 emit_patch() {
     cd /workspace
@@ -72,10 +104,12 @@ run_agent() {
 case "$AGENT_MODE" in
     headless)
         run_agent "$@"
+        stop_area_server
         emit_patch
         ;;
     interactive)
         run_agent "$@"
+        stop_area_server
         emit_patch
         ;;
     *)

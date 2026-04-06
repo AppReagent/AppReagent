@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "area": {
+      "command": "./area",
+      "args": ["mcp"]
+    }
+  }
+}

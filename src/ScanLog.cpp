@@ -80,6 +80,27 @@ std::string ScanLog::loadDDL() {
     throw std::runtime_error("ddl.sql not found");
 }
 
+std::optional<ScanLog::ExistingScan> ScanLog::findRecentScan(const std::string& path) {
+    // Find the most recent run that scanned files under this path
+    auto result = db_.executeParams(
+        "SELECT run_id, count(*) as cnt, "
+        "count(CASE WHEN risk_score > 0 THEN 1 END) as flagged, "
+        "coalesce(max(risk_score), 0) as max_risk, "
+        "max(created_at)::text as latest "
+        "FROM scan_results WHERE file_path LIKE $1 "
+        "GROUP BY run_id ORDER BY max(created_at) DESC LIMIT 1",
+        {path + "%"});
+    if (!result.ok() || result.rows.empty()) return std::nullopt;
+    auto& row = result.rows[0];
+    ExistingScan scan;
+    scan.run_id = row[0];
+    try { scan.file_count = std::stoi(row[1]); } catch (...) {}
+    try { scan.flagged_count = std::stoi(row[2]); } catch (...) {}
+    try { scan.max_risk = std::stoi(row[3]); } catch (...) {}
+    scan.latest = row[4];
+    return scan;
+}
+
 bool ScanLog::fileCompleted(const std::string& run_id, const std::string& file_hash) {
     auto result = db_.executeParams(
         "SELECT 1 FROM scan_results WHERE run_id = $1 AND file_hash = $2 LIMIT 1",

@@ -264,7 +264,11 @@ std::string Agent::buildSystemPrompt() const {
     prompt += "\nAlways use absolute paths. Expand ~ to the user's home directory.\n";
     prompt += "If the user refers to code without a path, use FIND_FILES to locate it first.\n";
     prompt += "When you have gathered sufficient evidence from multiple sources, provide your ANSWER with specific citations.\n";
-    prompt += "Never answer about scan results without first querying method_findings and scan_results tables.\n\n";
+    prompt += "Never answer about scan results without first querying method_findings and scan_results tables.\n";
+    prompt += "To find previous scans, run: SELECT run_id, count(*) as files, "
+              "count(CASE WHEN risk_score > 0 THEN 1 END) as flagged, max(risk_score) as max_risk, "
+              "min(file_path) as sample_path, max(created_at)::text as scanned_at "
+              "FROM scan_results GROUP BY run_id ORDER BY max(created_at) DESC LIMIT 10\n\n";
 
     std::string guides = harness_.guideText();
     if (!guides.empty()) {

@@ -3,6 +3,23 @@
 You are improving AppReagent, a malware analysis platform that uses LLM-powered
 node graphs to analyze Android apps. Your changes must be tested.
 
+## MCP Tools
+
+The area server is **already running** and MCP tools are pre-configured. Use them
+instead of raw shell commands:
+
+| Tool | Replaces |
+|------|----------|
+| `area_build` | `make` |
+| `area_test_unit` | `make test` |
+| `area_test_e2e` | `./scripts/test-use-case.sh all` |
+| `area_evaluate` | `./autoresearch/evaluate.sh` |
+| `area_chat` | `echo "..." \| ./area chat` |
+| `area_server_restart` | (restart after code/prompt changes) |
+
+After editing C++ code, call `area_build` then `area_server_restart`.
+After editing prompts only, call `area_server_restart` (no rebuild needed).
+
 ## Step 1: Orient
 
 Read these files:
@@ -12,19 +29,11 @@ Read these files:
 
 ## Step 2: Build & Baseline
 
-```bash
-make
-make test
-```
+Run `area_test_unit` to confirm unit tests pass.
 
-If unit tests pass, run the corpus evaluation:
-```bash
-BASELINE=$(./autoresearch/evaluate.sh 2>/tmp/eval-detail.txt)
-cat /tmp/eval-detail.txt
-```
-
-Study the per-file breakdown. Which files score lowest? Which dimension
-(classification, calibration, evidence) is weakest?
+Then run `area_evaluate` for a corpus evaluation. Study the per-file breakdown.
+Which files score lowest? Which dimension (classification, calibration, evidence)
+is weakest?
 
 If evaluation can't run (no DB, no LLM endpoints), skip eval and focus on
 code-level improvements in Step 3B instead.
@@ -39,7 +48,9 @@ Pick the highest-impact option based on what you learned:
 - Edit the relevant prompt in `prompts/` (triage.prompt, deep_analysis.prompt,
   synthesis.prompt, triage_supervisor.prompt)
 - Optionally adjust thresholds in `src/graph/graphs/scan_task_graph.cpp`
-- Re-run eval. Keep only if score improves; revert otherwise.
+- Rebuild (`area_build`) and restart (`area_server_restart`) if you changed C++
+- Restart (`area_server_restart`) if you only changed prompts
+- Re-run `area_evaluate`. Keep only if score improves; revert otherwise.
 
 ### 3B: Improve code quality (always available)
 - Fix bugs found during build or testing
@@ -73,19 +84,10 @@ Available helpers:
 
 ## Step 5: Verify everything
 
-Run ALL of these in order:
-```bash
-make test                                  # unit tests
-./scripts/test-use-case.sh <your-test>     # your new test alone
-./scripts/test-use-case.sh fast            # all fast e2e tests
-```
+1. `area_test_unit` — unit tests pass
+2. `area_test_e2e` — all e2e tests pass (including your new one)
 
-If you did 3A (prompt improvement):
-```bash
-AFTER=$(./autoresearch/evaluate.sh 2>/tmp/eval-after.txt)
-echo "Baseline: $BASELINE -> After: $AFTER"
-cat /tmp/eval-after.txt
-```
+If you did 3A (prompt improvement), run `area_evaluate` again and compare.
 
 ## Rules
 
@@ -93,5 +95,6 @@ cat /tmp/eval-after.txt
 - Every change gets a test. This is not optional.
 - Don't modify `autoresearch/evaluate.sh` or `autoresearch/corpus/`
 - Don't modify the graph engine (`src/graph/engine/`)
-- If C++ changed, `make test` must pass
+- If C++ changed, `area_test_unit` must pass
+- Use MCP tools, not raw shell commands
 - Explain what you changed and why

@@ -47,12 +47,17 @@ static std::string findManifest(const std::string& path) {
 
     // Search directory for AndroidManifest.xml
     std::error_code ec;
-    for (auto& entry : fs::recursive_directory_iterator(
-             path, fs::directory_options::skip_permission_denied, ec)) {
+    auto it = fs::recursive_directory_iterator(
+        path, fs::directory_options::skip_permission_denied, ec);
+    if (ec) return "";
+
+    for (; it != fs::recursive_directory_iterator(); it.increment(ec)) {
         if (ec) { ec.clear(); continue; }
-        if (entry.is_regular_file() && entry.path().filename() == "AndroidManifest.xml") {
-            return entry.path().string();
+        if (it->is_regular_file(ec) && !ec &&
+            it->path().filename() == "AndroidManifest.xml") {
+            return it->path().string();
         }
+        if (ec) ec.clear();
     }
     return "";
 }

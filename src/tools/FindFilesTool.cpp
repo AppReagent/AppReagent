@@ -152,20 +152,22 @@ std::optional<ToolResult> FindFilesTool::tryExecute(const std::string& action, T
             std::string fname = entry.path().filename().string();
 
             // Skip noisy directories
-            if (entry.is_directory() && shouldSkipDir(fname)) {
+            if (entry.is_directory(ec) && !ec && shouldSkipDir(fname)) {
                 it.disable_recursion_pending();
                 continue;
             }
+            if (ec) { ec.clear(); continue; }
 
             // Match against filename or full path
             if (matchesQuery(fname, query) ||
                 matchesQuery(entry.path().string(), query)) {
                 std::string dir;
-                if (entry.is_directory()) {
+                if (entry.is_directory(ec) && !ec) {
                     dir = entry.path().string();
                 } else {
                     dir = entry.path().parent_path().string();
                 }
+                if (ec) ec.clear();
                 dirs[dir].matchedFiles.push_back(entry.path().string());
             }
         }
@@ -175,11 +177,13 @@ std::optional<ToolResult> FindFilesTool::tryExecute(const std::string& action, T
     for (auto& [dirPath, info] : dirs) {
         std::error_code ec;
         if (!fs::is_directory(dirPath, ec)) continue;
-        for (auto& entry : fs::directory_iterator(dirPath, fs::directory_options::skip_permission_denied, ec)) {
+        for (auto dit = fs::directory_iterator(dirPath, fs::directory_options::skip_permission_denied, ec);
+             dit != fs::directory_iterator(); dit.increment(ec)) {
             if (ec) { ec.clear(); continue; }
-            if (entry.is_regular_file() && isScannable(entry.path())) {
+            if (dit->is_regular_file(ec) && !ec && isScannable(dit->path())) {
                 info.scannableCount++;
             }
+            if (ec) ec.clear();
         }
     }
 

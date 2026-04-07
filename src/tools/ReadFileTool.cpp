@@ -104,10 +104,12 @@ std::optional<ToolResult> ReadFileTool::tryExecute(const std::string& action, To
         out << "Directory: " << filePath << "\n\n";
         std::vector<std::string> entries;
         std::error_code ec;
-        for (auto& entry : fs::directory_iterator(filePath, fs::directory_options::skip_permission_denied, ec)) {
+        for (auto dit = fs::directory_iterator(filePath, fs::directory_options::skip_permission_denied, ec);
+             dit != fs::directory_iterator(); dit.increment(ec)) {
             if (ec) { ec.clear(); continue; }
-            std::string name = entry.path().filename().string();
-            if (entry.is_directory()) name += "/";
+            std::string name = dit->path().filename().string();
+            if (dit->is_directory(ec) && !ec) name += "/";
+            if (ec) ec.clear();
             entries.push_back(name);
         }
         std::sort(entries.begin(), entries.end());

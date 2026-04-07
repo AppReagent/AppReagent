@@ -157,11 +157,12 @@ std::optional<ToolResult> XrefsTool::tryExecute(const std::string& action, ToolC
             if (elapsed > MAX_MS) { truncated = true; break; }
 
             auto& entry = *it;
-            if (entry.is_directory() && shouldSkipDirXR(entry.path().filename().string())) {
+            if (entry.is_directory(ec) && !ec && shouldSkipDirXR(entry.path().filename().string())) {
                 it.disable_recursion_pending();
                 continue;
             }
-            if (!entry.is_regular_file()) continue;
+            if (ec) { ec.clear(); continue; }
+            if (!entry.is_regular_file(ec) || ec) { ec.clear(); continue; }
 
             std::string ext = entry.path().extension().string();
             for (auto& c : ext) c = std::tolower(static_cast<unsigned char>(c));

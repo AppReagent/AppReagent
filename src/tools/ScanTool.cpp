@@ -42,6 +42,27 @@ std::optional<ToolResult> ScanTool::tryExecute(const std::string& action, ToolCo
         path = args;
     }
 
+    // Check for existing scan results before spending LLM tokens
+    bool forceRescan = (goal.find("rescan") != std::string::npos);
+    if (!forceRescan && !path.ends_with(".jsonl")) {
+        ScanLog log(db_);
+        auto existing = log.findRecentScan(path);
+        if (existing) {
+            std::ostringstream obs;
+            obs << "OBSERVATION: Found existing scan for this path.\n"
+                << "  run_id: " << existing->run_id << "\n"
+                << "  files: " << existing->file_count << "\n"
+                << "  flagged: " << existing->flagged_count << "\n"
+                << "  max risk score: " << existing->max_risk << "\n"
+                << "  scanned at: " << existing->latest << "\n\n"
+                << "Use SQL to query these results (run_id = '" << existing->run_id << "') "
+                << "instead of re-scanning. If you need a fresh scan, use "
+                << "SCAN: " << path << " | rescan";
+            ctx.cb({AgentMessage::RESULT, obs.str()});
+            return ToolResult{obs.str()};
+        }
+    }
+
     ScanCommand scan(*config_, db_);
     scan.setLogCallback([&ctx](const std::string& msg) {
         ctx.cb({AgentMessage::THINKING, msg});
@@ -54,6 +75,7 @@ std::optional<ToolResult> ScanTool::tryExecute(const std::string& action, ToolCo
     if (path.ends_with(".jsonl")) {
         summary = scan.runFromFile(path);
     } else {
+        // Allow "rescan" goal to bypass the existing-scan check
         runId = ScanLog::generateRunId();
 
         if (state_) {

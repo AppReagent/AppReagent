@@ -202,16 +202,20 @@ std::optional<ToolResult> ReadCodeTool::tryExecute(const std::string& action, To
         out << "Directory: " << path << "\n\n";
         int smaliCount = 0, elfCount = 0, otherCount = 0;
         std::vector<std::string> files;
-        for (auto& entry : fs::directory_iterator(path)) {
-            std::string name = entry.path().filename().string();
-            if (entry.is_regular_file()) {
+        std::error_code ec;
+        for (auto it = fs::directory_iterator(path, fs::directory_options::skip_permission_denied, ec);
+             it != fs::directory_iterator(); it.increment(ec)) {
+            if (ec) { ec.clear(); continue; }
+            std::string name = it->path().filename().string();
+            if (it->is_regular_file(ec) && !ec) {
                 if (name.ends_with(".smali")) smaliCount++;
-                else if (hasElfMagic(entry.path().string())) elfCount++;
+                else if (hasElfMagic(it->path().string())) elfCount++;
                 else otherCount++;
                 files.push_back(name);
-            } else if (entry.is_directory()) {
+            } else if (!ec && it->is_directory(ec) && !ec) {
                 files.push_back(name + "/");
             }
+            if (ec) ec.clear();
         }
         std::sort(files.begin(), files.end());
 

@@ -220,11 +220,12 @@ std::optional<ToolResult> ClassesTool::tryExecute(const std::string& action, Too
             if (ec) { ec.clear(); continue; }
             if (truncated) break;
 
-            if (it->is_directory() && shouldSkipDirCL(it->path().filename().string())) {
+            if (it->is_directory(ec) && !ec && shouldSkipDirCL(it->path().filename().string())) {
                 it.disable_recursion_pending();
                 continue;
             }
-            if (!it->is_regular_file()) continue;
+            if (ec) { ec.clear(); continue; }
+            if (!it->is_regular_file(ec) || ec) { ec.clear(); continue; }
 
             std::string ext = it->path().extension().string();
             for (auto& c : ext) c = std::tolower(static_cast<unsigned char>(c));

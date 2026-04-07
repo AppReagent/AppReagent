@@ -177,12 +177,13 @@ std::optional<ToolResult> GrepTool::tryExecute(const std::string& action, ToolCo
             auto& entry = *it;
             std::string fname = entry.path().filename().string();
 
-            if (entry.is_directory() && shouldSkipDir(fname)) {
+            if (entry.is_directory(ec) && !ec && shouldSkipDir(fname)) {
                 it.disable_recursion_pending();
                 continue;
             }
+            if (ec) { ec.clear(); continue; }
 
-            if (!entry.is_regular_file()) continue;
+            if (!entry.is_regular_file(ec) || ec) { ec.clear(); continue; }
             if (!isSearchableFile(entry.path())) continue;
 
             // Check file size — skip very large files

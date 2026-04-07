@@ -57,12 +57,18 @@ std::vector<std::string> ScanCommand::findScanFiles(const std::string& dir) {
 
     if (!fs::is_directory(dir)) return files;
 
-    for (auto& entry : fs::recursive_directory_iterator(dir)) {
-        if (!entry.is_regular_file()) continue;
-        if (entry.path().extension() == ".smali") {
-            files.push_back(entry.path().string());
-        } else if (fileHasElfMagic(entry.path().string())) {
-            files.push_back(entry.path().string());
+    std::error_code ec;
+    auto it = fs::recursive_directory_iterator(
+        dir, fs::directory_options::skip_permission_denied, ec);
+    if (ec) return files;
+
+    for (; it != fs::recursive_directory_iterator(); it.increment(ec)) {
+        if (ec) { ec.clear(); continue; }
+        if (!it->is_regular_file(ec) || ec) { ec.clear(); continue; }
+        if (it->path().extension() == ".smali") {
+            files.push_back(it->path().string());
+        } else if (fileHasElfMagic(it->path().string())) {
+            files.push_back(it->path().string());
         }
     }
 
@@ -117,6 +123,8 @@ void ScanCommand::processFile(const std::string& filePath, const std::string& ru
 
     if (completedHashes_.count(fileHash) || log_.fileCompleted(runId, fileHash)) {
         summary.files_skipped++;
+        // Still record a scan_result so every input file appears in results
+        log_.logScanResult(runId, filePath, fileHash, "{}", "duplicate of already-scanned file", -1);
         return;
     }
 

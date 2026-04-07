@@ -1,8 +1,10 @@
 build/
+_deps/
 cmake-build-debug/
 cmake-build-release/
 .cache/
 .claude/
+.improve-output/
 area
 area_tests
 *.o

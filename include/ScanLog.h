@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <string>
 #include "Database.h"
 
@@ -14,6 +15,17 @@ public:
 
     // Check if a file (by content hash) has already been scanned in this run
     bool fileCompleted(const std::string& run_id, const std::string& file_hash);
+
+    // Find a recent scan whose files overlap with the given path.
+    // Returns run_id and file count, or empty string if none found.
+    struct ExistingScan {
+        std::string run_id;
+        int file_count = 0;
+        int flagged_count = 0;
+        int max_risk = 0;
+        std::string latest;  // timestamp
+    };
+    std::optional<ExistingScan> findRecentScan(const std::string& path);
 
     // Check if a prompt (by hash) has already been run in this run, return cached response
     std::string findCachedPrompt(const std::string& run_id, const std::string& prompt_hash);

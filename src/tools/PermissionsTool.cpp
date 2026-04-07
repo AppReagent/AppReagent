@@ -282,10 +282,13 @@ std::optional<ToolResult> PermissionsTool::tryExecute(const std::string& action,
             manifestPath = path + "/AndroidManifest.xml";
         else {
             // Search recursively (apktool output structure)
-            for (auto& entry : fs::recursive_directory_iterator(path,
-                    fs::directory_options::skip_permission_denied)) {
-                if (entry.path().filename() == "AndroidManifest.xml") {
-                    manifestPath = entry.path().string();
+            std::error_code ec2;
+            auto pit = fs::recursive_directory_iterator(path,
+                fs::directory_options::skip_permission_denied, ec2);
+            for (; pit != fs::recursive_directory_iterator(); pit.increment(ec2)) {
+                if (ec2) { ec2.clear(); continue; }
+                if (pit->path().filename() == "AndroidManifest.xml") {
+                    manifestPath = pit->path().string();
                     break;
                 }
             }

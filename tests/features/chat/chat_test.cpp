@@ -167,20 +167,6 @@ TEST_F(McpE2E, FindFiles) {
         << "Should have no errors:\n" << output;
 }
 
-// ── Ported from: tests/use-cases/improve-shell-escape ────────────
-
-TEST_F(McpE2E, DISABLED_ImproveShellEscape) {
-    // TODO: Needs IMPROVE tool sandbox setup in mock config
-    auto output = chat("evaluate the corpus with goal: test'; echo INJECTED; echo '",
-                       "improve-escape");
-    EXPECT_EQ(output.find("INJECTED"), std::string::npos)
-        << "Shell injection should not execute:\n" << output;
-    EXPECT_EQ(output.find("syntax error"), std::string::npos)
-        << "No shell syntax errors:\n" << output;
-    EXPECT_EQ(output.find("unexpected EOF"), std::string::npos)
-        << "No shell quoting errors:\n" << output;
-}
-
 // ── Tool-execution tests ─────────────────────────────────────────
 // These tests need a real LLM to extract paths from user messages
 // and route to the correct tools. With mock backend they verify

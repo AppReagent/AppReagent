@@ -94,4 +94,4 @@ target_compile_definitions(area_tests PRIVATE
 )
 
 include(GoogleTest)
-gtest_discover_tests(area_tests)
+gtest_discover_tests(area_tests PROPERTIES TIMEOUT 120)

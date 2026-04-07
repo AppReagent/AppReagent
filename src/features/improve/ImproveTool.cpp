@@ -32,7 +32,11 @@ static inline std::string escapeShell(const std::string& s) {
 
 ImproveTool::ImproveTool(Config* config, Database& db, const std::string& repoDir)
     : config_(config), db_(db), repoDir_(repoDir) {
-    corpusDir_ = repoDir_ + "/autoresearch/corpus";
+    if (auto env = std::getenv("AREA_CORPUS_DIR")) {
+        corpusDir_ = env;
+    } else {
+        corpusDir_ = repoDir_ + "/autoresearch/corpus";
+    }
     labelsPath_ = corpusDir_ + "/labels.json";
 }
 

@@ -1,0 +1,14 @@
+{
+  "malware/SmsExfil.smali": {
+    "expected_class": "relevant",
+    "min_risk_score": 70,
+    "must_mention": ["sms", "exfil"],
+    "must_not_mention": []
+  },
+  "benign/BenignActivity.smali": {
+    "expected_class": "not_relevant",
+    "max_risk_score": 15,
+    "must_mention": [],
+    "must_not_mention": ["malware", "exfiltration"]
+  }
+}

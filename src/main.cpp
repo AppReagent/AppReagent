@@ -4,8 +4,10 @@
 #include <filesystem>
 #include <iostream>
 #include <map>
+#include <fcntl.h>
 #include <poll.h>
 #include <sys/resource.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <curl/curl.h>
 
@@ -71,76 +73,72 @@ static int runScan(area::Config& config, area::Database& db,
     return (summary.files_error > 0) ? 1 : 0;
 }
 
-static int runTui(area::Config& config, area::Database& db) {
-    // Try connecting to server first
-    int sockFd = area::ipc::connectTo(getSockPath());
-    if (sockFd >= 0) {
-        std::cerr << "Connected to server" << std::endl;
-        area::Tui tui(sockFd, config.theme);
-        tui.run();
-        area::ipc::closeFd(sockFd);
-        return 0;
+static bool launchServer(const std::string& dataDir, const std::string& sockPath) {
+    std::string bin;
+    {
+        char buf[4096];
+        ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+        if (n > 0) { buf[n] = '\0'; bin = buf; }
+        auto del = bin.find(" (deleted)");
+        if (del != std::string::npos) bin = bin.substr(0, del);
+    }
+    if (bin.empty() || !fs::exists(bin)) {
+        std::cerr << "Cannot find binary to launch server" << std::endl;
+        return false;
     }
 
-    // Standalone mode
-    if (config.ai_endpoints.empty()) {
-        std::cerr << "No ai_endpoints configured" << std::endl;
-        return 1;
-    }
+    std::error_code ec;
+    fs::create_directories(dataDir, ec);
+    fs::remove(sockPath, ec);
 
-    area::ScanLog(db).ensureTables();
+    std::cerr << "Starting server..." << std::endl;
 
-    auto pool = std::make_unique<area::BackendPool>(config.ai_endpoints);
-    area::ScanState scanState;
-    area::Sandbox sandbox(getDataDir());
+    pid_t child = fork();
+    if (child < 0) { std::cerr << "fork() failed" << std::endl; return false; }
 
-    // Build tool registry
-    area::ToolRegistry tools;
-    tools.add(std::make_unique<area::GenerateRunIdTool>());
-    tools.add(std::make_unique<area::StateTool>(&scanState));
-    tools.add(std::make_unique<area::PauseScanTool>(&scanState));
-    tools.add(std::make_unique<area::ResumeScanTool>(&config, db, &scanState, "standalone"));
-    tools.add(std::make_unique<area::DeleteScanTool>(db, &scanState));
-    tools.add(std::make_unique<area::ShellTool>(&sandbox));
-    tools.add(std::make_unique<area::FindFilesTool>());
-    tools.add(std::make_unique<area::GrepTool>());
-    tools.add(std::make_unique<area::ReadFileTool>());
-    tools.add(std::make_unique<area::ReadCodeTool>());
-    tools.add(std::make_unique<area::XrefsTool>());
-    tools.add(std::make_unique<area::StringsTool>());
-    tools.add(std::make_unique<area::ManifestTool>());
-    tools.add(std::make_unique<area::DecompileTool>());
-    tools.add(std::make_unique<area::ClassesTool>());
-    tools.add(std::make_unique<area::ScanTool>(&config, db, &scanState, "standalone"));
-    tools.add(std::make_unique<area::AnalyzeTool>(&config, db));
-    tools.add(std::make_unique<area::SqlTool>(db));
-    tools.add(std::make_unique<area::SimilarTool>(&config, db));
-    tools.add(std::make_unique<area::CallGraphTool>(db));
-    tools.add(std::make_unique<area::FindBehaviorTool>(db));
-    tools.add(std::make_unique<area::PermissionsTool>());
-    tools.add(std::make_unique<area::DisasmTool>());
-    tools.add(std::make_unique<area::ReportTool>(db));
-    tools.add(std::make_unique<area::ImproveTool>(&config, db, fs::current_path().string()));
-
-    area::Agent agent(pool.get(), tools);
-
-    // Build system context
-    std::string systemCtx;
-    std::string ddl;
-    try { ddl = area::ScanLog::loadDDL(); } catch (...) {}
-    if (!ddl.empty()) {
-        systemCtx += "Database DDL:\n```sql\n" + ddl + "```\n";
-    }
-    try {
-        std::string schema = db.getSchema();
-        if (!schema.empty()) {
-            systemCtx += "\nLive schema:\n" + schema;
+    if (child == 0) {
+        setsid();
+        pid_t server = fork();
+        if (server == 0) {
+            int devnull = open("/dev/null", O_WRONLY);
+            if (devnull >= 0) { dup2(devnull, STDOUT_FILENO); close(devnull); }
+            setenv("AREA_DATA_DIR", dataDir.c_str(), 1);
+            execl(bin.c_str(), bin.c_str(), "server", nullptr);
+            _exit(1);
         }
-    } catch (...) {}
-    agent.setSystemContext(systemCtx);
+        _exit(0);
+    }
+    waitpid(child, nullptr, 0);
 
-    area::Tui tui(agent, config.theme);
+    for (int i = 0; i < 24; i++) {
+        usleep(500000);
+        if (fs::exists(sockPath)) {
+            std::cerr << "Server started" << std::endl;
+            return true;
+        }
+    }
+    std::cerr << "Server did not start within 12s" << std::endl;
+    return false;
+}
+
+static int runTui(area::Config& config, area::Database& db) {
+    std::string sockPath = getSockPath();
+    int sockFd = area::ipc::connectTo(sockPath);
+
+    if (sockFd < 0) {
+        // Auto-launch server
+        if (!launchServer(getDataDir(), sockPath)) return 1;
+        sockFd = area::ipc::connectTo(sockPath);
+        if (sockFd < 0) {
+            std::cerr << "Could not connect to server after launch" << std::endl;
+            return 1;
+        }
+    }
+
+    std::cerr << "Connected to server" << std::endl;
+    area::Tui tui(sockFd, config.theme);
     tui.run();
+    area::ipc::closeFd(sockFd);
     return 0;
 }
 
@@ -244,9 +242,14 @@ int main(int argc, char* argv[]) {
             std::cerr << "Server shutdown sent" << std::endl;
         }
     } else if (command == "chat") {
-        int sockFd = area::ipc::connectTo(getSockPath());
+        std::string sockPath = getSockPath();
+        int sockFd = area::ipc::connectTo(sockPath);
         if (sockFd < 0) {
-            std::cerr << "No server running. Start one with: area server" << std::endl;
+            if (!launchServer(getDataDir(), sockPath)) { exitCode = 1; }
+            else sockFd = area::ipc::connectTo(sockPath);
+        }
+        if (sockFd < 0) {
+            std::cerr << "Could not connect to server" << std::endl;
             exitCode = 1;
         } else {
             auto chatId = args.getPositionalArg(2).value_or("default");

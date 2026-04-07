@@ -145,3 +145,179 @@ TEST_F(McpE2E, ClearContext) {
     EXPECT_EQ(output.find("pineapple"), std::string::npos)
         << "Should not remember pineapple after clear:\n" << output;
 }
+
+// ── Ported from: tests/use-cases/sql-markdown-stripping ──────────
+
+TEST_F(McpE2E, SqlMarkdownStripping) {
+    auto output = chat("how many rows are in the scan_results table?");
+    EXPECT_EQ(output.find("syntax error"), std::string::npos)
+        << "Should have no SQL syntax errors:\n" << output;
+    EXPECT_EQ(output.find("max iterations"), std::string::npos)
+        << "Should not hit max iterations:\n" << output;
+    EXPECT_FALSE(output.empty()) << "Should have a response";
+}
+
+// ── Ported from: tests/use-cases/find-files ──────────────────────
+
+TEST_F(McpE2E, FindFiles) {
+    auto output = chat("find me the SmsExfil smali file, I don't remember the exact path");
+    EXPECT_NE(output.find("SmsExfil"), std::string::npos)
+        << "Should find SmsExfil:\n" << output;
+    EXPECT_EQ(output.find("[error]"), std::string::npos)
+        << "Should have no errors:\n" << output;
+}
+
+// ── Ported from: tests/use-cases/improve-shell-escape ────────────
+
+TEST_F(McpE2E, DISABLED_ImproveShellEscape) {
+    // TODO: Needs IMPROVE tool sandbox setup in mock config
+    auto output = chat("evaluate the corpus with goal: test'; echo INJECTED; echo '",
+                       "improve-escape");
+    EXPECT_EQ(output.find("INJECTED"), std::string::npos)
+        << "Shell injection should not execute:\n" << output;
+    EXPECT_EQ(output.find("syntax error"), std::string::npos)
+        << "No shell syntax errors:\n" << output;
+    EXPECT_EQ(output.find("unexpected EOF"), std::string::npos)
+        << "No shell quoting errors:\n" << output;
+}
+
+// ── Tool-execution tests ─────────────────────────────────────────
+// These tests need a real LLM to extract paths from user messages
+// and route to the correct tools. With mock backend they verify
+// no errors; with real LLM they verify actual tool output.
+// TODO: Add {{path_from_user}} mock variable to enable full mock testing.
+
+TEST_F(McpE2E, ManifestParse) {
+    auto manifest = srcDir_ + "/tests/use-cases/manifest-parse/assets/AndroidManifest.xml";
+    if (!fs::exists(manifest)) GTEST_SKIP() << "manifest asset not found";
+
+    auto output = chat("analyze the manifest at " + manifest);
+    bool hasPerms = output.find("INTERNET") != std::string::npos ||
+                    output.find("READ_CONTACTS") != std::string::npos ||
+                    output.find("SEND_SMS") != std::string::npos ||
+                    output.find("permission") != std::string::npos;
+    EXPECT_TRUE(hasPerms) << "Should find permissions:\n" << output;
+
+    bool hasComponents = output.find("MalwareService") != std::string::npos ||
+                         output.find("BootReceiver") != std::string::npos ||
+                         output.find("MainActivity") != std::string::npos;
+    EXPECT_TRUE(hasComponents) << "Should find components:\n" << output;
+}
+
+// ── Ported from: tests/use-cases/permissions-manifest ────────────
+
+TEST_F(McpE2E, PermissionsManifest) {
+    auto manifest = srcDir_ + "/tests/use-cases/permissions-manifest/assets/AndroidManifest.xml";
+    if (!fs::exists(manifest)) GTEST_SKIP() << "manifest asset not found";
+
+    auto output = chat("analyze the permissions in " + manifest);
+    bool hasSms = output.find("READ_SMS") != std::string::npos ||
+                  output.find("SEND_SMS") != std::string::npos ||
+                  output.find("SMS") != std::string::npos;
+    EXPECT_TRUE(hasSms) << "Should find SMS permissions:\n" << output;
+
+    bool hasInternet = output.find("INTERNET") != std::string::npos ||
+                       output.find("internet") != std::string::npos;
+    EXPECT_TRUE(hasInternet) << "Should find internet permission:\n" << output;
+
+    bool hasSuspicious = output.find("suspicious") != std::string::npos ||
+                         output.find("exfiltration") != std::string::npos ||
+                         output.find("surveillance") != std::string::npos ||
+                         output.find("combination") != std::string::npos;
+    EXPECT_TRUE(hasSuspicious) << "Should flag suspicious combinations:\n" << output;
+}
+
+// ── Ported from: tests/use-cases/read-code ───────────────────────
+
+TEST_F(McpE2E, ReadCode) {
+    auto smali = srcDir_ + "/tests/use-cases/read-code/assets/MalwareService.smali";
+    if (!fs::exists(smali)) GTEST_SKIP() << "read-code asset not found";
+
+    auto output = chat("show me the contents of " + smali);
+    bool hasContent = output.find("MalwareService") != std::string::npos ||
+                      output.find("exfiltrateData") != std::string::npos;
+    EXPECT_TRUE(hasContent) << "Should show file content:\n" << output;
+}
+
+// ── Ported from: tests/use-cases/grep-code ───────────────────────
+
+TEST_F(McpE2E, GrepCode) {
+    auto smali = srcDir_ + "/tests/use-cases/grep-code/assets/MalwareService.smali";
+    if (!fs::exists(smali)) GTEST_SKIP() << "grep-code asset not found";
+
+    auto output = chat("find all network calls in " + smali);
+    bool hasNetwork = output.find("HttpURLConnection") != std::string::npos ||
+                      output.find("openConnection") != std::string::npos ||
+                      output.find("URL") != std::string::npos;
+    EXPECT_TRUE(hasNetwork) << "Should find network code:\n" << output;
+}
+
+// ── Ported from: tests/use-cases/strings-extract ─────────────────
+
+TEST_F(McpE2E, StringsExtract) {
+    auto smali = srcDir_ + "/tests/use-cases/strings-extract/assets/MalwareService.smali";
+    if (!fs::exists(smali)) GTEST_SKIP() << "strings-extract asset not found";
+
+    auto output = chat("extract all hardcoded strings from " + smali);
+    bool hasStrings = output.find("evil-c2.example.com") != std::string::npos ||
+                      output.find("s3cr3t_k3y") != std::string::npos ||
+                      output.find("https") != std::string::npos ||
+                      output.find("content://") != std::string::npos;
+    EXPECT_TRUE(hasStrings) << "Should find hardcoded strings:\n" << output;
+}
+
+// ── Ported from: tests/use-cases/disasm-method ───────────────────
+
+TEST_F(McpE2E, DisasmMethod) {
+    auto smali = srcDir_ + "/tests/use-cases/disasm-method/assets/SmsExfil.smali";
+    if (!fs::exists(smali)) GTEST_SKIP() << "disasm-method asset not found";
+
+    auto output = chat("show me the methods in " + smali);
+    bool hasMethods = output.find("sendStolenData") != std::string::npos ||
+                      output.find("stealContacts") != std::string::npos ||
+                      output.find("exfiltrate") != std::string::npos ||
+                      output.find("SmsManager") != std::string::npos ||
+                      output.find("method") != std::string::npos;
+    EXPECT_TRUE(hasMethods) << "Should list methods:\n" << output;
+}
+
+// ── Ported from: tests/use-cases/decompile-method ────────────────
+
+TEST_F(McpE2E, DecompileMethod) {
+    auto smali = srcDir_ + "/tests/use-cases/decompile-method/assets/MalwareService.smali";
+    if (!fs::exists(smali)) GTEST_SKIP() << "decompile-method asset not found";
+
+    auto output = chat("decompile the code in " + smali);
+    bool hasJava = output.find("URL") != std::string::npos ||
+                   output.find("HttpURLConnection") != std::string::npos ||
+                   output.find("exfiltrateData") != std::string::npos ||
+                   output.find("void") != std::string::npos;
+    EXPECT_TRUE(hasJava) << "Should show Java-like code:\n" << output;
+}
+
+// ── Ported from: tests/use-cases/classes-overview ────────────────
+
+TEST_F(McpE2E, ClassesOverview) {
+    auto appDir = srcDir_ + "/tests/use-cases/classes-overview/assets";
+    if (!fs::exists(appDir)) GTEST_SKIP() << "classes-overview assets not found";
+
+    auto output = chat("show me all the classes in " + appDir);
+    bool hasClasses = output.find("MalwareService") != std::string::npos ||
+                      output.find("NetworkHelper") != std::string::npos ||
+                      output.find("DataCollector") != std::string::npos;
+    EXPECT_TRUE(hasClasses) << "Should find app classes:\n" << output;
+}
+
+// ── Ported from: tests/use-cases/xrefs ───────────────────────────
+
+TEST_F(McpE2E, Xrefs) {
+    auto smali = srcDir_ + "/tests/use-cases/xrefs/assets/MalwareService.smali";
+    if (!fs::exists(smali)) GTEST_SKIP() << "xrefs asset not found";
+
+    auto output = chat("find all references to HttpURLConnection in " + smali);
+    bool hasRefs = output.find("HttpURLConnection") != std::string::npos ||
+                   output.find("openConnection") != std::string::npos ||
+                   output.find("exfiltrateData") != std::string::npos ||
+                   output.find("reference") != std::string::npos;
+    EXPECT_TRUE(hasRefs) << "Should find HTTP references:\n" << output;
+}

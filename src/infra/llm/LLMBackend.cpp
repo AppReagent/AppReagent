@@ -3,6 +3,7 @@
 #include <chrono>
 #include <curl/curl.h>
 #include <fstream>
+#include <iostream>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 #include <thread>

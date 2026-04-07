@@ -4,8 +4,8 @@
 
 #include "features/grep/GrepTool.h"
 #include "infra/tools/ToolContext.h"
-#include "Agent.h"
-#include "Harness.h"
+#include "infra/agent/Agent.h"
+#include "infra/agent/Harness.h"
 
 namespace fs = std::filesystem;
 

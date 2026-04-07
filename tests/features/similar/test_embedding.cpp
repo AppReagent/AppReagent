@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include "infra/llm/Embedding.h"
-#include "Config.h"
+#include "infra/config/Config.h"
 
 using namespace area;
 
@@ -66,8 +66,8 @@ TEST(EmbeddingBackendTest, UnknownProviderThrows) {
 
 #include "features/similar/SimilarTool.h"
 #include "infra/tools/ToolContext.h"
-#include "Agent.h"
-#include "Harness.h"
+#include "infra/agent/Agent.h"
+#include "infra/agent/Harness.h"
 
 TEST(SimilarToolTest, ConstructsWithoutEmbeddingConfig) {
     Config config;

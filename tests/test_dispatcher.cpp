@@ -3,10 +3,10 @@
 #include <map>
 #include <thread>
 
-#include "ServerRunner.h"
-#include "JobManager.h"
+#include "features/server/ServerRunner.h"
+#include "infra/jobs/JobManager.h"
 #include "infra/llm/LLMBackend.h"
-#include "JobQueue.h"
+#include "infra/jobs/JobQueue.h"
 
 // Helper: make a Job with given id and tier
 static area::Job makeJob(int64_t id, int tier = 0, const std::string& payload = R"({"prompt":"test"})") {

@@ -1,9 +1,9 @@
 #include <gtest/gtest.h>
-#include "graph/engine/task_context.h"
-#include "graph/engine/task_graph.h"
-#include "graph/engine/graph_runner.h"
-#include "graph/nodes/code_node.h"
-#include "graph/nodes/splitter_node.h"
+#include "domains/graph/engine/task_context.h"
+#include "domains/graph/engine/task_graph.h"
+#include "domains/graph/engine/graph_runner.h"
+#include "domains/graph/nodes/code_node.h"
+#include "domains/graph/nodes/splitter_node.h"
 
 using namespace area::graph;
 
@@ -600,7 +600,7 @@ TEST(CollectorNode, CustomFn) {
 
 // --- json_extract tests ---
 
-#include "graph/util/json_extract.h"
+#include "domains/graph/util/json_extract.h"
 
 TEST(JsonExtract, FencedJsonBlock) {
     std::string input = "Here is the output:\n```json\n{\"key\": \"value\"}\n```\nDone.";

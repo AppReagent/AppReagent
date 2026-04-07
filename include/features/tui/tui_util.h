@@ -2,7 +2,7 @@
 
 #include <cmath>
 #include <string>
-#include "Agent.h"
+#include "infra/agent/Agent.h"
 
 namespace area::tui {
 

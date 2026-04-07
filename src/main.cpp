@@ -12,16 +12,16 @@
 #include <unistd.h>
 #include <curl/curl.h>
 
-#include "ArgParse.h"
-#include "Config.h"
-#include "ScanLog.h"
+#include "infra/config/ArgParse.h"
+#include "infra/config/Config.h"
+#include "features/scan/ScanLog.h"
 #include "infra/db/Database.h"
-#include "Harness.h"
-#include "ScanCommand.h"
+#include "infra/agent/Harness.h"
+#include "features/scan/ScanCommand.h"
 #include "features/tui/Tui.h"
-#include "AreaServer.h"
+#include "features/server/AreaServer.h"
 #include "infra/ipc/IPC.h"
-#include "McpServer.h"
+#include "mcp/McpWiring.h"
 #include "infra/tools/ToolRegistry.h"
 #include "features/improve/ImproveTool.h"
 #include "infra/tools/ToolContext.h"

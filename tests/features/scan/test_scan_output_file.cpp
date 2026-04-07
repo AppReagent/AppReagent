@@ -2,7 +2,7 @@
 #include <filesystem>
 #include <fstream>
 #include <nlohmann/json.hpp>
-#include "ScanOutputFile.h"
+#include "features/scan/ScanOutputFile.h"
 
 namespace fs = std::filesystem;
 

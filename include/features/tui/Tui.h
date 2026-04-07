@@ -9,7 +9,7 @@
 #include <nlohmann/json.hpp>
 #include <yoga/Yoga.h>
 
-#include "Agent.h"
+#include "infra/agent/Agent.h"
 
 namespace area {
 

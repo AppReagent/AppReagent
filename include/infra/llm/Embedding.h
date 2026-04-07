@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "Config.h"
+#include "infra/config/Config.h"
 #include "infra/db/Database.h"
 
 namespace area {

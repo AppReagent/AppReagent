@@ -2,9 +2,9 @@
 #include <filesystem>
 #include <fstream>
 
-#include "ScanCommand.h"
-#include "ScanLog.h"
-#include "graph/graphs/tier_pool.h"
+#include "features/scan/ScanCommand.h"
+#include "features/scan/ScanLog.h"
+#include "domains/graph/graphs/tier_pool.h"
 
 namespace fs = std::filesystem;
 

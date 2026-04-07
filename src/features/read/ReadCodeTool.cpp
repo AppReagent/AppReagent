@@ -1,8 +1,8 @@
 #include "features/read/ReadCodeTool.h"
 #include "infra/tools/ToolContext.h"
-#include "Agent.h"
-#include "elf/disassembler.h"
-#include "smali/parser.h"
+#include "infra/agent/Agent.h"
+#include "domains/elf/disassembler.h"
+#include "domains/smali/parser.h"
 #include "util/file_io.h"
 
 #include <filesystem>

@@ -3,7 +3,7 @@
 #include <chrono>
 #include <thread>
 
-#include "Agent.h"
+#include "infra/agent/Agent.h"
 #include "infra/llm/LLMBackend.h"
 #include "infra/tools/ToolRegistry.h"
 #include "features/sql/SqlTool.h"

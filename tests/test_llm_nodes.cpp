@@ -1,9 +1,9 @@
 #include <gtest/gtest.h>
-#include "graph/engine/graph_runner.h"
-#include "graph/engine/task_graph.h"
-#include "graph/nodes/code_node.h"
-#include "graph/nodes/llm_call_node.h"
-#include "graph/nodes/supervised_llm_call_node.h"
+#include "domains/graph/engine/graph_runner.h"
+#include "domains/graph/engine/task_graph.h"
+#include "domains/graph/nodes/code_node.h"
+#include "domains/graph/nodes/llm_call_node.h"
+#include "domains/graph/nodes/supervised_llm_call_node.h"
 #include "infra/llm/LLMBackend.h"
 
 using namespace area::graph;
@@ -273,7 +273,7 @@ TEST(SupervisedLLMCallNode, ValidationFailsAllRetries) {
     EXPECT_EQ(supervisor.callCount(), 0); // never reached supervisor
 }
 
-#include "graph/graphs/scan_task_graph.h"
+#include "domains/graph/graphs/scan_task_graph.h"
 
 TEST(TierBackends, ExactTierMatch) {
     area::AiEndpoint ep0{"t0", "mock", "", "auto"};

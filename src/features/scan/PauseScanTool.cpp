@@ -1,7 +1,7 @@
 #include "features/scan/PauseScanTool.h"
 #include "infra/tools/ToolContext.h"
-#include "Agent.h"
-#include "ScanState.h"
+#include "infra/agent/Agent.h"
+#include "features/scan/ScanState.h"
 
 namespace area {
 

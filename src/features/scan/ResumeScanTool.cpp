@@ -1,9 +1,9 @@
 #include "features/scan/ResumeScanTool.h"
 #include "infra/tools/ToolContext.h"
-#include "Agent.h"
-#include "ScanCommand.h"
-#include "ScanOutputFile.h"
-#include "ScanState.h"
+#include "infra/agent/Agent.h"
+#include "features/scan/ScanCommand.h"
+#include "features/scan/ScanOutputFile.h"
+#include "features/scan/ScanState.h"
 
 #include <sstream>
 

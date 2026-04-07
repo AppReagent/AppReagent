@@ -8,11 +8,11 @@
 #include <thread>
 #include <unistd.h>
 
-#include "Agent.h"
-#include "AreaServer.h"
+#include "infra/agent/Agent.h"
+#include "features/server/AreaServer.h"
 #include "infra/ipc/IPC.h"
 #include "infra/llm/LLMBackend.h"
-#include "ScanLog.h"
+#include "features/scan/ScanLog.h"
 #include "infra/tools/ToolRegistry.h"
 #include "features/runid/GenerateRunIdTool.h"
 #include "features/sql/SqlTool.h"

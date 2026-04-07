@@ -1,7 +1,7 @@
 #include "features/shell/ShellTool.h"
 #include "infra/tools/ToolContext.h"
-#include "Agent.h"
-#include "Harness.h"
+#include "infra/agent/Agent.h"
+#include "infra/agent/Harness.h"
 #include "infra/sandbox/Sandbox.h"
 
 namespace area {

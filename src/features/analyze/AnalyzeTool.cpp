@@ -1,7 +1,7 @@
 #include "features/analyze/AnalyzeTool.h"
 #include "infra/tools/ToolContext.h"
-#include "Agent.h"
-#include "AnalyzeCommand.h"
+#include "infra/agent/Agent.h"
+#include "features/analyze/AnalyzeCommand.h"
 
 #include <sstream>
 

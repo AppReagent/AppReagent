@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include <fstream>
 #include <nlohmann/json.hpp>
-#include "Config.h"
+#include "infra/config/Config.h"
 
 class ConfigTest : public ::testing::Test {
 protected:

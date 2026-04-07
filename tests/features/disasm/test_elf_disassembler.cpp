@@ -2,7 +2,7 @@
 #include <cstring>
 #include <elf.h>
 
-#include "elf/disassembler.h"
+#include "domains/elf/disassembler.h"
 
 // Build a minimal x86-64 ELF binary with one function in memory.
 static std::string buildTestElf() {

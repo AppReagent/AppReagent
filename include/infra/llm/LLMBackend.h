@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include "Config.h"
+#include "infra/config/Config.h"
 
 namespace area {
 

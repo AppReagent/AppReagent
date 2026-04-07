@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 #include <fstream>
 
-#include "graph/engine/graph_runner.h"
-#include "graph/graphs/scan_task_graph.h"
+#include "domains/graph/engine/graph_runner.h"
+#include "domains/graph/graphs/scan_task_graph.h"
 #include "infra/llm/LLMBackend.h"
 
 using namespace area::graph;

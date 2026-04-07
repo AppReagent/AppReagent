@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "graph/graphs/elf_analysis.h"
+#include "domains/graph/graphs/elf_analysis.h"
 
 using namespace area::graph;
 
@@ -276,10 +276,10 @@ TEST(ElfMethodAnalysis, DetectsInt80Syscall) {
 
 // ── Integration: ELF scan graph pipeline test ───────────────────────
 
-#include "graph/engine/graph_runner.h"
-#include "graph/graphs/scan_task_graph.h"
+#include "domains/graph/engine/graph_runner.h"
+#include "domains/graph/graphs/scan_task_graph.h"
 #include "infra/llm/LLMBackend.h"
-#include "elf/disassembler.h"
+#include "domains/elf/disassembler.h"
 #include <cstring>
 #include <elf.h>
 #include <fstream>

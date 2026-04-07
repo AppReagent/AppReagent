@@ -1,7 +1,7 @@
 #pragma once
 
 #include "infra/tools/Tool.h"
-#include "Config.h"
+#include "infra/config/Config.h"
 #include "infra/db/Database.h"
 
 #include <nlohmann/json.hpp>

@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "smali/parser.h"
+#include "domains/smali/parser.h"
 
 static const char* SAMPLE_SMALI = R"(
 .class public Lcom/example/Malware;

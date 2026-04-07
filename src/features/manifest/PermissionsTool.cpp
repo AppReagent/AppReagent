@@ -1,6 +1,6 @@
 #include "features/manifest/PermissionsTool.h"
 #include "infra/tools/ToolContext.h"
-#include "Agent.h"
+#include "infra/agent/Agent.h"
 #include "util/file_io.h"
 
 #include <algorithm>

@@ -1,10 +1,10 @@
 #include "features/scan/ScanTool.h"
 #include "infra/tools/ToolContext.h"
-#include "Agent.h"
-#include "Harness.h"
-#include "ScanCommand.h"
-#include "ScanLog.h"
-#include "ScanState.h"
+#include "infra/agent/Agent.h"
+#include "infra/agent/Harness.h"
+#include "features/scan/ScanCommand.h"
+#include "features/scan/ScanLog.h"
+#include "features/scan/ScanState.h"
 
 #include <sstream>
 

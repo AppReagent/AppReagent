@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include <memory>
-#include "Agent.h"
+#include "infra/agent/Agent.h"
 #include "infra/llm/LLMBackend.h"
 
 

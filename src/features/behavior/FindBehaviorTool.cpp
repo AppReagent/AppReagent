@@ -1,6 +1,6 @@
 #include "features/behavior/FindBehaviorTool.h"
 #include "infra/tools/ToolContext.h"
-#include "Agent.h"
+#include "infra/agent/Agent.h"
 
 #include <algorithm>
 #include <sstream>

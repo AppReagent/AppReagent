@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 #include "features/read/ReadCodeTool.h"
 #include "infra/tools/ToolContext.h"
-#include "Agent.h"
-#include "Harness.h"
+#include "infra/agent/Agent.h"
+#include "infra/agent/Harness.h"
 
 #include <filesystem>
 #include <fstream>

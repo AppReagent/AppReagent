@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
-#include "ArgParse.h"
-#include "Error.h"
+#include "infra/config/ArgParse.h"
+#include "infra/config/Error.h"
 
 // Helper to build argv from strings
 struct ArgHelper {

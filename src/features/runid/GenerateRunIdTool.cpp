@@ -1,7 +1,7 @@
 #include "features/runid/GenerateRunIdTool.h"
 #include "infra/tools/ToolContext.h"
-#include "Agent.h"
-#include "ScanLog.h"
+#include "infra/agent/Agent.h"
+#include "features/scan/ScanLog.h"
 
 namespace area {
 

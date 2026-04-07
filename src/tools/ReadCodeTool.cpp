@@ -197,7 +197,6 @@ std::optional<ToolResult> ReadCodeTool::tryExecute(const std::string& action, To
     }
 
     if (fs::is_directory(path)) {
-        // List directory contents
         std::ostringstream out;
         out << "Directory: " << path << "\n\n";
         int smaliCount = 0, elfCount = 0, otherCount = 0;
@@ -263,7 +262,6 @@ std::optional<ToolResult> ReadCodeTool::tryExecute(const std::string& action, To
         return ToolResult{"OBSERVATION: Could not read file (empty or binary): " + path};
     }
 
-    // Truncate large files
     if (contents.size() > 10000) {
         contents = contents.substr(0, 10000) + "\n\n... (truncated at 10000 chars, file is "
                    + std::to_string(contents.size()) + " chars total)";

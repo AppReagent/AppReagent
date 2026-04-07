@@ -506,7 +506,6 @@ void Tui::renderTaskPane(int startRow, int height, int width) {
     std::unique_lock lk(messagesMu_, std::try_to_lock);
     if (!lk.owns_lock()) return;
 
-    // Collect thinking lines
     std::vector<std::string> taskLines;
     for (auto& msg : messages_) {
         if (msg.who == Message::AGENT && msg.agentType == AgentMessage::THINKING && !msg.content.empty()) {
@@ -539,7 +538,6 @@ void Tui::renderTaskPane(int startRow, int height, int width) {
     // Auto-scroll to bottom
     int visibleStart = std::max(0, totalLines - innerHeight);
 
-    // Yellow border color
     auto setYellow = [&]() {
         appendRGB(outputBuf_, 200, 160, 40);
     };
@@ -581,7 +579,6 @@ void Tui::renderTaskPane(int startRow, int height, int width) {
             int innerW = width - 5; // space + │ + space + ... + │ + space
             if ((int)text.size() > innerW) text = truncateUTF8(text, innerW);
             outputBuf_ += text;
-            // Pad to fill
             int pad = innerW - (int)text.size();
             if (pad > 0) outputBuf_ += std::string(pad, ' ');
             resetStyle();
@@ -855,7 +852,6 @@ void Tui::renderInput(int row, int width) {
         setColor(COLOR_GRAY);
         outputBuf_ += rightHint;
     } else if (processing_) {
-        // Yellow thinking circles
         int textEnd = 3 + (int)visible.size();
         int dotsStart = width - 7;
         if (dotsStart > textEnd) {

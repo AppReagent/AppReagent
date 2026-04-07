@@ -4,8 +4,6 @@
 
 using namespace area;
 
-// --- EmbeddingStore without backend ---
-
 class EmbeddingHelperTest : public ::testing::Test {
 protected:
     Database db_;
@@ -24,8 +22,6 @@ TEST_F(EmbeddingHelperTest, EmbedAndStoreSkipsWithoutBackend) {
     // Should not throw — just silently skips
     EXPECT_NO_THROW(store.embedAndStore("run1", "/path", "hash", "Class", "method", "content"));
 }
-
-// --- EmbeddingBackend factory ---
 
 TEST(EmbeddingBackendTest, CreateOllamaBackend) {
     EmbeddingEndpoint ep;
@@ -67,8 +63,6 @@ TEST(EmbeddingBackendTest, UnknownProviderThrows) {
     ep.provider = "unknown";
     EXPECT_THROW(EmbeddingBackend::create(ep), std::runtime_error);
 }
-
-// --- SimilarTool matching ---
 
 #include "tools/SimilarTool.h"
 #include "tools/ToolContext.h"

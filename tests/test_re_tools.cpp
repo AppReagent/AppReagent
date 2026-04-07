@@ -11,7 +11,6 @@
 
 namespace fs = std::filesystem;
 
-// Helper to create a temp file with given content
 static std::string createTempFile(const std::string& suffix, const std::string& content) {
     std::string path = "/tmp/test_re_tools_" + std::to_string(getpid()) + suffix;
     std::ofstream f(path);
@@ -25,7 +24,6 @@ static void removeTempFile(const std::string& path) {
     fs::remove(path, ec);
 }
 
-// Collect messages from tool execution
 struct ToolMessages {
     std::vector<area::AgentMessage> messages;
     area::MessageCallback cb() {
@@ -39,8 +37,6 @@ struct ToolMessages {
         return out;
     }
 };
-
-// ==================== STRINGS Tool Tests ====================
 
 TEST(StringsTool, ExtractsUrlsFromSmali) {
     std::string smali = R"(
@@ -212,8 +208,6 @@ TEST(StringsTool, HandlesNonexistentPath) {
     EXPECT_NE(result->observation.find("not found"), std::string::npos);
 }
 
-// ==================== DISASM Tool Tests ====================
-
 TEST(DisasmTool, ListsMethodsInSmali) {
     std::string smali = R"(
 .class public Lcom/test/Foo;
@@ -303,8 +297,6 @@ TEST(DisasmTool, ShowsFieldInfo) {
 
     removeTempFile(path);
 }
-
-// ==================== PERMISSIONS Tool Tests ====================
 
 TEST(PermissionsTool, ParsesDangerousPermissions) {
     std::string manifest = R"(<?xml version="1.0" encoding="utf-8"?>
@@ -431,8 +423,6 @@ TEST(PermissionsTool, HandlesManifestNotFound) {
     ASSERT_TRUE(result.has_value());
     EXPECT_NE(result->observation.find("not found"), std::string::npos);
 }
-
-// ==================== Tool Prefix Tests ====================
 
 TEST(ToolPrefixes, AllNewToolsIgnoreUnrelatedActions) {
     area::Harness h;

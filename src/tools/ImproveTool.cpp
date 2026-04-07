@@ -202,7 +202,6 @@ int ImproveTool::runAgentDocker(const std::string& prompt, bool headful,
             pclose(logFp);
         }
 
-        // Get exit code
         auto waitResult = exec("sudo docker wait '" + escapeShell(containerId) + "' 2>/dev/null");
         std::remove(promptFile.c_str());
         try { return std::stoi(waitResult.output); } catch (...) { return -1; }

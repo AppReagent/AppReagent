@@ -99,7 +99,6 @@ std::optional<ToolResult> ReadFileTool::tryExecute(const std::string& action, To
     }
 
     if (fs::is_directory(filePath)) {
-        // List directory contents
         std::ostringstream out;
         out << "Directory: " << filePath << "\n\n";
         std::vector<std::string> entries;
@@ -122,7 +121,6 @@ std::optional<ToolResult> ReadFileTool::tryExecute(const std::string& action, To
         return ToolResult{"OBSERVATION: " + result};
     }
 
-    // Check file size
     std::error_code ec;
     auto fsize = fs::file_size(filePath, ec);
     if (ec) {
@@ -133,7 +131,6 @@ std::optional<ToolResult> ReadFileTool::tryExecute(const std::string& action, To
                           " KB). Use a line range: READ: " + filePath + " | 1-100"};
     }
 
-    // Read all lines
     std::ifstream file(filePath);
     if (!file.is_open()) {
         return ToolResult{"OBSERVATION: Cannot open file: " + filePath};
@@ -152,7 +149,6 @@ std::optional<ToolResult> ReadFileTool::tryExecute(const std::string& action, To
         while (!methodName.empty() && methodName[0] == ' ') methodName.erase(0, 1);
 
         if (methodName.empty()) {
-            // List all methods
             std::ostringstream out;
             out << "Methods in " << filePath << ":\n\n";
             for (int i = 0; i < (int)lines.size(); i++) {

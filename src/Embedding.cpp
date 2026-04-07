@@ -8,7 +8,6 @@
 
 namespace area {
 
-// RAII wrapper (same as LLMBackend.cpp)
 struct EmbCurlHandle {
     CURL* curl = nullptr;
     struct curl_slist* headers = nullptr;
@@ -23,8 +22,6 @@ struct EmbCurlHandle {
     EmbCurlHandle(const EmbCurlHandle&) = delete;
     EmbCurlHandle& operator=(const EmbCurlHandle&) = delete;
 };
-
-// --- HTTP helper (same pattern as LLMBackend.cpp) ---
 
 static size_t embCurlWriteCb(char* data, size_t size, size_t nmemb, std::string* out) {
     size_t total = size * nmemb;
@@ -60,16 +57,12 @@ static std::string embHttpPost(const std::string& url,
     return response;
 }
 
-// --- EmbeddingBackend factory ---
-
 std::unique_ptr<EmbeddingBackend> EmbeddingBackend::create(const EmbeddingEndpoint& ep) {
     if (ep.provider == "ollama") return std::make_unique<OllamaEmbeddingBackend>(ep);
     if (ep.provider == "openai" || ep.provider == "lmstudio")
         return std::make_unique<OpenAIEmbeddingBackend>(ep);
     throw std::runtime_error("unknown embedding provider: " + ep.provider);
 }
-
-// --- Ollama ---
 
 OllamaEmbeddingBackend::OllamaEmbeddingBackend(const EmbeddingEndpoint& ep)
     : url_(ep.url), model_(ep.model) {
@@ -102,8 +95,6 @@ std::vector<float> OllamaEmbeddingBackend::embed(const std::string& text) {
     return result;
 }
 
-// --- OpenAI ---
-
 OpenAIEmbeddingBackend::OpenAIEmbeddingBackend(const EmbeddingEndpoint& ep)
     : url_(ep.url), model_(ep.model), api_key_(ep.api_key) {
     dimensions_ = ep.dimensions;
@@ -135,8 +126,6 @@ std::vector<float> OpenAIEmbeddingBackend::embed(const std::string& text) {
     }
     return result;
 }
-
-// --- EmbeddingStore ---
 
 EmbeddingStore::EmbeddingStore(Database& db, EmbeddingBackend* backend)
     : db_(db), backend_(backend) {}

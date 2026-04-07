@@ -155,7 +155,6 @@ AnalysisResult AnalyzeCommand::run(const std::string& run_id) {
         }
     });
 
-    // Run the graph
     graph::TaskContext initial;
     initial.set("run_id", resolvedId);
     initial.set("scan_goal", scanGoal);

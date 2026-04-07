@@ -14,9 +14,7 @@ std::optional<ToolResult> TuiTool::tryExecute(const std::string& action, ToolCon
     std::string rest = action.substr(action.find(':') != std::string::npos
                                      ? action.find(':') + 1
                                      : 4);
-    // Trim leading whitespace
     while (!rest.empty() && rest[0] == ' ') rest.erase(0, 1);
-    // Lowercase
     std::transform(rest.begin(), rest.end(), rest.begin(),
                    [](unsigned char c) { return std::tolower(c); });
 
@@ -33,7 +31,6 @@ std::optional<ToolResult> TuiTool::tryExecute(const std::string& action, ToolCon
         return ToolResult{"Error: expected 'show <panel>' or 'hide <panel>'. Panels: task"};
     }
 
-    // Trim panel name
     while (!panel.empty() && panel.back() == ' ') panel.pop_back();
 
     if (panel != "task") {

@@ -348,7 +348,6 @@ std::pair<std::string, bool> McpServer::toolServerStop() {
         ipc::closeFd(fd);
     }
 
-    // Wait for exit
     for (int i = 0; i < 20; i++) {
         if (!isServerRunning()) break;
         usleep(500000);
@@ -414,11 +413,9 @@ std::pair<std::string, bool> McpServer::toolChat(const json& args) {
         }
     }
 
-    // Send user message
     ipc::sendLine(fd, {{"type", "user_input"}, {"chat_id", chatId},
                        {"content", message}});
 
-    // Collect response
     std::string result;
     bool done = false;
     while (!done) {

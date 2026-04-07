@@ -78,7 +78,6 @@ static ClassInfo parseSmaliFile(const std::string& path) {
 
     std::string line;
     while (std::getline(file, line)) {
-        // Trim leading whitespace
         size_t start = line.find_first_not_of(" \t");
         if (start == std::string::npos) continue;
         std::string trimmed = line.substr(start);

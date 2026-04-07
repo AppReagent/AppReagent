@@ -97,14 +97,12 @@ std::optional<ToolResult> ManifestTool::tryExecute(const std::string& action, To
         return ToolResult{"OBSERVATION: Cannot open " + manifestPath};
     }
 
-    // Read all lines
     std::vector<std::string> lines;
     std::string line;
     while (std::getline(file, line)) {
         lines.push_back(line);
     }
 
-    // Extract manifest information
     std::string packageName;
     std::vector<std::string> permissions;
     std::vector<std::string> activities;

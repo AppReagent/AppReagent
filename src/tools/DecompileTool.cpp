@@ -15,7 +15,6 @@ namespace fs = std::filesystem;
 
 namespace area {
 
-// --- Smali type descriptor to Java type ---
 static std::string typeToJava(const std::string& desc) {
     if (desc.empty()) return "void";
     if (desc == "V") return "void";
@@ -353,8 +352,6 @@ static std::string decompileMethod(const std::vector<std::string>& lines,
             }
             return "";
         };
-
-        // --- Instruction decompilation ---
 
         // const-string
         if (opcode == "const-string" || opcode == "const-string/jumbo") {

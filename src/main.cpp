@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <functional>
 #include <map>
 #include <fcntl.h>
 #include <poll.h>
@@ -29,6 +30,10 @@
 namespace fs = std::filesystem;
 
 static constexpr int kServerStartPollIter = 24; // x 500ms = 12s
+static constexpr int kChatPollTimeoutMs = 60000;
+static constexpr int kStatePollIter = 50;
+static constexpr int kStatePollIntervalMs = 200;
+static constexpr int kShutdownDelayUs = 100000;
 
 static std::string getDataDir() {
     if (auto dir = std::getenv("AREA_DATA_DIR")) return dir;
@@ -37,14 +42,6 @@ static std::string getDataDir() {
 
 static std::string getSockPath() {
     return getDataDir() + "/area.sock";
-}
-
-static int runScan(area::Config& config, area::Database& db,
-                   const std::string& target, const std::string& runId,
-                   const std::string& goal = "") {
-    area::ScanCommand scan(config, db);
-    auto summary = scan.run(target, runId, goal);
-    return (summary.files_error > 0) ? 1 : 0;
 }
 
 static bool launchServer(const std::string& dataDir, const std::string& sockPath) {
@@ -89,18 +86,197 @@ static bool launchServer(const std::string& dataDir, const std::string& sockPath
     return false;
 }
 
-static int runTui(area::Config& config, area::Database& db) {
+static int connectToServer() {
     std::string sockPath = getSockPath();
-    int sockFd = area::ipc::connectTo(sockPath);
+    int fd = area::ipc::connectTo(sockPath);
+    if (fd >= 0) return fd;
 
-    if (sockFd < 0) {
-        // Auto-launch server
-        if (!launchServer(getDataDir(), sockPath)) return 1;
-        sockFd = area::ipc::connectTo(sockPath);
-        if (sockFd < 0) {
-            std::cerr << "Could not connect to server after launch" << std::endl;
-            return 1;
+    if (!launchServer(getDataDir(), sockPath)) return -1;
+    return area::ipc::connectTo(sockPath);
+}
+
+// --- Command handlers ---
+
+static int cmdMcp() {
+    signal(SIGPIPE, SIG_IGN);
+    area::McpServer mcp(getDataDir(), fs::current_path().string());
+    return mcp.run();
+}
+
+static int cmdScan(area::Config& config, area::Database& db, area::ArgParse& args) {
+    auto target = args.getPositionalArg(2);
+    if (!target) {
+        std::cerr << "Usage: area scan <path-or-jsonl> [--run-id <id>] [--goal <question>]" << std::endl;
+        return 1;
+    }
+
+    area::ScanCommand scan(config, db);
+    if (target->ends_with(".jsonl")) {
+        auto summary = scan.runFromFile(*target);
+        return (summary.files_error > 0) ? 1 : 0;
+    }
+
+    auto runId = args.getNamedArg("run-id").value_or("");
+    auto goal = args.getNamedArg("goal").value_or("");
+    auto summary = scan.run(*target, runId, goal);
+    return (summary.files_error > 0) ? 1 : 0;
+}
+
+static int cmdTest(area::Config& config) {
+    if (config.ai_endpoints.empty()) {
+        std::cerr << "No ai_endpoints configured" << std::endl;
+        return 1;
+    }
+
+    int exitCode = 0;
+    for (auto& ep : config.ai_endpoints) {
+        std::cerr << ep.id << " (" << ep.provider << " " << ep.url << ") ... " << std::flush;
+        auto backend = area::LLMBackend::create(ep);
+        auto start = std::chrono::steady_clock::now();
+        try {
+            auto result = backend->chat("Reply with just 'ok'.", {{"user", "ping"}});
+            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start).count();
+            std::cerr << "ok " << ms << "ms (" << result.substr(0, 40) << ")" << std::endl;
+        } catch (const std::exception& e) {
+            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start).count();
+            std::cerr << "FAIL " << ms << "ms (" << e.what() << ")" << std::endl;
+            exitCode = 1;
         }
+    }
+    return exitCode;
+}
+
+static int cmdServer(area::Config& config) {
+    area::AreaServer server(config, getDataDir());
+    server.run();
+    return 0;
+}
+
+static int cmdKillServer() {
+    int fd = area::ipc::connectTo(getSockPath());
+    if (fd < 0) {
+        std::cerr << "No server running" << std::endl;
+        return 1;
+    }
+    area::ipc::sendLine(fd, {{"type", "shutdown"}});
+    usleep(kShutdownDelayUs);
+    area::ipc::closeFd(fd);
+    std::cerr << "Server shutdown sent" << std::endl;
+    return 0;
+}
+
+static void waitForState(int sockFd) {
+    for (int i = 0; i < kStatePollIter; i++) {
+        struct pollfd p = {sockFd, POLLIN, 0};
+        if (poll(&p, 1, kStatePollIntervalMs) > 0) {
+            bool gotState = false;
+            while (auto msg = area::ipc::readLine(sockFd)) {
+                if (msg->value("type", "") == "state") gotState = true;
+            }
+            if (gotState) break;
+        }
+    }
+}
+
+static void processChatResponse(int sockFd) {
+    bool done = false;
+    while (!done) {
+        struct pollfd rpfd = {sockFd, POLLIN, 0};
+        if (poll(&rpfd, 1, kChatPollTimeoutMs) <= 0) break;
+        while (auto resp = area::ipc::readLine(sockFd)) {
+            auto type = resp->value("type", "");
+            if (type == "agent_msg") {
+                auto t = (*resp)["msg"].value("type", "");
+                auto c = (*resp)["msg"].value("content", "");
+                if (t == "answer") std::cout << c << std::endl;
+                else if (t == "sql") std::cout << "[sql] " << c << std::endl;
+                else if (t == "result") std::cout << "[result] " << c << std::endl;
+                else if (t == "error") std::cerr << "[error] " << c << std::endl;
+            } else if (type == "state") {
+                if (!resp->value("processing", true)) done = true;
+            }
+        }
+    }
+}
+
+static int cmdChat(area::ArgParse& args) {
+    int sockFd = connectToServer();
+    if (sockFd < 0) {
+        std::cerr << "Could not connect to server" << std::endl;
+        return 1;
+    }
+
+    auto chatId = args.getPositionalArg(2).value_or("default");
+    area::ipc::sendLine(sockFd, {{"type", "attach"}, {"chat_id", chatId}});
+    area::ipc::sendLine(sockFd, {{"type", "set_dangerous"}, {"chat_id", chatId}, {"enabled", true}});
+
+    waitForState(sockFd);
+
+    std::vector<std::string> queries;
+    std::string line;
+    while (std::getline(std::cin, line)) {
+        if (!line.empty()) queries.push_back(line);
+    }
+
+    for (auto& query : queries) {
+        if (query == "/clear") {
+            area::ipc::sendLine(sockFd, {{"type", "clear_context"}, {"chat_id", chatId}});
+            continue;
+        }
+        area::ipc::sendLine(sockFd, {{"type", "user_input"}, {"chat_id", chatId}, {"content", query}});
+        processChatResponse(sockFd);
+    }
+
+    area::ipc::closeFd(sockFd);
+    return 0;
+}
+
+static area::ToolContext makeImproveContext() {
+    area::ToolRegistry dummyTools;
+    area::Harness dummyHarness;
+    return area::ToolContext{
+        [](const area::AgentMessage& msg) {
+            if (msg.type == area::AgentMessage::THINKING)
+                std::cerr << msg.content << std::endl;
+            else if (msg.type == area::AgentMessage::RESULT)
+                std::cout << msg.content << std::endl;
+            else if (msg.type == area::AgentMessage::ERROR)
+                std::cerr << "[error] " << msg.content << std::endl;
+        },
+        nullptr,
+        dummyHarness
+    };
+}
+
+static int cmdEvaluate(area::Config& config, area::Database& db) {
+    area::ImproveTool improve(&config, db, fs::current_path().string());
+    auto ctx = makeImproveContext();
+    auto result = improve.tryExecute("IMPROVE: evaluate", ctx);
+    return (result && result->observation.find("Error") != std::string::npos) ? 1 : 0;
+}
+
+static int cmdImprove(area::Config& config, area::Database& db, area::ArgParse& args) {
+    auto task = args.getPositionalArg(2);
+    if (!task) {
+        std::cerr << "Usage: area improve <task description>" << std::endl;
+        std::cerr << "  area improve \"improve triage accuracy\"" << std::endl;
+        std::cerr << "  area evaluate  (eval-only, no Claude Code needed)" << std::endl;
+        return 1;
+    }
+
+    area::ImproveTool improve(&config, db, fs::current_path().string());
+    auto ctx = makeImproveContext();
+    auto result = improve.tryExecute("IMPROVE: " + *task, ctx);
+    return (result && result->observation.find("Error") != std::string::npos) ? 1 : 0;
+}
+
+static int cmdTui(area::Config& config) {
+    int sockFd = connectToServer();
+    if (sockFd < 0) {
+        std::cerr << "Could not connect to server" << std::endl;
+        return 1;
     }
 
     std::cerr << "Connected to server" << std::endl;
@@ -110,17 +286,26 @@ static int runTui(area::Config& config, area::Database& db) {
     return 0;
 }
 
+static void initProcess() {
+    signal(SIGPIPE, SIG_IGN);
+
+    struct rlimit rl;
+    if (getrlimit(RLIMIT_NOFILE, &rl) == 0) {
+        rl.rlim_cur = rl.rlim_max;
+        setrlimit(RLIMIT_NOFILE, &rl);
+    }
+
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+}
+
 int main(int argc, char* argv[]) {
     area::ArgParse args(argc, argv);
     args.parse();
 
+    auto command = args.getPositionalArg(1).value_or("tui");
+
     // MCP server: lightweight protocol bridge — no config or DB needed.
-    // Must be checked before config/DB init so it works even without them.
-    if (args.getPositionalArg(1) == "mcp") {
-        signal(SIGPIPE, SIG_IGN);
-        area::McpServer mcp(getDataDir(), fs::current_path().string());
-        return mcp.run();
-    }
+    if (command == "mcp") return cmdMcp();
 
     area::Config config;
     try {
@@ -131,21 +316,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Ignore SIGPIPE so writing to a disconnected socket returns EPIPE
-    // instead of killing the process.
-    signal(SIGPIPE, SIG_IGN);
-
-    // Raise file descriptor limit to avoid "too many open files" during
-    // concurrent scans (many parallel curl connections + file reads).
-    {
-        struct rlimit rl;
-        if (getrlimit(RLIMIT_NOFILE, &rl) == 0) {
-            rl.rlim_cur = rl.rlim_max;
-            setrlimit(RLIMIT_NOFILE, &rl);
-        }
-    }
-
-    curl_global_init(CURL_GLOBAL_DEFAULT);
+    initProcess();
 
     area::Database db;
     try {
@@ -156,168 +327,24 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    int exitCode = 0;
-    auto command = args.getPositionalArg(1);
+    using Handler = std::function<int()>;
+    const std::map<std::string, Handler> commands = {
+        {"scan",        [&] { return cmdScan(config, db, args); }},
+        {"test",        [&] { return cmdTest(config); }},
+        {"server",      [&] { return cmdServer(config); }},
+        {"kill-server", [&] { return cmdKillServer(); }},
+        {"chat",        [&] { return cmdChat(args); }},
+        {"evaluate",    [&] { return cmdEvaluate(config, db); }},
+        {"improve",     [&] { return cmdImprove(config, db, args); }},
+        {"tui",         [&] { return cmdTui(config); }},
+    };
 
-    if (command == "scan") {
-        auto target = args.getPositionalArg(2);
-        if (!target) {
-            std::cerr << "Usage: area scan <path-or-jsonl> [--run-id <id>] [--goal <question>]" << std::endl;
-            exitCode = 1;
-        } else if (target->ends_with(".jsonl")) {
-            area::ScanCommand scan(config, db);
-            auto summary = scan.runFromFile(*target);
-            exitCode = (summary.files_error > 0) ? 1 : 0;
-        } else {
-            auto runId = args.getNamedArg("run-id").value_or("");
-            auto goal = args.getNamedArg("goal").value_or("");
-            exitCode = runScan(config, db, *target, runId, goal);
-        }
-    } else if (command == "test") {
-        if (config.ai_endpoints.empty()) {
-            std::cerr << "No ai_endpoints configured" << std::endl;
-            exitCode = 1;
-        } else {
-            for (auto& ep : config.ai_endpoints) {
-                std::cerr << ep.id << " (" << ep.provider << " " << ep.url << ") ... " << std::flush;
-                auto backend = area::LLMBackend::create(ep);
-                auto start = std::chrono::steady_clock::now();
-                try {
-                    auto result = backend->chat("Reply with just 'ok'.", {{"user", "ping"}});
-                    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::steady_clock::now() - start).count();
-                    std::cerr << "ok " << ms << "ms (" << result.substr(0, 40) << ")" << std::endl;
-                } catch (const std::exception& e) {
-                    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::steady_clock::now() - start).count();
-                    std::cerr << "FAIL " << ms << "ms (" << e.what() << ")" << std::endl;
-                    exitCode = 1;
-                }
-            }
-        }
-    } else if (command == "server") {
-        area::AreaServer server(config, getDataDir());
-        server.run();
-    } else if (command == "kill-server") {
-        int fd = area::ipc::connectTo(getSockPath());
-        if (fd < 0) {
-            std::cerr << "No server running" << std::endl;
-            exitCode = 1;
-        } else {
-            area::ipc::sendLine(fd, {{"type", "shutdown"}});
-            usleep(100000);
-            area::ipc::closeFd(fd);
-            std::cerr << "Server shutdown sent" << std::endl;
-        }
-    } else if (command == "chat") {
-        std::string sockPath = getSockPath();
-        int sockFd = area::ipc::connectTo(sockPath);
-        if (sockFd < 0) {
-            if (!launchServer(getDataDir(), sockPath)) { exitCode = 1; }
-            else sockFd = area::ipc::connectTo(sockPath);
-        }
-        if (sockFd < 0) {
-            std::cerr << "Could not connect to server" << std::endl;
-            exitCode = 1;
-        } else {
-            auto chatId = args.getPositionalArg(2).value_or("default");
-            area::ipc::sendLine(sockFd, {{"type", "attach"}, {"chat_id", chatId}});
-            area::ipc::sendLine(sockFd, {{"type", "set_dangerous"}, {"chat_id", chatId}, {"enabled", true}});
-
-            for (int i = 0; i < 50; i++) {
-                struct pollfd p = {sockFd, POLLIN, 0};
-                if (poll(&p, 1, 200) > 0) {
-                    bool gotState = false;
-                    while (auto msg = area::ipc::readLine(sockFd)) {
-                        if (msg->value("type", "") == "state") gotState = true;
-                    }
-                    if (gotState) break;
-                }
-            }
-
-            std::vector<std::string> queries;
-            std::string line;
-            while (std::getline(std::cin, line)) {
-                if (!line.empty()) queries.push_back(line);
-            }
-
-            for (auto& query : queries) {
-                if (query == "/clear") {
-                    area::ipc::sendLine(sockFd, {{"type", "clear_context"}, {"chat_id", chatId}});
-                    continue;
-                }
-                area::ipc::sendLine(sockFd, {{"type", "user_input"}, {"chat_id", chatId}, {"content", query}});
-
-                bool done = false;
-                while (!done) {
-                    struct pollfd rpfd = {sockFd, POLLIN, 0};
-                    if (poll(&rpfd, 1, 60000) <= 0) break;
-                    while (auto resp = area::ipc::readLine(sockFd)) {
-                        auto type = resp->value("type", "");
-                        if (type == "agent_msg") {
-                            auto t = (*resp)["msg"].value("type", "");
-                            auto c = (*resp)["msg"].value("content", "");
-                            if (t == "answer") std::cout << c << std::endl;
-                            else if (t == "sql") std::cout << "[sql] " << c << std::endl;
-                            else if (t == "result") std::cout << "[result] " << c << std::endl;
-                            else if (t == "error") std::cerr << "[error] " << c << std::endl;
-                        } else if (type == "state") {
-                            if (!resp->value("processing", true)) done = true;
-                        }
-                    }
-                }
-            }
-            area::ipc::closeFd(sockFd);
-        }
-    } else if (command == "evaluate") {
-        area::ImproveTool improve(&config, db, fs::current_path().string());
-        // Run eval-only via a minimal ToolContext
-        area::ToolRegistry dummyTools;
-        area::Harness dummyHarness;
-        area::ToolContext ctx{
-            [](const area::AgentMessage& msg) {
-                if (msg.type == area::AgentMessage::THINKING)
-                    std::cerr << msg.content << std::endl;
-                else if (msg.type == area::AgentMessage::RESULT)
-                    std::cout << msg.content << std::endl;
-                else if (msg.type == area::AgentMessage::ERROR)
-                    std::cerr << "[error] " << msg.content << std::endl;
-            },
-            nullptr,
-            dummyHarness
-        };
-        auto result = improve.tryExecute("IMPROVE: evaluate", ctx);
-        if (result && result->observation.find("Error") != std::string::npos) exitCode = 1;
-    } else if (command == "improve") {
-        auto task = args.getPositionalArg(2);
-        if (!task) {
-            std::cerr << "Usage: area improve <task description>" << std::endl;
-            std::cerr << "  area improve \"improve triage accuracy\"" << std::endl;
-            std::cerr << "  area evaluate  (eval-only, no Claude Code needed)" << std::endl;
-            exitCode = 1;
-        } else {
-            area::ImproveTool improve(&config, db, fs::current_path().string());
-            area::ToolRegistry dummyTools;
-            area::Harness dummyHarness;
-            area::ToolContext ctx{
-                [](const area::AgentMessage& msg) {
-                    if (msg.type == area::AgentMessage::THINKING)
-                        std::cerr << msg.content << std::endl;
-                    else if (msg.type == area::AgentMessage::RESULT)
-                        std::cout << msg.content << std::endl;
-                    else if (msg.type == area::AgentMessage::ERROR)
-                        std::cerr << "[error] " << msg.content << std::endl;
-                },
-                nullptr,
-                dummyHarness
-            };
-            auto result = improve.tryExecute("IMPROVE: " + *task, ctx);
-            if (result && result->observation.find("Error") != std::string::npos) exitCode = 1;
-        }
-    } else if (!command || command == "tui") {
-        exitCode = runTui(config, db);
+    int exitCode;
+    auto it = commands.find(command);
+    if (it != commands.end()) {
+        exitCode = it->second();
     } else {
-        std::cerr << "Unknown command: " << *command << std::endl;
+        std::cerr << "Unknown command: " << command << std::endl;
         std::cerr << "Usage: area [server | kill-server | chat | scan <path> | tui | test | evaluate | improve <task> | mcp]" << std::endl;
         exitCode = 1;
     }

@@ -118,6 +118,13 @@ TaskGraph buildAnalyzeTaskGraph(const TierBackends& backends,
             items.push_back(std::move(empty));
         }
 
+        // Tag each item with total count for progress reporting
+        int total = (int)items.size();
+        for (int i = 0; i < (int)items.size(); i++) {
+            items[i].set("finding_index", i + 1);
+            items[i].set("total_findings", total);
+        }
+
         return items;
     });
 
@@ -197,8 +204,9 @@ TaskGraph buildAnalyzeTaskGraph(const TierBackends& backends,
         if (!items.empty()) {
             if (items[0].has("run_id")) result.set("run_id", items[0].get("run_id"));
             if (items[0].has("scan_goal")) result.set("scan_goal", items[0].get("scan_goal"));
-            if (items[0].has("files_analyzed")) result.set("files_analyzed", items[0].get("files_analyzed"));
         }
+        // Set findings_count to number of items analyzed
+        result.set("files_analyzed", (int)collected.size());
         return result;
     });
 

@@ -84,6 +84,17 @@ AnalysisResult AnalyzeCommand::run(const std::string& run_id) {
         return result;
     }
 
+    // Check for previous analyses
+    auto prev = db_.executeParams(
+        "SELECT threat_level, confidence, risk_score, created_at FROM analyze_results "
+        "WHERE run_id = $1 ORDER BY created_at DESC LIMIT 1",
+        {resolvedId});
+    if (prev.ok() && !prev.rows.empty()) {
+        emitLog("Note: run " + resolvedId + " was previously analyzed (" +
+                prev.rows[0][0] + ", confidence=" + prev.rows[0][1] +
+                "%, " + prev.rows[0][3] + "). Re-analyzing...");
+    }
+
     std::string scanGoal = loadScanGoal(resolvedId);
     emitLog("Analyzing run " + resolvedId + " (goal: " + scanGoal.substr(0, 80) + "...)");
 
@@ -107,6 +118,11 @@ AnalysisResult AnalyzeCommand::run(const std::string& run_id) {
             if (ctx.has("method_name")) {
                 auto mn = ctx.get("method_name").get<std::string>();
                 if (!mn.empty()) label += ": " + mn;
+            }
+            // Show progress (e.g., "analyze_finding: sendSms [3/12]")
+            if (ctx.has("finding_index") && ctx.has("total_findings")) {
+                label += " [" + std::to_string(ctx.get("finding_index").get<int>()) +
+                         "/" + std::to_string(ctx.get("total_findings").get<int>()) + "]";
             }
             emitLog(label);
         }
@@ -145,6 +161,9 @@ AnalysisResult AnalyzeCommand::run(const std::string& run_id) {
     }
 
     // Extract results
+    int findingsCount = graphResult.has("files_analyzed")
+        ? graphResult.get("files_analyzed").get<int>() : 0;
+
     if (graphResult.has("analysis_result")) {
         auto j = graphResult.get("analysis_result");
         result.summary = j.value("summary", "");
@@ -154,7 +173,18 @@ AnalysisResult AnalyzeCommand::run(const std::string& run_id) {
         result.full_json = j.dump(2);
         emitLog("Analysis complete: " + result.threat_level +
                 " (confidence=" + std::to_string(result.confidence) +
-                ", risk=" + std::to_string(result.risk_score) + ")");
+                ", risk=" + std::to_string(result.risk_score) + "/100)");
+
+        // Persist to analyze_results table
+        db_.executeParams(
+            "INSERT INTO analyze_results (run_id, threat_level, confidence, risk_score, "
+            "summary, full_json, findings_count) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            {resolvedId, result.threat_level,
+             std::to_string(result.confidence),
+             std::to_string(result.risk_score),
+             result.summary, result.full_json,
+             std::to_string(findingsCount)});
     } else if (graphResult.has("llm_response")) {
         result.full_json = graphResult.get("llm_response").get<std::string>();
         result.summary = result.full_json;

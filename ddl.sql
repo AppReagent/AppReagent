@@ -106,6 +106,20 @@ BEGIN
     END IF;
 END $$;
 
+CREATE TABLE IF NOT EXISTS analyze_results (
+    id           BIGSERIAL PRIMARY KEY,
+    run_id       TEXT NOT NULL,
+    threat_level TEXT NOT NULL DEFAULT 'unknown',
+    confidence   INTEGER NOT NULL DEFAULT 0,
+    risk_score   INTEGER NOT NULL DEFAULT 0,
+    summary      TEXT NOT NULL DEFAULT '',
+    full_json    JSONB NOT NULL DEFAULT '{}',
+    findings_count INTEGER NOT NULL DEFAULT 0,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_analyze_results_run ON analyze_results (run_id);
+
 -- Migration: add threat_category column for existing databases
 DO $$
 BEGIN

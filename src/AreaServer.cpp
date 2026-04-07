@@ -107,6 +107,14 @@ AreaServer::AreaServer(Config config, const std::string& dataDir)
 
 AreaServer::~AreaServer() {
     shutdown();
+    // Join all processing threads before destroying ChatSessions to prevent
+    // use-after-free / std::terminate from destroying a joinable thread.
+    std::lock_guard lk(chatsMu_);
+    for (auto& [id, chat] : chats_) {
+        if (chat->processingThread.joinable()) {
+            chat->processingThread.join();
+        }
+    }
 }
 
 std::string AreaServer::generateId() {

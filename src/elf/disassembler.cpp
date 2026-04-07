@@ -105,8 +105,10 @@ static ElfInfo disassembleImpl(const uint8_t* data, size_t dataSize,
         return info;
     }
 
-    const auto* sections = reinterpret_cast<const Shdr*>(data + ehdr->e_shoff);
+    // Copy section headers via memcpy to avoid unaligned access UB
     uint16_t shnum = ehdr->e_shnum;
+    std::vector<Shdr> sections(shnum);
+    std::memcpy(sections.data(), data + ehdr->e_shoff, shnum * sizeof(Shdr));
 
     // Section name string table
     const char* shstrtab = nullptr;
@@ -120,25 +122,25 @@ static ElfInfo disassembleImpl(const uint8_t* data, size_t dataSize,
     }
 
     // Find symbol tables and executable sections
-    const Shdr* symtab = nullptr;
-    const Shdr* symstrtab = nullptr;
-    const Shdr* dynsym = nullptr;
-    const Shdr* dynstr = nullptr;
-    std::vector<const Shdr*> execSections;
+    size_t symtabIdx = SIZE_MAX;
+    size_t symstrtabIdx = SIZE_MAX;
+    size_t dynsymIdx = SIZE_MAX;
+    size_t dynstrIdx = SIZE_MAX;
+    std::vector<size_t> execSectionIdxs;
 
     for (uint16_t i = 0; i < shnum; i++) {
         const auto& s = sections[i];
 
         if (s.sh_type == SHT_SYMTAB) {
-            symtab = &s;
-            if (s.sh_link < shnum) symstrtab = &sections[s.sh_link];
+            symtabIdx = i;
+            if (s.sh_link < shnum) symstrtabIdx = s.sh_link;
         }
         if (s.sh_type == SHT_DYNSYM) {
-            dynsym = &s;
-            if (s.sh_link < shnum) dynstr = &sections[s.sh_link];
+            dynsymIdx = i;
+            if (s.sh_link < shnum) dynstrIdx = s.sh_link;
         }
         if (s.sh_flags & SHF_EXECINSTR) {
-            execSections.push_back(&s);
+            execSectionIdxs.push_back(i);
         }
 
         if (shstrtab && s.sh_name > 0 && s.sh_name < shstrtabSize) {
@@ -159,66 +161,69 @@ static ElfInfo disassembleImpl(const uint8_t* data, size_t dataSize,
     }
 
     // Extract functions from a symbol table
-    auto extractFunctions = [&](const Shdr* symSect, const Shdr* strSect,
+    auto extractFunctions = [&](size_t symSectIdx, size_t strSectIdx,
                                 bool isDynamic) {
-        if (!symSect || !strSect) return;
-        if (symSect->sh_offset + symSect->sh_size > dataSize) return;
-        if (strSect->sh_offset + strSect->sh_size > dataSize) return;
+        if (symSectIdx >= shnum || strSectIdx >= shnum) return;
+        const auto& symSect = sections[symSectIdx];
+        const auto& strSect = sections[strSectIdx];
+        if (symSect.sh_offset + symSect.sh_size > dataSize) return;
+        if (strSect.sh_offset + strSect.sh_size > dataSize) return;
 
-        const char* strtab = reinterpret_cast<const char*>(data + strSect->sh_offset);
-        size_t numSyms = symSect->sh_size / sizeof(Sym);
+        const char* strtab = reinterpret_cast<const char*>(data + strSect.sh_offset);
+        size_t numSyms = symSect.sh_size / sizeof(Sym);
 
         for (size_t i = 0; i < numSyms; i++) {
-            const auto* sym = reinterpret_cast<const Sym*>(
-                data + symSect->sh_offset + i * sizeof(Sym));
+            // Copy symbol via memcpy to avoid unaligned access UB
+            Sym sym;
+            std::memcpy(&sym, data + symSect.sh_offset + i * sizeof(Sym), sizeof(Sym));
 
-            int stype = ELF64_ST_TYPE(sym->st_info); // same macro for 32/64
+            int stype = ELF64_ST_TYPE(sym.st_info); // same macro for 32/64
 
             if (stype != STT_FUNC) continue;
 
             std::string symName;
-            if (sym->st_name > 0 && sym->st_name < strSect->sh_size) {
-                symName = std::string(strtab + sym->st_name,
-                    strnlen(strtab + sym->st_name, strSect->sh_size - sym->st_name));
+            if (sym.st_name > 0 && sym.st_name < strSect.sh_size) {
+                symName = std::string(strtab + sym.st_name,
+                    strnlen(strtab + sym.st_name, strSect.sh_size - sym.st_name));
             }
             if (symName.empty()) continue;
 
-            if (sym->st_shndx == SHN_UNDEF) {
+            if (sym.st_shndx == SHN_UNDEF) {
                 info.imports.push_back(symName);
                 continue;
             }
 
-            if (sym->st_size == 0) continue;
+            if (sym.st_size == 0) continue;
 
             // Find section and disassemble
             std::string sectName = ".text";
-            if (sym->st_shndx < shnum && shstrtab &&
-                sections[sym->st_shndx].sh_name < shstrtabSize) {
-                auto off = sections[sym->st_shndx].sh_name;
+            if (sym.st_shndx < shnum && shstrtab &&
+                sections[sym.st_shndx].sh_name < shstrtabSize) {
+                auto off = sections[sym.st_shndx].sh_name;
                 sectName = std::string(shstrtab + off,
                     strnlen(shstrtab + off, shstrtabSize - off));
             }
 
             std::string disasm;
-            if (sym->st_shndx < shnum) {
-                const auto& funcSect = sections[sym->st_shndx];
+            if (sym.st_shndx < shnum) {
+                const auto& funcSect = sections[sym.st_shndx];
                 if (funcSect.sh_flags & SHF_EXECINSTR &&
-                    sym->st_value >= funcSect.sh_addr) {
+                    sym.st_value >= funcSect.sh_addr) {
                     uint64_t fileOffset = funcSect.sh_offset +
-                                          (sym->st_value - funcSect.sh_addr);
-                    if (fileOffset + sym->st_size <= dataSize &&
-                        fileOffset + sym->st_size >= fileOffset) {
+                                          (sym.st_value - funcSect.sh_addr);
+                    if (fileOffset + sym.st_size <= dataSize &&
+                        fileOffset + sym.st_size >= fileOffset) {
                         disasm = disassembleBytes(
-                            data + fileOffset, sym->st_size,
-                            sym->st_value, csArch, csMode);
+                            data + fileOffset, sym.st_size,
+                            sym.st_value, csArch, csMode);
                     }
                 }
             }
 
             ElfFunction func;
             func.name = symName;
-            func.address = sym->st_value;
-            func.size = sym->st_size;
+            func.address = sym.st_value;
+            func.size = sym.st_size;
             func.disassembly = disasm;
             func.section = sectName;
             info.functions.push_back(std::move(func));
@@ -229,8 +234,8 @@ static ElfInfo disassembleImpl(const uint8_t* data, size_t dataSize,
         }
     };
 
-    extractFunctions(symtab, symstrtab, false);
-    extractFunctions(dynsym, dynstr, true);
+    extractFunctions(symtabIdx, symstrtabIdx, false);
+    extractFunctions(dynsymIdx, dynstrIdx, true);
 
     // Deduplicate by address
     std::sort(info.functions.begin(), info.functions.end(),
@@ -246,25 +251,26 @@ static ElfInfo disassembleImpl(const uint8_t* data, size_t dataSize,
 
     // Stripped binary fallback: disassemble entire executable sections
     if (info.functions.empty()) {
-        for (const auto* sect : execSections) {
-            if (sect->sh_size == 0) continue;
-            if (sect->sh_offset + sect->sh_size > dataSize) continue;
+        for (size_t idx : execSectionIdxs) {
+            const auto& sect = sections[idx];
+            if (sect.sh_size == 0) continue;
+            if (sect.sh_offset + sect.sh_size > dataSize) continue;
 
             std::string sectName = "section";
-            if (shstrtab && sect->sh_name > 0 && sect->sh_name < shstrtabSize) {
-                sectName = std::string(shstrtab + sect->sh_name,
-                    strnlen(shstrtab + sect->sh_name, shstrtabSize - sect->sh_name));
+            if (shstrtab && sect.sh_name > 0 && sect.sh_name < shstrtabSize) {
+                sectName = std::string(shstrtab + sect.sh_name,
+                    strnlen(shstrtab + sect.sh_name, shstrtabSize - sect.sh_name));
             }
 
-            size_t maxSize = std::min<size_t>(sect->sh_size, 65536);
+            size_t maxSize = std::min<size_t>(sect.sh_size, 65536);
             std::string disasm = disassembleBytes(
-                data + sect->sh_offset, maxSize,
-                sect->sh_addr, csArch, csMode);
+                data + sect.sh_offset, maxSize,
+                sect.sh_addr, csArch, csMode);
 
             ElfFunction func;
             func.name = sectName;
-            func.address = sect->sh_addr;
-            func.size = sect->sh_size;
+            func.address = sect.sh_addr;
+            func.size = sect.sh_size;
             func.disassembly = disasm;
             func.section = sectName;
             info.functions.push_back(std::move(func));

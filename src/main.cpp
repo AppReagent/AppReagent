@@ -22,9 +22,9 @@
 #include "AreaServer.h"
 #include "infra/ipc/IPC.h"
 #include "McpServer.h"
-#include "tools/ToolRegistry.h"
-#include "tools/ImproveTool.h"
-#include "tools/ToolContext.h"
+#include "infra/tools/ToolRegistry.h"
+#include "features/improve/ImproveTool.h"
+#include "infra/tools/ToolContext.h"
 #include "util/file_io.h"
 
 namespace fs = std::filesystem;

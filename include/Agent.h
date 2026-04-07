@@ -8,7 +8,7 @@
 
 #include "Harness.h"
 #include "infra/llm/LLMBackend.h"
-#include "tools/ToolRegistry.h"
+#include "infra/tools/ToolRegistry.h"
 
 namespace area {
 

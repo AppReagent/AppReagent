@@ -83,7 +83,7 @@ target_link_libraries(area_lib PUBLIC
 target_include_directories(area_lib PUBLIC include)
 
 file(GLOB TEST_SOURCES tests/*.cpp)
-file(GLOB_RECURSE FEATURE_TEST_SOURCES src/features/*_test.cpp)
+file(GLOB_RECURSE FEATURE_TEST_SOURCES tests/features/*.cpp)
 add_executable(area_tests ${TEST_SOURCES} ${FEATURE_TEST_SOURCES})
 target_link_libraries(area_tests PRIVATE
     area_lib

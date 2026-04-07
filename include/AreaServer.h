@@ -16,7 +16,7 @@
 #include "infra/db/Database.h"
 #include "infra/sandbox/Sandbox.h"
 #include "ScanState.h"
-#include "tools/ToolRegistry.h"
+#include "infra/tools/ToolRegistry.h"
 #include "events/EventBus.h"
 
 namespace area {

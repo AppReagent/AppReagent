@@ -13,9 +13,9 @@
 #include "infra/ipc/IPC.h"
 #include "infra/llm/LLMBackend.h"
 #include "ScanLog.h"
-#include "tools/ToolRegistry.h"
-#include "tools/GenerateRunIdTool.h"
-#include "tools/SqlTool.h"
+#include "infra/tools/ToolRegistry.h"
+#include "features/runid/GenerateRunIdTool.h"
+#include "features/sql/SqlTool.h"
 
 namespace fs = std::filesystem;
 

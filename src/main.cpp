@@ -308,7 +308,12 @@ int main(int argc, char* argv[]) {
 
     area::Config config;
     try {
-        auto configPath = args.getNamedArg("config").value_or("config.json");
+        auto configPath = args.getNamedArg("config").value_or("");
+        if (configPath.empty()) {
+            // Check AREA_DATA_DIR first, then cwd
+            auto dataConfig = getDataDir() + "/config.json";
+            configPath = fs::exists(dataConfig) ? dataConfig : "config.json";
+        }
         config = area::Config::load(configPath);
     } catch (const std::exception& e) {
         std::cerr << "Failed to load config: " << e.what() << std::endl;

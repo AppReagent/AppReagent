@@ -38,6 +38,7 @@ find_package(CURL REQUIRED)
 include_directories(include)
 
 file(GLOB_RECURSE SOURCES src/*.cpp)
+list(FILTER SOURCES EXCLUDE REGEX "_test\\.cpp$")
 add_executable(area ${SOURCES})
 find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED)
@@ -64,9 +65,10 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 
-# Library target for test linking (everything except main.cpp)
+# Library target for test linking (everything except main.cpp and *_test.cpp)
 file(GLOB_RECURSE LIB_SOURCES src/*.cpp)
 list(FILTER LIB_SOURCES EXCLUDE REGEX "src/main\\.cpp$")
+list(FILTER LIB_SOURCES EXCLUDE REGEX "_test\\.cpp$")
 add_library(area_lib STATIC ${LIB_SOURCES})
 target_link_libraries(area_lib PUBLIC
     nlohmann_json::nlohmann_json
@@ -81,7 +83,8 @@ target_link_libraries(area_lib PUBLIC
 target_include_directories(area_lib PUBLIC include)
 
 file(GLOB TEST_SOURCES tests/*.cpp)
-add_executable(area_tests ${TEST_SOURCES})
+file(GLOB_RECURSE FEATURE_TEST_SOURCES src/features/*_test.cpp)
+add_executable(area_tests ${TEST_SOURCES} ${FEATURE_TEST_SOURCES})
 target_link_libraries(area_tests PRIVATE
     area_lib
     GTest::gtest_main

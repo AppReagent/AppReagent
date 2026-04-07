@@ -709,13 +709,13 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
             if (category != "none" && !category.empty()) return true;
 
             // Pass through if triage found API calls worth investigating
+            // Methods with API calls need HIGHER confidence to discard (they're more likely relevant)
             if (j.contains("api_calls") && j["api_calls"].is_array() && !j["api_calls"].empty()) {
-                // Only discard if confidently irrelevant AND has no interesting API calls
-                return confidence < 0.85;
+                return confidence < 0.95;
             }
 
-            // Discard only if high confidence in irrelevance
-            return confidence < 0.9;
+            // No API calls: moderate confidence is enough to discard
+            return confidence < 0.85;
         } catch (...) {
             return true;
         }

@@ -1,1 +1,41 @@
-You are analyzing a disassembled function from a native ELF binary ({{arch}} architecture). Focus on system calls, C library functions, network operations (socket, connect, send, recv), file operations (open, read, write, mmap), process manipulation (fork, exec, ptrace), dynamic loading (dlopen, dlsym), and suspicious patterns like encoded strings or anti-debugging techniques. The "api_calls" field should list any library or system calls found.
+You are analyzing a disassembled function from a native ELF binary ({{arch}} architecture). The code is shown as Capstone-disassembled instructions (address: mnemonic operands).
+
+## What to look for
+
+### System-level threats (high priority)
+- **System calls**: Direct `syscall`/`int 0x80`/`svc #0` instructions that bypass libc — the binary is trying to avoid hooking or detection.
+- **Process execution**: Calls to `execve`, `system`, `popen`, `execl` — especially when combined with network or file input, this forms a remote shell or command injection.
+- **Privilege escalation**: `setuid`, `setgid`, `setreuid`, `seteuid` calls — changing effective UID, especially to 0 (root).
+- **Anti-debugging**: `ptrace(PTRACE_TRACEME)` to prevent debugger attachment, `prctl(PR_SET_DUMPABLE, 0)`, `/proc/self/status` reads checking `TracerPid`, timing checks via `rdtsc`/`clock_gettime`.
+- **Process injection**: `ptrace(PTRACE_ATTACH)` on other processes, combined with `mmap`/`mprotect` to inject code.
+
+### Network operations (C2, exfiltration, backdoor)
+- **Socket creation**: `socket()` + `connect()` = outbound C2 channel. `socket()` + `bind()` + `listen()` + `accept()` = backdoor listener.
+- **Data transfer**: `send`/`recv`/`sendto`/`recvfrom`/`write`/`read` on socket file descriptors.
+- **DNS resolution**: `getaddrinfo`/`gethostbyname` resolving hardcoded or decoded domain names.
+- **Reverse shell pattern**: `socket()` → `connect()` → `dup2(sockfd, 0/1/2)` → `execve("/bin/sh")` — classic reverse shell.
+
+### Dynamic loading and code injection
+- **dlopen/dlsym**: Loading shared libraries at runtime — may load dropped or downloaded payloads.
+- **mmap + mprotect(PROT_EXEC)**: Allocating executable memory — shellcode execution, JIT compilation, or unpacking.
+- **memfd_create**: Creating anonymous in-memory files — fileless malware technique.
+
+### File system operations
+- **Directory traversal**: `opendir`/`readdir` combined with file operations — may be enumerating files for encryption (ransomware) or data theft.
+- **File manipulation**: `open`/`read`/`write`/`unlink`/`rename` — watch for operations on sensitive paths (`/etc/passwd`, `/proc/`, `/sys/`, user data directories).
+
+### Obfuscation and evasion
+- **XOR loops**: `xor` instruction inside a loop — string decryption or data obfuscation. Distinguish from register zeroing (`xor eax, eax`).
+- **Stack strings**: Character-by-character construction of strings via `mov byte [rsp+N], imm8` — hiding strings from static extraction.
+- **VM/emulator detection**: `cpuid` instruction, checking for hypervisor brand string, reading `/proc/cpuinfo` or DMI data.
+- **Self-modifying code**: Writing to executable memory regions, modifying own .text section.
+
+### Crypto operations
+- **Symmetric encryption**: Calls to `EVP_EncryptInit`, `AES_encrypt`, `AES_set_encrypt_key` — may indicate ransomware if combined with file traversal.
+- **Hashing in loops**: `SHA256_Update`/`MD5_Update` in tight loops — potential crypto mining.
+- **Key material**: Hardcoded byte sequences used as encryption keys or IVs.
+
+## Architecture-specific notes ({{arch}})
+- Register conventions and calling conventions vary by architecture. Focus on the BEHAVIOR, not the specific register names.
+- The "api_calls" field should list any library functions, system calls, or PLT entries called by this function.
+- If the disassembly shows raw addresses instead of function names for `call`/`bl` targets, note this — it may indicate stripped symbols or computed call targets.

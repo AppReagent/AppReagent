@@ -1,4 +1,5 @@
 #include "graph/graphs/scan_task_graph.h"
+#include "graph/graphs/elf_analysis.h"
 #include "graph/util/json_extract.h"
 #include "util/file_io.h"
 #include "Embedding.h"
@@ -167,6 +168,341 @@ static const std::vector<ObfuscationIndicator> kObfuscationIndicators = {
     {"Ljava/util/zip/ZipInputStream;", "ZIP extraction (possible payload unpacking)", 10},
     {"Landroid/util/Base64;", "Base64 encoding/decoding", 8},
 };
+
+// ── ELF-specific static analysis ────────────────────────────────────
+
+// Suspicious imported functions in ELF binaries
+static const std::vector<SuspiciousApi> kElfSuspiciousImports = {
+    // Network
+    {"socket", "c2", 15},
+    {"connect", "c2", 15},
+    {"bind", "c2", 10},
+    {"listen", "c2", 10},
+    {"accept", "c2", 10},
+    {"send", "c2", 8},
+    {"recv", "c2", 8},
+    {"sendto", "c2", 10},
+    {"recvfrom", "c2", 10},
+    {"getaddrinfo", "c2", 10},
+    {"gethostbyname", "c2", 12},
+    {"inet_addr", "c2", 8},
+    // Process execution
+    {"execve", "evasion", 20},
+    {"execvp", "evasion", 20},
+    {"execl", "evasion", 18},
+    {"execlp", "evasion", 18},
+    {"system", "evasion", 20},
+    {"popen", "evasion", 15},
+    {"fork", "evasion", 10},
+    {"clone", "evasion", 10},
+    // Anti-debug / anti-analysis
+    {"ptrace", "evasion", 25},
+    {"prctl", "evasion", 8},
+    // Dynamic loading
+    {"dlopen", "dropper", 20},
+    {"dlsym", "dropper", 15},
+    // Memory manipulation
+    {"mmap", "evasion", 5},
+    {"mprotect", "evasion", 15},
+    {"memfd_create", "dropper", 20},
+    // File operations
+    {"unlink", "evasion", 8},
+    {"rename", "evasion", 5},
+    {"opendir", "data_theft", 5},
+    {"readdir", "data_theft", 5},
+    // Privilege
+    {"setuid", "rootkit", 20},
+    {"setgid", "rootkit", 15},
+    {"seteuid", "rootkit", 18},
+    {"setreuid", "rootkit", 18},
+    {"chmod", "persistence", 8},
+    {"chown", "persistence", 8},
+    {"chroot", "evasion", 12},
+    {"mount", "rootkit", 15},
+    // Crypto
+    {"EVP_EncryptInit", "ransomware", 15},
+    {"EVP_EncryptInit_ex", "ransomware", 15},
+    {"EVP_DecryptInit", "evasion", 10},
+    {"AES_encrypt", "ransomware", 12},
+    {"AES_set_encrypt_key", "ransomware", 12},
+    {"SHA256_Init", "crypto_mining", 8},
+    {"SHA256_Update", "crypto_mining", 8},
+    // Process/signal manipulation
+    {"kill", "evasion", 8},
+    {"signal", "evasion", 5},
+    {"sigaction", "evasion", 5},
+    // Keylogging / input
+    {"ioctl", "surveillance", 8},
+    // IPC
+    {"shmget", "c2", 8},
+    {"msgget", "c2", 8},
+};
+
+// Compound threat patterns for ELF imports
+static const std::vector<ThreatPattern> kElfThreatPatterns = {
+    {"Network C2 channel",
+     {"socket", "connect"},
+     "c2", 30},
+    {"Server backdoor",
+     {"socket", "bind", "listen"},
+     "c2", 40},
+    {"Remote shell",
+     {"socket", "execve"},
+     "c2", 50},
+    {"Remote command execution",
+     {"socket", "system"},
+     "c2", 45},
+    {"Remote command execution",
+     {"socket", "popen"},
+     "c2", 45},
+    {"Dynamic code loading from network",
+     {"socket", "dlopen"},
+     "dropper", 45},
+    {"Anti-debugging",
+     {"ptrace", "fork"},
+     "evasion", 35},
+    {"Process injection",
+     {"ptrace", "mmap"},
+     "rootkit", 45},
+    {"Self-modifying code",
+     {"mmap", "mprotect"},
+     "evasion", 25},
+    {"Privilege escalation",
+     {"setuid", "execve"},
+     "rootkit", 50},
+    {"Privilege escalation",
+     {"setuid", "system"},
+     "rootkit", 45},
+    {"File encryption",
+     {"EVP_EncryptInit", "opendir"},
+     "ransomware", 40},
+    {"File encryption",
+     {"EVP_EncryptInit_ex", "opendir"},
+     "ransomware", 40},
+    {"Fileless payload",
+     {"memfd_create", "dlopen"},
+     "dropper", 50},
+    {"Fileless execution",
+     {"memfd_create", "execve"},
+     "dropper", 50},
+    {"Data exfiltration",
+     {"opendir", "socket", "connect"},
+     "data_theft", 40},
+    {"Keylogger",
+     {"ioctl", "socket"},
+     "surveillance", 35},
+    {"DNS-based C2",
+     {"gethostbyname", "socket"},
+     "c2", 25},
+};
+
+// Assembly-level indicators found in Capstone disassembly output
+struct AsmIndicator {
+    std::string pattern;
+    std::string description;
+    int risk;
+    std::string category;
+};
+
+static const std::vector<AsmIndicator> kElfAsmIndicators = {
+    {"syscall", "Direct syscall instruction (bypasses libc)", 15, "evasion"},
+    {"int\t0x80", "x86 interrupt syscall", 15, "evasion"},
+    {"svc\t#0", "ARM supervisor call", 15, "evasion"},
+    {"svc\t0", "ARM supervisor call (alternate)", 15, "evasion"},
+    {"int3", "Debugger trap / anti-debug", 10, "evasion"},
+    {"rdtsc", "Timing check (anti-debug/VM detection)", 12, "evasion"},
+    {"cpuid", "CPU identification (VM detection)", 10, "evasion"},
+};
+
+// Compute file-level signals for ELF binaries from import/export analysis
+nlohmann::json computeElfFileSignals(const std::vector<std::string>& imports,
+                                      const std::vector<std::string>& exports) {
+    nlohmann::json signals;
+    signals["matched_patterns"] = nlohmann::json::array();
+    signals["suspicious_apis"] = nlohmann::json::array();
+    signals["obfuscation_indicators"] = nlohmann::json::array();
+    signals["file_risk_score"] = 0;
+    int totalRisk = 0;
+
+    // Build a searchable set of imports, stripping version suffixes
+    // (e.g., "socket@GLIBC_2.2.5" → "socket") so stripped binaries match too
+    std::set<std::string> importSet;
+    for (auto& imp : imports) {
+        importSet.insert(imp);
+        auto at = imp.find('@');
+        if (at != std::string::npos) {
+            importSet.insert(imp.substr(0, at));
+        }
+    }
+
+    // Check compound threat patterns
+    std::set<std::string> categories;
+    for (auto& tp : kElfThreatPatterns) {
+        bool allFound = true;
+        for (auto& req : tp.required_apis) {
+            if (importSet.find(req) == importSet.end()) {
+                allFound = false;
+                break;
+            }
+        }
+        if (allFound) {
+            nlohmann::json entry;
+            entry["name"] = tp.name;
+            entry["category"] = tp.category;
+            entry["risk"] = tp.risk_boost;
+            signals["matched_patterns"].push_back(entry);
+            totalRisk += tp.risk_boost;
+            categories.insert(tp.category);
+        }
+    }
+
+    // Check individual suspicious imports
+    for (auto& sa : kElfSuspiciousImports) {
+        if (importSet.find(sa.pattern) != importSet.end()) {
+            nlohmann::json entry;
+            entry["api"] = sa.pattern;
+            entry["category"] = sa.category;
+            entry["risk"] = sa.risk;
+            signals["suspicious_apis"].push_back(entry);
+            totalRisk += sa.risk;
+            categories.insert(sa.category);
+        }
+    }
+
+    signals["threat_categories"] = nlohmann::json::array();
+    for (auto& c : categories) signals["threat_categories"].push_back(c);
+    signals["file_risk_score"] = std::min(totalRisk, 100);
+
+    return signals;
+}
+
+// Compute method-level static analysis for ELF functions
+nlohmann::json computeElfMethodStaticAnalysis(const std::string& disasm,
+                                               const std::string& importsSummary) {
+    nlohmann::json analysis;
+    analysis["api_calls"] = nlohmann::json::array();
+    analysis["risk_indicators"] = nlohmann::json::array();
+    int methodRisk = 0;
+
+    // Extract called functions from assembly.
+    // Capstone output format: "  0xADDR:  mnemonic\toperands"
+    // Parse each line to extract the mnemonic and operands.
+    std::istringstream stream(disasm);
+    std::string line;
+    std::set<std::string> calledFunctions;
+    while (std::getline(stream, line)) {
+        // Find the ":  " separator between address and mnemonic
+        auto colonPos = line.find(":  ");
+        if (colonPos == std::string::npos) continue;
+        auto mnemonicStart = colonPos + 3;
+        // Mnemonic ends at the tab separator (or end of line for zero-operand instructions)
+        auto tabPos = line.find('\t', mnemonicStart);
+        std::string mnemonic = (tabPos != std::string::npos)
+            ? line.substr(mnemonicStart, tabPos - mnemonicStart)
+            : line.substr(mnemonicStart);
+        while (!mnemonic.empty() && std::isspace(mnemonic.back())) mnemonic.pop_back();
+
+        if (mnemonic == "call" || mnemonic == "bl" || mnemonic == "blx") {
+            if (tabPos != std::string::npos) {
+                std::string target = line.substr(tabPos + 1);
+                while (!target.empty() && std::isspace(target.back()))
+                    target.pop_back();
+                if (!target.empty()) {
+                    calledFunctions.insert(target);
+                    analysis["api_calls"].push_back(target);
+                }
+            }
+        }
+    }
+
+    // Check for suspicious call targets against imports
+    for (auto& sa : kElfSuspiciousImports) {
+        bool found = false;
+        for (auto& cf : calledFunctions) {
+            if (cf.find(sa.pattern) != std::string::npos) {
+                found = true;
+                break;
+            }
+        }
+        // Also check imports summary (in case PLT calls aren't resolved in disasm)
+        if (!found && importsSummary.find(sa.pattern) != std::string::npos) {
+            // Only flag if import is relevant to this function's context
+            continue;
+        }
+        if (found) {
+            nlohmann::json ri;
+            ri["api"] = sa.pattern;
+            ri["category"] = sa.category;
+            ri["risk"] = sa.risk;
+            analysis["risk_indicators"].push_back(ri);
+            methodRisk += sa.risk;
+        }
+    }
+
+    // Check assembly-level indicators
+    for (auto& ind : kElfAsmIndicators) {
+        if (disasm.find(ind.pattern) != std::string::npos) {
+            nlohmann::json ri;
+            ri["pattern"] = ind.pattern;
+            ri["description"] = ind.description;
+            ri["category"] = ind.category;
+            ri["risk"] = ind.risk;
+            analysis["risk_indicators"].push_back(ri);
+            methodRisk += ind.risk;
+        }
+    }
+
+    // Detect XOR loops in assembly (potential obfuscation/cipher).
+    // Parse each line to extract mnemonic for accurate matching.
+    bool hasXor = false;
+    bool hasLoop = false;
+    bool hasSelfXor = false;
+    {
+        std::istringstream xs(disasm);
+        std::string xl;
+        while (std::getline(xs, xl)) {
+            auto cp = xl.find(":  ");
+            if (cp == std::string::npos) continue;
+            auto ms = cp + 3;
+            auto tp = xl.find('\t', ms);
+            std::string mn = (tp != std::string::npos)
+                ? xl.substr(ms, tp - ms) : xl.substr(ms);
+            while (!mn.empty() && std::isspace(mn.back())) mn.pop_back();
+
+            if (mn == "xor" || mn == "eor") {
+                hasXor = true;
+                if (tp != std::string::npos) {
+                    std::string operands = xl.substr(tp + 1);
+                    auto comma = operands.find(',');
+                    if (comma != std::string::npos) {
+                        auto op1 = operands.substr(0, comma);
+                        auto op2 = operands.substr(comma + 1);
+                        while (!op1.empty() && std::isspace(op1.front())) op1.erase(0, 1);
+                        while (!op1.empty() && std::isspace(op1.back())) op1.pop_back();
+                        while (!op2.empty() && std::isspace(op2.front())) op2.erase(0, 1);
+                        while (!op2.empty() && std::isspace(op2.back())) op2.pop_back();
+                        if (op1 == op2) hasSelfXor = true;
+                    }
+                }
+            }
+            if (mn == "jne" || mn == "jnz" || mn == "loop" || mn == "bne") {
+                hasLoop = true;
+            }
+        }
+    }
+    if (hasXor && hasLoop && !hasSelfXor) {
+        nlohmann::json ri;
+        ri["pattern"] = "xor_loop";
+        ri["description"] = "XOR operation in loop — possible cipher/obfuscation";
+        ri["category"] = "evasion";
+        ri["risk"] = 15;
+        analysis["risk_indicators"].push_back(ri);
+        methodRisk += 15;
+    }
+
+    analysis["static_risk_score"] = std::min(methodRisk, 100);
+    return analysis;
+}
 
 // Scan file contents for all invoke-* targets, return set of API strings
 static std::set<std::string> extractAllApiCalls(const std::string& contents) {
@@ -518,12 +854,51 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
                     importsSummary << "  " << imp << "\n";
                 }
             }
+            if (!info.exports.empty()) {
+                importsSummary << "Exported functions:\n";
+                for (auto& exp : info.exports) {
+                    importsSummary << "  " << exp << "\n";
+                }
+            }
             std::string imports = importsSummary.str();
 
             std::string elfFmtTmpl = loadPrompt(prompts_dir + "/elf_format_context.prompt");
             TaskContext archCtx;
             archCtx.set("arch", info.arch);
             std::string formatCtx = resolveTemplate(elfFmtTmpl, archCtx);
+
+            // Compute file-level threat signals from imports/exports
+            auto fileSignals = computeElfFileSignals(info.imports, info.exports);
+            int fileRiskScore = fileSignals.value("file_risk_score", 0);
+
+            // Build file-level signals summary for LLM context
+            std::ostringstream fileSigSummary;
+            if (fileRiskScore > 0) {
+                fileSigSummary << "FILE-LEVEL THREAT SIGNALS (risk=" << fileRiskScore << "):\n";
+                if (fileSignals.contains("matched_patterns") && !fileSignals["matched_patterns"].empty()) {
+                    fileSigSummary << "  Compound patterns detected:\n";
+                    for (auto& p : fileSignals["matched_patterns"]) {
+                        fileSigSummary << "    - " << p["name"].get<std::string>()
+                                       << " [" << p["category"].get<std::string>() << "]\n";
+                    }
+                }
+                if (fileSignals.contains("threat_categories") && !fileSignals["threat_categories"].empty()) {
+                    fileSigSummary << "  Threat categories: ";
+                    for (size_t i = 0; i < fileSignals["threat_categories"].size(); i++) {
+                        if (i > 0) fileSigSummary << ", ";
+                        fileSigSummary << fileSignals["threat_categories"][i].get<std::string>();
+                    }
+                    fileSigSummary << "\n";
+                }
+                if (fileSignals.contains("suspicious_apis") && !fileSignals["suspicious_apis"].empty()) {
+                    fileSigSummary << "  Suspicious imports:\n";
+                    for (auto& s : fileSignals["suspicious_apis"]) {
+                        fileSigSummary << "    - " << s["api"].get<std::string>()
+                                       << " [" << s["category"].get<std::string>() << "]\n";
+                    }
+                }
+            }
+            std::string fileSigStr = fileSigSummary.str();
 
             for (auto& func : info.functions) {
                 TaskContext item;
@@ -532,6 +907,7 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
                 item.set("class_name", className);
                 item.set("source_file", className);
                 item.set("scan_goal", scanGoal);
+                item.set("file_format", "elf");
                 item.set("method_name", func.name);
                 char addrBuf[32];
                 snprintf(addrBuf, sizeof(addrBuf), "0x%" PRIx64, func.address);
@@ -540,6 +916,9 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
                 item.set("method_body", func.disassembly);
                 item.set("fields_summary", imports);
                 item.set("format_context", formatCtx);
+                // Propagate file-level threat signals
+                item.set("file_threat_signals", fileSignals);
+                item.set("file_signals_summary", fileSigStr);
                 items.push_back(std::move(item));
             }
 
@@ -620,7 +999,16 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
         if (!ctx.has("method_body")) return ctx;
         auto methodBody = ctx.get("method_body").get<std::string>();
 
-        auto analysis = computeMethodStaticAnalysis(methodBody);
+        // Use format-specific analysis
+        std::string format = ctx.has("file_format") ? ctx.get("file_format").get<std::string>() : "smali";
+        nlohmann::json analysis;
+        if (format == "elf") {
+            std::string importsSummary = ctx.has("fields_summary") ?
+                ctx.get("fields_summary").get<std::string>() : "";
+            analysis = computeElfMethodStaticAnalysis(methodBody, importsSummary);
+        } else {
+            analysis = computeMethodStaticAnalysis(methodBody);
+        }
         ctx.set("static_analysis", analysis);
 
         // Build human-readable summary for the LLM prompt

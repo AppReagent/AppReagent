@@ -52,18 +52,22 @@ TaskContext GraphRunner::executeFrom(RunState& state, const std::string& nodeNam
         return discarded;
     }
 
-    if (nr.outputs.size() > 1) {
-        emitEnd(nodeName, nr.outputs[0]);
-
-        std::string subgraphEntry;
-        std::string collectorName;
-        for (auto* e : state.graph.allEdgesFrom(nodeName)) {
-            if (e->branch == "collect") {
-                collectorName = e->to;
-            } else if (e->branch.empty()) {
-                subgraphEntry = e->to;
-            }
+    // Detect splitter nodes by presence of a "collect" edge OR multi-output.
+    // Single-function ELF binaries produce 1 output but still need collector routing
+    // when a "collect" edge exists.
+    std::string subgraphEntry;
+    std::string collectorName;
+    for (auto* e : state.graph.allEdgesFrom(nodeName)) {
+        if (e->branch == "collect") {
+            collectorName = e->to;
+        } else if (e->branch.empty()) {
+            subgraphEntry = e->to;
         }
+    }
+    bool isSplitter = !collectorName.empty() || nr.outputs.size() > 1;
+
+    if (isSplitter && !nr.outputs.empty()) {
+        emitEnd(nodeName, nr.outputs[0]);
         if (subgraphEntry.empty()) {
             throw std::runtime_error("splitter node " + nodeName + " has no downstream edge");
         }

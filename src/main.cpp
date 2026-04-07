@@ -24,8 +24,11 @@
 #include "tools/ToolRegistry.h"
 #include "tools/ImproveTool.h"
 #include "tools/ToolContext.h"
+#include "util/file_io.h"
 
 namespace fs = std::filesystem;
+
+static constexpr int kServerStartPollIter = 24; // x 500ms = 12s
 
 static std::string getDataDir() {
     if (auto dir = std::getenv("AREA_DATA_DIR")) return dir;
@@ -45,14 +48,7 @@ static int runScan(area::Config& config, area::Database& db,
 }
 
 static bool launchServer(const std::string& dataDir, const std::string& sockPath) {
-    std::string bin;
-    {
-        char buf[4096];
-        ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
-        if (n > 0) { buf[n] = '\0'; bin = buf; }
-        auto del = bin.find(" (deleted)");
-        if (del != std::string::npos) bin = bin.substr(0, del);
-    }
+    std::string bin = area::util::selfExe();
     if (bin.empty() || !fs::exists(bin)) {
         std::cerr << "Cannot find binary to launch server" << std::endl;
         return false;
@@ -81,14 +77,15 @@ static bool launchServer(const std::string& dataDir, const std::string& sockPath
     }
     waitpid(child, nullptr, 0);
 
-    for (int i = 0; i < 24; i++) {
+    for (int i = 0; i < kServerStartPollIter; i++) {
         usleep(500000);
         if (fs::exists(sockPath)) {
             std::cerr << "Server started" << std::endl;
             return true;
         }
     }
-    std::cerr << "Server did not start within 12s" << std::endl;
+    std::cerr << "Server did not start within "
+              << (kServerStartPollIter / 2) << "s" << std::endl;
     return false;
 }
 

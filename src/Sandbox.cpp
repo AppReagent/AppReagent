@@ -1,4 +1,5 @@
 #include "Sandbox.h"
+#include "util/string_util.h"
 
 #include <array>
 #include <cstdio>
@@ -46,26 +47,15 @@ Sandbox::~Sandbox() {
 void Sandbox::ensureRunning() {
     if (!containerId_.empty()) return;
 
-    // Shell-quote a path to prevent command injection from special characters
-    auto shellQuote = [](const std::string& s) -> std::string {
-        std::string q = "'";
-        for (char c : s) {
-            if (c == '\'') q += "'\\''";
-            else q += c;
-        }
-        q += "'";
-        return q;
-    };
-
     std::ostringstream cmd;
     cmd << "docker run -d --rm"
         << " --network none"
         << " --memory 512m"
         << " --cpus 1"
-        << " -v " << shellQuote(workDir_) << ":/workspace";
+        << " -v " << util::shellQuote(workDir_) << ":/workspace";
 
     if (!samplesDir_.empty() && fs::exists(samplesDir_)) {
-        cmd << " -v " << shellQuote(samplesDir_) << ":/samples:ro";
+        cmd << " -v " << util::shellQuote(samplesDir_) << ":/samples:ro";
     }
 
     cmd << " -w /workspace"

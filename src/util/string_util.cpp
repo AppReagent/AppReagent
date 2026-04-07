@@ -12,15 +12,32 @@ std::string trim(const std::string& s) {
 
 void trimInPlace(std::string& s) {
     while (!s.empty() && (s.back() == '\n' || s.back() == ' ')) s.pop_back();
-    while (!s.empty() && (s[0] == '\n' || s[0] == ' ')) s.erase(0, 1);
+    auto pos = s.find_first_not_of(" \n");
+    if (pos == std::string::npos) s.clear();
+    else if (pos > 0) s.erase(0, pos);
 }
 
 void ltrimInPlace(std::string& s) {
-    while (!s.empty() && (s[0] == ' ' || s[0] == '\n')) s.erase(0, 1);
+    auto pos = s.find_first_not_of(" \n");
+    if (pos == std::string::npos) s.clear();
+    else if (pos > 0) s.erase(0, pos);
 }
 
 void rtrimInPlace(std::string& s) {
     while (!s.empty() && (s.back() == ' ' || s.back() == '\n')) s.pop_back();
+}
+
+std::string shellEscape(const std::string& s) {
+    std::string out;
+    for (char c : s) {
+        if (c == '\'') out += "'\\''";
+        else out += c;
+    }
+    return out;
+}
+
+std::string shellQuote(const std::string& s) {
+    return "'" + shellEscape(s) + "'";
 }
 
 } // namespace area::util

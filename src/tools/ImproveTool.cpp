@@ -4,6 +4,7 @@
 #include "Harness.h"
 #include "ScanCommand.h"
 #include "ScanLog.h"
+#include "util/string_util.h"
 
 #include <array>
 #include <algorithm>
@@ -24,14 +25,9 @@ namespace fs = std::filesystem;
 
 namespace area {
 
-// Escape a string for safe inclusion in a single-quoted shell argument.
-static std::string escapeShell(const std::string& s) {
-    std::string out;
-    for (char c : s) {
-        if (c == '\'') out += "'\\''";
-        else out += c;
-    }
-    return out;
+// Alias for brevity — escapes single quotes for use inside shell strings.
+static inline std::string escapeShell(const std::string& s) {
+    return util::shellEscape(s);
 }
 
 ImproveTool::ImproveTool(Config* config, Database& db, const std::string& repoDir)
@@ -245,19 +241,19 @@ ImproveTool::FileScore ImproveTool::scoreFile(
 
     // Calibration (0.0 to 1.0)
     if (expectedClass == "relevant") {
-        fs.calibration = (riskScore >= minScore) ? 1.0 : (double)riskScore / minScore;
+        fs.calibration = (riskScore >= minScore) ? 1.0 : static_cast<double>(riskScore) / minScore;
     } else if (expectedClass == "not_relevant") {
         fs.calibration = (riskScore <= maxScore) ? 1.0
-            : (riskScore > 0) ? (double)maxScore / riskScore : 1.0;
+            : (riskScore > 0) ? static_cast<double>(maxScore) / riskScore : 1.0;
     } else {
         if (riskScore >= minScore && riskScore <= maxScore) {
             fs.calibration = 1.0;
         } else if (riskScore < minScore) {
-            fs.calibration = (minScore > 0) ? (double)riskScore / minScore : 0.0;
+            fs.calibration = (minScore > 0) ? static_cast<double>(riskScore) / minScore : 0.0;
         } else {
             int over = riskScore - maxScore;
             int range = 100 - maxScore;
-            fs.calibration = (range > 0) ? std::max(0.0, 1.0 - (double)over / range) : 0.0;
+            fs.calibration = (range > 0) ? std::max(0.0, 1.0 - static_cast<double>(over) / range) : 0.0;
         }
     }
 
@@ -274,7 +270,7 @@ ImproveTool::FileScore ImproveTool::scoreFile(
                 hits++;
         }
     }
-    fs.evidence = (total > 0) ? (double)hits / total : 1.0;
+    fs.evidence = (total > 0) ? static_cast<double>(hits) / total : 1.0;
 
     if (label.contains("must_not_mention")) {
         int violations = 0;

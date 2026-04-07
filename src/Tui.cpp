@@ -88,13 +88,13 @@ static const CT lightTheme = {
 };
 
 static RGB pulseColor(const CT& th, int x, int y, int frame, double intensity) {
-    double n = noise2d((double)x, (double)y, (double)frame);
+    double n = noise2d(static_cast<double>(x), static_cast<double>(y), static_cast<double>(frame));
     double t = n * intensity;
     // Quantize to steps of 8 so adjacent chars share escapes
     return {
-        std::clamp(((th.pulseBase.r + (int)(t * th.pulseShift.r)) >> 3) << 3, 0, 255),
-        std::clamp(((th.pulseBase.g + (int)(t * th.pulseShift.g)) >> 3) << 3, 0, 255),
-        std::clamp(((th.pulseBase.b + (int)(t * th.pulseShift.b)) >> 3) << 3, 0, 255)
+        std::clamp(((th.pulseBase.r + static_cast<int>(t * th.pulseShift.r)) >> 3) << 3, 0, 255),
+        std::clamp(((th.pulseBase.g + static_cast<int>(t * th.pulseShift.g)) >> 3) << 3, 0, 255),
+        std::clamp(((th.pulseBase.b + static_cast<int>(t * th.pulseShift.b)) >> 3) << 3, 0, 255)
     };
 }
 
@@ -844,7 +844,7 @@ void Tui::renderInput(int row, int width) {
 
     // Right-side indicator
     if (!rightHint.empty()) {
-        int textEnd = 3 + (int)visible.size();
+        int textEnd = 3 + static_cast<int>(visible.size());
         int hintStart = width - (int)rightHint.size() - 1;
         if (hintStart > textEnd) {
             outputBuf_ += std::string(hintStart - textEnd, ' ');
@@ -852,17 +852,17 @@ void Tui::renderInput(int row, int width) {
         setColor(COLOR_GRAY);
         outputBuf_ += rightHint;
     } else if (processing_) {
-        int textEnd = 3 + (int)visible.size();
+        int textEnd = 3 + static_cast<int>(visible.size());
         int dotsStart = width - 7;
         if (dotsStart > textEnd) {
             outputBuf_ += std::string(dotsStart - textEnd, ' ');
         }
         for (int ci = 0; ci < 3; ci++) {
-            double pulse = flowNoise((double)ci * 2.5, (double)animFrame_ * 0.3);
+            double pulse = flowNoise(static_cast<double>(ci) * 2.5, static_cast<double>(animFrame_) * 0.3);
             double t = (pulse + 1.0) * 0.5;
-            int r = 180 + (int)(t * 75);
-            int g = 140 + (int)(t * 60);
-            int b = 20 + (int)(t * 20);
+            int r = 180 + static_cast<int>(t * 75);
+            int g = 140 + static_cast<int>(t * 60);
+            int b = 20 + static_cast<int>(t * 20);
             appendRGB(outputBuf_, r, g, b, true);
             outputBuf_ += (ci < 2) ? "\xe2\x97\x8f " : "\xe2\x97\x8f";
         }
@@ -889,13 +889,13 @@ void Tui::renderWaveBar(int row, int width) {
     for (int i = 0; i < width; i++) {
         int r, g, b;
         if (i < waveLen) {
-            double env = (1.0 - (double)i / (double)waveLen);
+            double env = (1.0 - static_cast<double>(i) / static_cast<double>(waveLen));
             env = env * env * (3.0 - 2.0 * env);
-            double n = flowNoise((double)i, (double)animFrame_);
+            double n = flowNoise(static_cast<double>(i), static_cast<double>(animFrame_));
             double wave = (n + 1.0) * 0.5 * env;
-            r = wBase.r + (int)(wave * wAccent.r);
-            g = wBase.g + (int)(wave * wAccent.g);
-            b = wBase.b + (int)(wave * wAccent.b);
+            r = wBase.r + static_cast<int>(wave * wAccent.r);
+            g = wBase.g + static_cast<int>(wave * wAccent.g);
+            b = wBase.b + static_cast<int>(wave * wAccent.b);
         } else {
             r = wBase.r; g = wBase.g; b = wBase.b;
         }

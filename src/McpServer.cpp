@@ -1,5 +1,6 @@
 #include "McpServer.h"
 #include "IPC.h"
+#include "util/file_io.h"
 
 #include <cctype>
 #include <cstdio>
@@ -19,21 +20,9 @@ namespace area {
 
 // ── helpers ────────────────────────────────────────────────────────
 
-static std::string selfExe() {
-    char buf[4096];
-    ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
-    if (n <= 0) return {};
-    buf[n] = '\0';
-    std::string p(buf);
-    // cmake rebuild replaces the binary; running process shows " (deleted)"
-    auto del = p.find(" (deleted)");
-    if (del != std::string::npos) p = p.substr(0, del);
-    return p;
-}
+struct CmdResult { std::string output; int exitCode; };
 
-struct ExecResult { std::string output; int exitCode; };
-
-static ExecResult exec(const std::string& workDir,
+static CmdResult exec(const std::string& workDir,
                        const std::vector<std::string>& argv) {
     if (argv.empty()) return {"no command", -1};
 
@@ -73,7 +62,14 @@ static ExecResult exec(const std::string& workDir,
     return {out, WIFEXITED(status) ? WEXITSTATUS(status) : -1};
 }
 
-static std::string trimOutput(std::string s, size_t maxLen = 4000) {
+static constexpr size_t kDefaultTrimLen     = 4000;
+static constexpr size_t kBuildOutputTrimLen  = 3000;
+static constexpr size_t kBuildSuccessTrimLen = 1000;
+static constexpr int    kServerStartPollIter = 24;     // x 500ms = 12s
+static constexpr int    kServerStopPollIter  = 20;     // x 500ms = 10s
+static constexpr int    kChatPollTimeoutMs   = 300000; // 5 min for scans
+
+static std::string trimOutput(std::string s, size_t maxLen = kDefaultTrimLen) {
     if (s.size() > maxLen) s = "...\n" + s.substr(s.size() - maxLen);
     while (!s.empty() && (s.back() == '\n' || s.back() == ' ')) s.pop_back();
     return s;
@@ -104,7 +100,7 @@ void McpServer::send(const json& msg) {
 }
 
 std::string McpServer::findBin() {
-    auto exe = selfExe();
+    auto exe = util::selfExe();
     if (!exe.empty() && fs::exists(exe)) return exe;
     auto wb = workDir_ + "/area";
     if (fs::exists(wb)) return wb;
@@ -287,11 +283,11 @@ std::pair<std::string, bool> McpServer::toolBuild(const json& args) {
 
     log("build target=" + target);
     auto [out, rc] = exec(workDir_, {"make", target});
-    out = trimOutput(out, 3000);
+    out = trimOutput(out, kBuildOutputTrimLen);
 
     if (rc != 0)
         return {"Build failed (exit " + std::to_string(rc) + "):\n" + out, true};
-    return {"Build succeeded.\n" + trimOutput(out, 1000), false};
+    return {"Build succeeded.\n" + trimOutput(out, kBuildSuccessTrimLen), false};
 }
 
 std::pair<std::string, bool> McpServer::toolServerStart() {
@@ -329,7 +325,7 @@ std::pair<std::string, bool> McpServer::toolServerStart() {
     waitpid(child, nullptr, 0); // reap intermediate child immediately
 
     // Wait for socket to appear
-    for (int i = 0; i < 24; i++) {
+    for (int i = 0; i < kServerStartPollIter; i++) {
         usleep(500000);
         if (fs::exists(sockPath_)) {
             int spid = 0;
@@ -337,7 +333,9 @@ std::pair<std::string, bool> McpServer::toolServerStart() {
             return {"Server started (PID " + std::to_string(spid) + ").", false};
         }
     }
-    return {"Server did not start within 12 s. Check config.json and database.", true};
+    return {"Server did not start within " +
+            std::to_string(kServerStartPollIter / 2) +
+            " s. Check config.json and database.", true};
 }
 
 std::pair<std::string, bool> McpServer::toolServerStop() {
@@ -348,7 +346,7 @@ std::pair<std::string, bool> McpServer::toolServerStop() {
         ipc::closeFd(fd);
     }
 
-    for (int i = 0; i < 20; i++) {
+    for (int i = 0; i < kServerStopPollIter; i++) {
         if (!isServerRunning()) break;
         usleep(500000);
     }
@@ -420,7 +418,7 @@ std::pair<std::string, bool> McpServer::toolChat(const json& args) {
     bool done = false;
     while (!done) {
         struct pollfd rpfd = {fd, POLLIN, 0};
-        if (poll(&rpfd, 1, 300000) <= 0) { // 5 min timeout for scans
+        if (poll(&rpfd, 1, kChatPollTimeoutMs) <= 0) { // 5 min timeout for scans
             result += "\n[timeout after 5 minutes]";
             break;
         }

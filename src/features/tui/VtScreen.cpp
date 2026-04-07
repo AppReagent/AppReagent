@@ -1,4 +1,4 @@
-#include "VtScreen.h"
+#include "features/tui/VtScreen.h"
 
 #include <algorithm>
 #include <sstream>

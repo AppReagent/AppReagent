@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "tui_util.h"
+#include "features/tui/tui_util.h"
 #include "util/string_util.h"
 
 using namespace area::tui;

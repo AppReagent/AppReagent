@@ -1,6 +1,6 @@
 #pragma once
 
-#include "VtScreen.h"
+#include "features/tui/VtScreen.h"
 
 #include <string>
 #include <sys/types.h>

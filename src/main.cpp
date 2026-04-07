@@ -18,7 +18,7 @@
 #include "Database.h"
 #include "Harness.h"
 #include "ScanCommand.h"
-#include "Tui.h"
+#include "features/tui/Tui.h"
 #include "AreaServer.h"
 #include "IPC.h"
 #include "McpServer.h"
@@ -99,8 +99,7 @@ static int connectToServer() {
 
 static int cmdMcp() {
     signal(SIGPIPE, SIG_IGN);
-    area::McpServer mcp(getDataDir(), fs::current_path().string());
-    return mcp.run();
+    return area::runMcpServer(getDataDir(), fs::current_path().string());
 }
 
 static int cmdScan(area::Config& config, area::Database& db, area::ArgParse& args) {

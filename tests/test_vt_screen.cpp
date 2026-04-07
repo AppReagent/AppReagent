@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "VtScreen.h"
+#include "features/tui/VtScreen.h"
 
 using area::VtScreen;
 

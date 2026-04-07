@@ -1,4 +1,4 @@
-#include "Tui.h"
+#include "features/tui/Tui.h"
 
 #include <algorithm>
 #include <cmath>
@@ -8,7 +8,7 @@
 #include <fstream>
 #include <sstream>
 #include "IPC.h"
-#include "tui_util.h"
+#include "features/tui/tui_util.h"
 #include "util/convo_io.h"
 #include "util/string_util.h"
 #include <nlohmann/json.hpp>
@@ -144,8 +144,7 @@ void Tui::disableMouseTracking() {
 void Tui::enterAltScreen() {
     outputBuf_ += "\033[?1049h"; // alt screen
     outputBuf_ += "\033[?25l";   // hide cursor
-    // Mouse tracking off by default so terminal text selection works.
-    // Ctrl+M toggles mouse mode (scroll wheel + right-click).
+    enableMouseTracking();       // Ctrl+B toggles off for text selection
     flush();
 }
 

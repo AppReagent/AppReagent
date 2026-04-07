@@ -3,6 +3,7 @@
 #include <fstream>
 
 #include "features/ghidra/GhidraTool.h"
+#include "util/file_io.h"
 #include "infra/tools/ToolContext.h"
 #include "infra/agent/Agent.h"
 #include "infra/agent/Harness.h"

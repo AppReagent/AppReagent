@@ -106,6 +106,16 @@
       "response": "ANSWER: There are no active scans running right now."
     },
     {
+      "id": "ghidra_decompile",
+      "user_match": ["ghidra", "decompile"],
+      "response": "ANSWER: Ghidra decompilation of the main function shows: socket() call to create network connection, connect() to reach C2 server, dup2() to redirect stdin/stdout/stderr, and execve(\"/bin/sh\") to spawn a shell. This is a classic reverse shell pattern."
+    },
+    {
+      "id": "ghidra_overview",
+      "user_match": ["ghidra", "overview"],
+      "response": "ANSWER: Ghidra analysis shows this is an ELF x86_64 binary. Functions found: main, _start. Imports: socket, connect, dup2, execve, close from libc."
+    },
+    {
       "id": "sensor_feedback",
       "user_match": ["SENSOR FEEDBACK"],
       "response": "ANSWER: The scan found relevant malware indicators including SMS exfiltration, contact theft, C2 communication, HttpURLConnection network calls, banking overlay attacks, dropper payload loading, persistence via BOOT_COMPLETED, and obfuscation techniques. Score: 72/100."

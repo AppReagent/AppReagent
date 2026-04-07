@@ -142,9 +142,17 @@ std::optional<ToolResult> GhidraTool::tryExecute(const std::string& action, Tool
 
     // Check Ghidra availability
     std::string gh = ghidraHome();
-    if (gh.empty() || !fs::exists(gh + "/support/analyzeHeadless")) {
-        return ToolResult{"OBSERVATION: Error — Ghidra not found. Set GHIDRA_HOME or "
-                          "install Ghidra to ~/.local/opt/ghidra_*"};
+    bool useDocker = gh.empty() || !fs::exists(gh + "/support/analyzeHeadless");
+    if (useDocker) {
+        // Check if Docker image is available
+        int rc;
+        runCmd("sudo docker image inspect area-ghidra >/dev/null 2>&1", &rc);
+        if (rc != 0) {
+            return ToolResult{"OBSERVATION: Error — Ghidra not found locally and area-ghidra "
+                              "Docker image not available. Set GHIDRA_HOME, install Ghidra "
+                              "to ~/.local/opt/ghidra_*, or build the Docker image with: "
+                              "sudo docker build -t area-ghidra docker/ghidra/"};
+        }
     }
 
     ctx.cb({AgentMessage::THINKING, "Running Ghidra " + mode + " analysis on " +
@@ -197,39 +205,80 @@ std::string GhidraTool::runGhidra(const std::string& binaryPath,
                                    const std::string& outputPath,
                                    std::string& ghidraLog) {
     std::string gh = ghidraHome();
-    std::string jh = javaHome();
     std::string sd = scriptDir();
+    bool useDocker = gh.empty() || !fs::exists(gh + "/support/analyzeHeadless");
 
-    if (sd.empty()) return "Ghidra scripts not found (scripts/ghidra/AreaAnalyze.java)";
+    if (!useDocker && sd.empty())
+        return "Ghidra scripts not found (scripts/ghidra/AreaAnalyze.java)";
 
     std::string projDir = "/tmp/area-ghidra-proj-" + std::to_string(getpid());
     fs::create_directories(projDir);
 
     std::ostringstream cmd;
 
-    // Set environment
-    if (!jh.empty()) {
-        cmd << "JAVA_HOME=" << jh << " PATH=" << jh << "/bin:$PATH ";
-    }
+    if (useDocker) {
+        // Docker mode: mount binary, scripts, output dir into container
+        auto absInput = fs::absolute(binaryPath).string();
+        auto absOutput = fs::absolute(fs::path(outputPath).parent_path()).string();
+        auto outputFile = fs::path(outputPath).filename().string();
 
-    cmd << gh << "/support/analyzeHeadless"
-        << " " << projDir << " AreaProject"
-        << " -import " << binaryPath
-        << " -postScript AreaAnalyze.java " << outputPath << " " << mode;
-
-    if (!filter.empty()) {
-        // Shell-escape the filter
-        std::string escaped;
-        for (char c : filter) {
-            if (c == '\'') escaped += "'\\''";
-            else escaped += c;
+        if (sd.empty()) {
+            // Find scripts relative to binary
+            auto exe = util::selfExe();
+            if (!exe.empty()) {
+                auto d = fs::path(exe).parent_path() / "scripts" / "ghidra";
+                if (fs::exists(d / "AreaAnalyze.java")) sd = d.string();
+            }
         }
-        cmd << " '" << escaped << "'";
-    }
+        if (sd.empty()) return "Ghidra scripts not found (scripts/ghidra/AreaAnalyze.java)";
 
-    cmd << " -scriptPath " << sd
-        << " -deleteproject"
-        << " -analysisTimeoutPerFile 180";
+        cmd << "sudo docker run --rm"
+            << " -v " << absInput << ":/input/" << fs::path(binaryPath).filename().string()
+            << " -v " << sd << ":/scripts"
+            << " -v " << absOutput << ":/output"
+            << " -v " << projDir << ":/proj"
+            << " area-ghidra"
+            << " /proj AreaProject"
+            << " -import /input/" << fs::path(binaryPath).filename().string()
+            << " -postScript AreaAnalyze.java /output/" << outputFile << " " << mode;
+
+        if (!filter.empty()) {
+            std::string escaped;
+            for (char c : filter) {
+                if (c == '\'') escaped += "'\\''";
+                else escaped += c;
+            }
+            cmd << " '" << escaped << "'";
+        }
+
+        cmd << " -scriptPath /scripts"
+            << " -deleteproject"
+            << " -analysisTimeoutPerFile 180";
+    } else {
+        // Local mode
+        std::string jh = javaHome();
+        if (!jh.empty()) {
+            cmd << "JAVA_HOME=" << jh << " PATH=" << jh << "/bin:$PATH ";
+        }
+
+        cmd << gh << "/support/analyzeHeadless"
+            << " " << projDir << " AreaProject"
+            << " -import " << binaryPath
+            << " -postScript AreaAnalyze.java " << outputPath << " " << mode;
+
+        if (!filter.empty()) {
+            std::string escaped;
+            for (char c : filter) {
+                if (c == '\'') escaped += "'\\''";
+                else escaped += c;
+            }
+            cmd << " '" << escaped << "'";
+        }
+
+        cmd << " -scriptPath " << sd
+            << " -deleteproject"
+            << " -analysisTimeoutPerFile 180";
+    }
 
     int exitCode;
     ghidraLog = runCmd(cmd.str(), &exitCode);

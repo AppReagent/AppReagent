@@ -84,15 +84,26 @@ AnalysisResult AnalyzeCommand::run(const std::string& run_id) {
         return result;
     }
 
-    // Check for previous analyses
+    // Check for previous analyses — return cached result unless force re-analyze
     auto prev = db_.executeParams(
-        "SELECT threat_level, confidence, risk_score, created_at FROM analyze_results "
-        "WHERE run_id = $1 ORDER BY created_at DESC LIMIT 1",
+        "SELECT threat_level, confidence, risk_score, summary, full_json, findings_count, created_at "
+        "FROM analyze_results WHERE run_id = $1 ORDER BY created_at DESC LIMIT 1",
         {resolvedId});
-    if (prev.ok() && !prev.rows.empty()) {
-        emitLog("Note: run " + resolvedId + " was previously analyzed (" +
-                prev.rows[0][0] + ", confidence=" + prev.rows[0][1] +
-                "%, " + prev.rows[0][3] + "). Re-analyzing...");
+    if (prev.ok() && !prev.rows.empty() && !forceReanalyze_) {
+        result.threat_level = prev.rows[0][0];
+        result.confidence = std::stoi(prev.rows[0][1]);
+        result.risk_score = std::stoi(prev.rows[0][2]);
+        result.summary = prev.rows[0][3];
+        result.full_json = prev.rows[0][4];
+        emitLog("Returning cached analysis for run " + resolvedId +
+                " (" + result.threat_level + ", confidence=" +
+                std::to_string(result.confidence) + "%, " + prev.rows[0][6] +
+                "). Use ANALYZE:reanalyze " + resolvedId + " to force re-analysis.");
+        return result;
+    }
+    if (prev.ok() && !prev.rows.empty() && forceReanalyze_) {
+        emitLog("Re-analyzing run " + resolvedId + " (previous: " +
+                prev.rows[0][0] + ", confidence=" + prev.rows[0][1] + "%)");
     }
 
     std::string scanGoal = loadScanGoal(resolvedId);
@@ -133,12 +144,14 @@ AnalysisResult AnalyzeCommand::run(const std::string& run_id) {
             auto prompt = ctx.get("llm_prompt").get<std::string>();
             auto response = ctx.get("llm_response").get<std::string>();
             auto promptHash = ScanLog::sha256(prompt);
+            std::string filePath = ctx.has("file_path") ? ctx.get("file_path").get<std::string>() : "";
+            std::string fileHash = ctx.has("file_hash") ? ctx.get("file_hash").get<std::string>() : "";
             // Log analyze LLM calls to the same llm_calls table
             db_.executeParams(
                 "INSERT INTO llm_calls (run_id, file_path, file_hash, node_name, "
                 "tier, prompt, prompt_hash, response, latency_ms) "
-                "VALUES ($1, '', '', $2, 0, $3, $4, $5, 0)",
-                {resolvedId, "analyze:" + nodeName, prompt, promptHash, response});
+                "VALUES ($1, $2, $3, $4, 0, $5, $6, $7, 0)",
+                {resolvedId, filePath, fileHash, "analyze:" + nodeName, prompt, promptHash, response});
         }
     });
 

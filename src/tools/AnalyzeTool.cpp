@@ -17,6 +17,15 @@ std::optional<ToolResult> AnalyzeTool::tryExecute(const std::string& action, Too
 
     if (args.empty()) args = "latest";
 
+    // Support "reanalyze <run_id>" to force re-analysis
+    bool forceReanalyze = false;
+    if (args.find("reanalyze") == 0) {
+        forceReanalyze = true;
+        args = args.substr(9);
+        while (!args.empty() && args[0] == ' ') args.erase(0, 1);
+        if (args.empty()) args = "latest";
+    }
+
     if (!config_) {
         ctx.cb({AgentMessage::ERROR, "Analyze not available (no config)"});
         return ToolResult{"OBSERVATION: Error — analyze not available, no config provided."};
@@ -25,6 +34,7 @@ std::optional<ToolResult> AnalyzeTool::tryExecute(const std::string& action, Too
     ctx.cb({AgentMessage::THINKING, "Starting RAG-augmented analysis for run: " + args});
 
     AnalyzeCommand analyze(*config_, db_);
+    analyze.setForceReanalyze(forceReanalyze);
     analyze.setLogCallback([&ctx](const std::string& msg) {
         ctx.cb({AgentMessage::THINKING, msg});
     });

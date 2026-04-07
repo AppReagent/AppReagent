@@ -508,6 +508,8 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
 
             for (auto& func : info.functions) {
                 TaskContext item;
+                if (ctx.has("file_path")) item.set("file_path", ctx.get("file_path"));
+                if (ctx.has("file_hash")) item.set("file_hash", ctx.get("file_hash"));
                 item.set("class_name", className);
                 item.set("source_file", className);
                 item.set("scan_goal", scanGoal);
@@ -556,6 +558,8 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
 
             for (auto& m : parsed.methods) {
                 TaskContext item;
+                if (ctx.has("file_path")) item.set("file_path", ctx.get("file_path"));
+                if (ctx.has("file_hash")) item.set("file_hash", ctx.get("file_hash"));
                 item.set("class_name", className);
                 item.set("source_file", sourceFile);
                 item.set("scan_goal", scanGoal);

@@ -17,9 +17,11 @@ public:
     std::string name() const override { return "ANALYZE"; }
     std::string description() const override {
         return "<run_id> | latest — run RAG-augmented analysis on a completed scan. "
-               "Retrieves similar methods from the embedding corpus to produce deeper threat assessments.\n"
+               "Returns cached results if previously analyzed (no extra LLM cost). "
+               "Use 'reanalyze <run_id>' to force re-analysis.\n"
                "  Example: ANALYZE: latest\n"
-               "  Example: ANALYZE: abc123XYZ_w";
+               "  Example: ANALYZE: abc123XYZ_w\n"
+               "  Example: ANALYZE: reanalyze abc123XYZ_w";
     }
     std::optional<ToolResult> tryExecute(const std::string& action, ToolContext& ctx) override;
 

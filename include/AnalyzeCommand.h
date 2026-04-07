@@ -34,6 +34,7 @@ public:
     void setLogCallback(LogCallback cb) { logCb_ = cb; }
 
     void setEventBus(EventBus* bus) { events_ = bus; }
+    void setForceReanalyze(bool force) { forceReanalyze_ = force; }
 
 private:
     void emitLog(const std::string& msg);
@@ -46,6 +47,7 @@ private:
     std::unique_ptr<EmbeddingStore> embeddingStore_;
     LogCallback logCb_;
     EventBus* events_ = nullptr;
+    bool forceReanalyze_ = false;
 };
 
 } // namespace area

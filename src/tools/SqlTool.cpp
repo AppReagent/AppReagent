@@ -82,13 +82,16 @@ std::string SqlTool::formatResults(const QueryResult& qr) {
         }
     }
 
-    for (auto& w : widths) w = std::min(w, (size_t)40);
+    // Cap display width but don't truncate actual values — use ellipsis for long values
+    constexpr size_t MAX_COL_WIDTH = 200;
+    for (auto& w : widths) w = std::min(w, MAX_COL_WIDTH);
 
     for (size_t i = 0; i < qr.columns.size(); i++) {
         if (i > 0) out << " | ";
-        out << qr.columns[i];
-        if (qr.columns[i].size() < widths[i])
-            out << std::string(widths[i] - qr.columns[i].size(), ' ');
+        std::string col = qr.columns[i].substr(0, MAX_COL_WIDTH);
+        out << col;
+        if (col.size() < widths[i])
+            out << std::string(widths[i] - col.size(), ' ');
     }
     out << "\n";
 
@@ -102,7 +105,10 @@ std::string SqlTool::formatResults(const QueryResult& qr) {
     for (size_t r = 0; r < maxRows; r++) {
         for (size_t i = 0; i < qr.rows[r].size(); i++) {
             if (i > 0) out << " | ";
-            std::string val = qr.rows[r][i].substr(0, 40);
+            std::string val = qr.rows[r][i];
+            if (val.size() > MAX_COL_WIDTH) {
+                val = val.substr(0, MAX_COL_WIDTH - 3) + "...";
+            }
             out << val;
             if (val.size() < widths[i])
                 out << std::string(widths[i] - val.size(), ' ');

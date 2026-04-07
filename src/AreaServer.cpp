@@ -29,6 +29,7 @@
 #include "tools/ReportTool.h"
 #include "tools/ReadCodeTool.h"
 #include "tools/ClassesTool.h"
+#include "tools/GhidraTool.h"
 
 #include <csignal>
 #include <filesystem>
@@ -167,6 +168,7 @@ ChatSession& AreaServer::getOrCreateChat(const std::string& id, const std::strin
         session->tools->add(std::make_unique<FindBehaviorTool>(db_));
         session->tools->add(std::make_unique<PermissionsTool>());
         session->tools->add(std::make_unique<DisasmTool>());
+        session->tools->add(std::make_unique<GhidraTool>());
         session->tools->add(std::make_unique<ReportTool>(db_));
         session->tools->add(std::make_unique<ImproveTool>(&config_, db_,
             std::filesystem::current_path().string()));

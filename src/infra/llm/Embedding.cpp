@@ -1,4 +1,4 @@
-#include "Embedding.h"
+#include "infra/llm/Embedding.h"
 
 #include <curl/curl.h>
 #include <iostream>

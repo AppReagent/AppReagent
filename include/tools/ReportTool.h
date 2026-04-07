@@ -1,7 +1,7 @@
 #pragma once
 
 #include "tools/Tool.h"
-#include "Database.h"
+#include "infra/db/Database.h"
 
 namespace area {
 

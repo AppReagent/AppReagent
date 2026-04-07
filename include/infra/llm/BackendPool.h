@@ -6,7 +6,7 @@
 #include <mutex>
 #include <vector>
 
-#include "LLMBackend.h"
+#include "infra/llm/LLMBackend.h"
 
 namespace area {
 

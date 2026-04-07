@@ -278,7 +278,7 @@ TEST(ElfMethodAnalysis, DetectsInt80Syscall) {
 
 #include "graph/engine/graph_runner.h"
 #include "graph/graphs/scan_task_graph.h"
-#include "LLMBackend.h"
+#include "infra/llm/LLMBackend.h"
 #include "elf/disassembler.h"
 #include <cstring>
 #include <elf.h>

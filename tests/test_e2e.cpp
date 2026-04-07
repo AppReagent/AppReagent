@@ -10,8 +10,8 @@
 
 #include "Agent.h"
 #include "AreaServer.h"
-#include "IPC.h"
-#include "LLMBackend.h"
+#include "infra/ipc/IPC.h"
+#include "infra/llm/LLMBackend.h"
 #include "ScanLog.h"
 #include "tools/ToolRegistry.h"
 #include "tools/GenerateRunIdTool.h"

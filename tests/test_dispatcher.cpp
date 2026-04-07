@@ -5,7 +5,7 @@
 
 #include "ServerRunner.h"
 #include "JobManager.h"
-#include "LLMBackend.h"
+#include "infra/llm/LLMBackend.h"
 #include "JobQueue.h"
 
 // Helper: make a Job with given id and tier

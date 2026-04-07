@@ -3,7 +3,7 @@
 
 #include "graph/engine/graph_runner.h"
 #include "graph/graphs/scan_task_graph.h"
-#include "LLMBackend.h"
+#include "infra/llm/LLMBackend.h"
 
 using namespace area::graph;
 

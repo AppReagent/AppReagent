@@ -2,7 +2,7 @@
 #include "graph/graphs/elf_analysis.h"
 #include "graph/util/json_extract.h"
 #include "util/file_io.h"
-#include "Embedding.h"
+#include "infra/llm/Embedding.h"
 
 #include <cinttypes>
 #include <filesystem>

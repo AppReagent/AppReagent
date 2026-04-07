@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "JobQueue.h"
-#include "LLMBackend.h"
+#include "infra/llm/LLMBackend.h"
 
 namespace area {
 

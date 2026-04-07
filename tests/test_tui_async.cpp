@@ -4,7 +4,7 @@
 #include <thread>
 
 #include "Agent.h"
-#include "LLMBackend.h"
+#include "infra/llm/LLMBackend.h"
 #include "tools/ToolRegistry.h"
 #include "tools/SqlTool.h"
 

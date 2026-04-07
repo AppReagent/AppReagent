@@ -2,7 +2,7 @@
 #include "tools/ToolContext.h"
 #include "Agent.h"
 #include "Harness.h"
-#include "Sandbox.h"
+#include "infra/sandbox/Sandbox.h"
 
 namespace area {
 

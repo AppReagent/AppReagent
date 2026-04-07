@@ -1,5 +1,5 @@
 #include "features/chat/ChatService.h"
-#include "IPC.h"
+#include "infra/ipc/IPC.h"
 
 #include <filesystem>
 #include <poll.h>

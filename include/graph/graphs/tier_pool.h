@@ -4,9 +4,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include "BackendPool.h"
+#include "infra/llm/BackendPool.h"
 #include "Config.h"
-#include "LLMBackend.h"
+#include "infra/llm/LLMBackend.h"
 #include "graph/graphs/scan_task_graph.h"
 
 namespace area::graph {

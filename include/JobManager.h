@@ -7,7 +7,7 @@
 
 #include "ClusterStatus.h"
 #include "Config.h"
-#include "Database.h"
+#include "infra/db/Database.h"
 #include "JobQueue.h"
 #include "ServerRunner.h"
 

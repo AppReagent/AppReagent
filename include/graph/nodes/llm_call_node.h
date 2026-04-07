@@ -3,7 +3,7 @@
 #include <string>
 
 #include "../engine/node.h"
-#include "LLMBackend.h"
+#include "infra/llm/LLMBackend.h"
 
 namespace area::graph {
 

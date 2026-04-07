@@ -4,9 +4,9 @@
 
 #include "graph/engine/task_graph.h"
 #include "graph/graphs/scan_task_graph.h"
-#include "Database.h"
-#include "Embedding.h"
-#include "LLMBackend.h"
+#include "infra/db/Database.h"
+#include "infra/llm/Embedding.h"
+#include "infra/llm/LLMBackend.h"
 
 namespace area::graph {
 

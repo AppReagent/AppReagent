@@ -6,8 +6,8 @@
 #include <string>
 
 #include "Config.h"
-#include "Database.h"
-#include "Embedding.h"
+#include "infra/db/Database.h"
+#include "infra/llm/Embedding.h"
 
 namespace area { class EventBus; }
 

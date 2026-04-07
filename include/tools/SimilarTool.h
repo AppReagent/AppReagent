@@ -2,8 +2,8 @@
 
 #include "tools/Tool.h"
 #include "Config.h"
-#include "Database.h"
-#include "Embedding.h"
+#include "infra/db/Database.h"
+#include "infra/llm/Embedding.h"
 
 namespace area {
 

@@ -7,7 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
-#include "IPC.h"
+#include "infra/ipc/IPC.h"
 #include "features/tui/tui_util.h"
 #include "util/convo_io.h"
 #include "util/string_util.h"

@@ -2,7 +2,7 @@
 
 #include "tools/Tool.h"
 #include "Config.h"
-#include "Database.h"
+#include "infra/db/Database.h"
 
 #include <nlohmann/json.hpp>
 

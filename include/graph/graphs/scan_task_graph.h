@@ -4,7 +4,7 @@
 #include <unordered_map>
 
 #include "graph/engine/task_graph.h"
-#include "LLMBackend.h"
+#include "infra/llm/LLMBackend.h"
 
 namespace area { class EmbeddingStore; }
 

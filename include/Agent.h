@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "Harness.h"
-#include "LLMBackend.h"
+#include "infra/llm/LLMBackend.h"
 #include "tools/ToolRegistry.h"
 
 namespace area {

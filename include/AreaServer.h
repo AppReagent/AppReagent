@@ -11,10 +11,10 @@
 #include <nlohmann/json.hpp>
 
 #include "Agent.h"
-#include "BackendPool.h"
+#include "infra/llm/BackendPool.h"
 #include "Config.h"
-#include "Database.h"
-#include "Sandbox.h"
+#include "infra/db/Database.h"
+#include "infra/sandbox/Sandbox.h"
 #include "ScanState.h"
 #include "tools/ToolRegistry.h"
 #include "events/EventBus.h"

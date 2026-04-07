@@ -1,7 +1,7 @@
 #include "tools/DeleteScanTool.h"
 #include "tools/ToolContext.h"
 #include "Agent.h"
-#include "Embedding.h"
+#include "infra/llm/Embedding.h"
 #include "ScanLog.h"
 #include "ScanState.h"
 

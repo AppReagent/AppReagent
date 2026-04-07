@@ -1,6 +1,6 @@
 #include "features/server/ServerFeature.h"
 #include "mcp/McpUtil.h"
-#include "IPC.h"
+#include "infra/ipc/IPC.h"
 #include "util/file_io.h"
 
 #include <fcntl.h>

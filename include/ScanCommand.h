@@ -11,8 +11,8 @@
 #include <nlohmann/json.hpp>
 
 #include "Config.h"
-#include "Database.h"
-#include "Embedding.h"
+#include "infra/db/Database.h"
+#include "infra/llm/Embedding.h"
 #include "ScanLog.h"
 #include "ScanOutputFile.h"
 

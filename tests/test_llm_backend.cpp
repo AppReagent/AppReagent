@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "LLMBackend.h"
+#include "infra/llm/LLMBackend.h"
 
 TEST(LLMBackendFactory, CreatesOllama) {
     area::AiEndpoint ep{"id1", "ollama", "http://localhost:11434", "auto"};

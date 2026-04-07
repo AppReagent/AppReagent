@@ -4,7 +4,7 @@
 #include "graph/nodes/code_node.h"
 #include "graph/nodes/llm_call_node.h"
 #include "graph/nodes/supervised_llm_call_node.h"
-#include "LLMBackend.h"
+#include "infra/llm/LLMBackend.h"
 
 using namespace area::graph;
 

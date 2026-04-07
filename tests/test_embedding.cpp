@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "Embedding.h"
+#include "infra/llm/Embedding.h"
 #include "Config.h"
 
 using namespace area;

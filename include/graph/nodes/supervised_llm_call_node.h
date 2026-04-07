@@ -4,7 +4,7 @@
 #include <string>
 
 #include "../engine/node.h"
-#include "LLMBackend.h"
+#include "infra/llm/LLMBackend.h"
 #include "llm_call_node.h"
 
 namespace area::graph {

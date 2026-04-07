@@ -40,5 +40,8 @@ ca-certificate.crt
 # Test output
 area_tests
 
+# Scratch
+scratch/
+
 # OS files
 .DS_Store

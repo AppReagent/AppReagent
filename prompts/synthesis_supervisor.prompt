@@ -14,7 +14,7 @@ Check the following:
 8. Is "threat_type" a recognized category or "none" for non-relevant files?
 9. Are "mitre_techniques" entries formatted as "T-number -- description"?
 10. Does evidence_summary cite specific API calls, string constants, or code patterns -- not vague claims?
-11. Classification consistency: if overall_relevance is "relevant", risk_score must be >= 70 and there must be concrete malicious findings. If "not_relevant", risk_score must be <= 15 and the answer must NOT use words like "malicious", "suspicious", or "threat" even in negated form.
+11. Classification consistency: if overall_relevance is "relevant", risk_score must be >= 70 and there must be concrete malicious findings. If "partially_relevant", risk_score must be between 15 and 55. If "not_relevant", risk_score must be <= 15 and the answer must NOT use words like "malicious", "suspicious", or "threat" even in negated form.
 12. Cross-method synthesis: if multiple methods have findings, the evidence_summary should describe how they relate to each other (e.g., "method A collects data that method B exfiltrates"), not just list individual findings.
 13. If any method showed definitive malicious behavior, the overall classification should not be "not_relevant".
 

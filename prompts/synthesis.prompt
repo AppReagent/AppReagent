@@ -47,6 +47,17 @@ If multiple threat types are present in the same class (e.g., data theft + C2 + 
 - **"partially_relevant"** (risk score 15-55): Security-sensitive APIs that COULD be abused but appear legitimate in isolation. This includes: downloading files, accessing location, sending notifications, HTTP requests, analytics/tracking, device identifiers. Single suspicious method without corroboration.
 - **"not_relevant"** (risk score 0-15): NO security-sensitive operations -- pure UI, data models, utilities, formatters, adapters.
 
+### Legitimate pattern recognition (CRITICAL for avoiding false positives)
+Before classifying as "relevant", verify the behavior is genuinely malicious — not a common legitimate pattern:
+- **Analytics/tracking SDKs**: Code that collects screen views, UI events, or session data and sends to a named analytics endpoint (e.g., analytics.example.com, Firebase Analytics, Mixpanel). Data collection + HTTP POST to an analytics endpoint is standard app telemetry, NOT exfiltration. Classify as "partially_relevant" at most.
+- **File download managers**: Code using Android DownloadManager or similar system APIs to download files with user-visible notifications and public storage destinations. Classify as "partially_relevant" at most.
+- **Push notification handlers**: Firebase/FCM message handling that displays notifications via NotificationManager. Classify as "partially_relevant" at most.
+- **Standard network clients**: Simple HTTP GET/POST to named API endpoints for data retrieval or content updates. Classify as "partially_relevant" at most unless combined with sensitive data sources.
+
+The key discriminator between "relevant" (malware) and "partially_relevant" (legitimate but security-sensitive): what data is being collected and where is it sent? Tracking screen views and sending to analytics.example.com is NOT the same as stealing contacts and sending to a hardcoded IP. Exfiltration requires accessing SENSITIVE user data (contacts, SMS, call logs, location, credentials, photos) and transmitting it covertly or to suspicious endpoints.
+
+IMPORTANT: Files that handle remote data (push notifications, FCM/Firebase messages), manage file downloads, or perform network data transmission should NEVER be classified as "not_relevant". These are inherently security-relevant operations even when they appear legitimate. At minimum, classify as "partially_relevant" with a risk score of 15-45.
+
 ### Language rules (CRITICAL)
 - For **"not_relevant"** files: describe what the code DOES (e.g., "displays UI", "formats data"). Do NOT use words like "malware", "malicious", "exfiltration", "suspicious", or "threat" -- not even in negated form like "no malicious behavior found". Simply state what the code does.
 - For **"partially_relevant"** files: describe the security-sensitive APIs used and why they are noteworthy. Use descriptive terms matching actual functionality (e.g., "analytics tracking", "file downloading", "location monitoring"). Do NOT inflate language.

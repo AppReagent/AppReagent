@@ -143,6 +143,11 @@ static const std::vector<SuspiciousApi> kSuspiciousApis = {
     {"DataOutputStream;->write", "c2", 10},
     {"Base64;->decode", "evasion", 8},
     {"Base64;->encode", "evasion", 5},
+    // Security-relevant but potentially legitimate APIs
+    {"DownloadManager;->enqueue", "dropper", 15},
+    {"NotificationManager;->notify", "surveillance", 10},
+    {"NotificationCompat", "surveillance", 8},
+    {"FirebaseMessagingService", "surveillance", 10},
 };
 
 // Check for obfuscation indicators in raw code

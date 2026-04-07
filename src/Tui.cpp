@@ -111,12 +111,6 @@ static void appendRGB(std::string& buf, int r, int g, int b, bool bold = false) 
     buf += esc;
 }
 
-Tui::Tui(Agent& agent, const std::string& theme, ClusterStatusProvider* cluster)
-    : agent_(&agent), cluster_(cluster),
-      theme_(theme == "light" ? lightTheme : darkTheme) {
-    outputBuf_.reserve(16384);
-}
-
 Tui::Tui(int sockFd, const std::string& theme)
     : sockFd_(sockFd),
       theme_(theme == "light" ? lightTheme : darkTheme) {
@@ -199,13 +193,8 @@ void Tui::buildLayout() {
     YGNodeStyleSetHeight(headerNode_, showHeader_ ? 1.0f : 0.0f);
     YGNodeInsertChild(root_, headerNode_, idx++);
 
-    int clusterHeight = 0;
-    if (cluster_) {
-        auto snap = cluster_->snapshot();
-        clusterHeight = showClusterDetail_ ? (int)snap.endpoints.size() + 2 : 1;
-    }
     clusterNode_ = YGNodeNew();
-    YGNodeStyleSetHeight(clusterNode_, (float)clusterHeight);
+    YGNodeStyleSetHeight(clusterNode_, 0.0f);
     YGNodeInsertChild(root_, clusterNode_, idx++);
 
     // Task pane: visible when agent explicitly shows it via TUI tool
@@ -335,7 +324,7 @@ void Tui::renderHeader(int row, int width) {
     outputBuf_ += "\033[7m";
     std::string title = " App Reagent (aREa) ";
     std::string subtitle = "";
-    int pct = agent_ ? agent_->contextPercent() : 0;
+    int pct = 0; // context percentage sent by server via state messages
     std::string ctxLabel = "ctx " + std::to_string(pct) + "%";
     std::string header = title + subtitle;
     int rightPad = width - (int)header.size() - (int)ctxLabel.size() - 1;
@@ -411,114 +400,7 @@ void Tui::renderContextMenu(int screenRows, int screenCols) {
     resetStyle();
 }
 
-void Tui::renderCluster(int startRow, int height, int width) {
-    if (!cluster_) return;
-    auto snap = cluster_->snapshot();
-
-    if (!showClusterDetail_) {
-        // Compact: single line with colored utilization per endpoint
-        clearLine(startRow + 1, width);
-        moveCursor(startRow + 1, 1);
-        setColor(COLOR_GRAY);
-        outputBuf_ += " cluster ";
-        resetStyle();
-
-        for (auto& ep : snap.endpoints) {
-            int used = ep.in_flight;
-            int max = ep.max_concurrent;
-
-            int color;
-            if (!ep.healthy) color = COLOR_RED;
-            else if (used == 0) color = COLOR_GRAY;
-            else if (used >= max) color = COLOR_GREEN;
-            else color = COLOR_YELLOW;
-
-            setColor(color);
-            outputBuf_ += ep.id + ":" + std::to_string(used) + "/" + std::to_string(max);
-            resetStyle();
-            outputBuf_ += " ";
-        }
-
-        setColor(COLOR_GRAY);
-        outputBuf_ += "[tab]";
-        resetStyle();
-        return;
-    }
-
-    // Detail view: table with tier, model, utilization
-    int row = startRow + 1;
-    clearLine(row, width);
-    moveCursor(row, 1);
-    setColor(COLOR_GRAY);
-    setBold();
-    outputBuf_ += " ID               TIER  MODEL                    LOAD    STATUS";
-    resetStyle();
-    row++;
-
-    clearLine(row, width);
-    moveCursor(row, 1);
-    setColor(COLOR_GRAY);
-    outputBuf_ += std::string(width, '-');
-    resetStyle();
-    row++;
-
-    for (auto& ep : snap.endpoints) {
-        if (row > startRow + height) break;
-        clearLine(row, width);
-        moveCursor(row, 1);
-
-        int used = ep.in_flight;
-        int max = ep.max_concurrent;
-
-        int color;
-        if (!ep.healthy) color = COLOR_RED;
-        else if (used == 0) color = COLOR_GRAY;
-        else if (used >= max) color = COLOR_GREEN;
-        else color = COLOR_YELLOW;
-
-        // ID (18 chars)
-        std::string id = ep.id;
-        if (id.size() > 17) id = id.substr(0, 17);
-        outputBuf_ += " ";
-        setColor(COLOR_WHITE);
-        outputBuf_ += id;
-        if (id.size() < 18) outputBuf_ += std::string(18 - id.size(), ' ');
-        resetStyle();
-
-        // Tier
-        outputBuf_ += std::to_string(ep.tier);
-        outputBuf_ += "     ";
-
-        // Model (25 chars)
-        std::string model = ep.model;
-        if (model.size() > 24) model = model.substr(0, 24);
-        setColor(COLOR_CYAN);
-        outputBuf_ += model;
-        if (model.size() < 25) outputBuf_ += std::string(25 - model.size(), ' ');
-        resetStyle();
-
-        // Load
-        setColor(color);
-        setBold();
-        outputBuf_ += std::to_string(used) + "/" + std::to_string(max);
-        resetStyle();
-        outputBuf_ += "     ";
-
-        // Status
-        if (!ep.healthy) {
-            setColor(COLOR_RED);
-            outputBuf_ += "BACKOFF";
-        } else if (used > 0) {
-            setColor(COLOR_GREEN);
-            outputBuf_ += "ACTIVE";
-        } else {
-            setColor(COLOR_GRAY);
-            outputBuf_ += "IDLE";
-        }
-        resetStyle();
-
-        row++;
-    }
+void Tui::renderCluster(int /*startRow*/, int /*height*/, int /*width*/) {
 }
 
 void Tui::renderMessages(int startRow, int height, int width) {
@@ -792,11 +674,7 @@ void Tui::handleCtrlC() {
 
         // Only send interrupt once (guard against repeated Ctrl-C)
         if (!interruptSuppressing_) {
-            if (sockFd_ >= 0) {
-                sendToServer({{"type", "interrupt"}, {"chat_id", currentChatId_}});
-            } else if (agent_) {
-                agent_->interrupt();
-            }
+            sendToServer({{"type", "interrupt"}, {"chat_id", currentChatId_}});
             // Show (interrupted) immediately without waiting for server
             {
                 std::lock_guard lk(messagesMu_);
@@ -804,17 +682,12 @@ void Tui::handleCtrlC() {
                 messagesDirty_ = true;
             }
             interruptShown_ = true;
-            if (sockFd_ >= 0) {
-                // Client mode: suppress in-flight messages from old query
-                // but clear processing_ immediately so the user can type and
-                // submit a new message without waiting for the server to
-                // confirm the old query finished.
-                interruptSuppressing_ = true;
-                processing_ = false;
-            } else {
-                // Standalone: safe to clear immediately since thread is joined on next submit
-                processing_ = false;
-            }
+            // Suppress in-flight messages from old query
+            // but clear processing_ immediately so the user can type and
+            // submit a new message without waiting for the server to
+            // confirm the old query finished.
+            interruptSuppressing_ = true;
+            processing_ = false;
         }
         scrollOffset_ = 0;
         render();
@@ -835,42 +708,24 @@ void Tui::handleCtrlC() {
 
 void Tui::approveConfirm() {
     // Caller must hold confirmMu_
-    if (sockFd_ >= 0) {
-        sendToServer({{"type", "confirm_resp"}, {"chat_id", currentChatId_},
-            {"req_id", confirmReqId_}, {"action", "approve"}});
-    } else {
-        confirmResult_ = {ConfirmResult::APPROVE, ""};
-        confirmReady_ = true;
-        confirmCv_.notify_one();
-    }
+    sendToServer({{"type", "confirm_resp"}, {"chat_id", currentChatId_},
+        {"req_id", confirmReqId_}, {"action", "approve"}});
     confirmPending_ = false;
     messagesDirty_ = true;
 }
 
 void Tui::denyConfirm() {
     // Caller must hold confirmMu_
-    if (sockFd_ >= 0) {
-        sendToServer({{"type", "confirm_resp"}, {"chat_id", currentChatId_},
-            {"req_id", confirmReqId_}, {"action", "deny"}});
-    } else {
-        confirmResult_ = {ConfirmResult::DENY, ""};
-        confirmReady_ = true;
-        confirmCv_.notify_one();
-    }
+    sendToServer({{"type", "confirm_resp"}, {"chat_id", currentChatId_},
+        {"req_id", confirmReqId_}, {"action", "deny"}});
     confirmPending_ = false;
     messagesDirty_ = true;
 }
 
 void Tui::submitConfirmCustom() {
     // Caller must hold confirmMu_
-    if (sockFd_ >= 0) {
-        sendToServer({{"type", "confirm_resp"}, {"chat_id", currentChatId_},
-            {"req_id", confirmReqId_}, {"action", "custom"}, {"text", confirmCustom_}});
-    } else {
-        confirmResult_ = {ConfirmResult::CUSTOM, confirmCustom_};
-        confirmReady_ = true;
-        confirmCv_.notify_one();
-    }
+    sendToServer({{"type", "confirm_resp"}, {"chat_id", currentChatId_},
+        {"req_id", confirmReqId_}, {"action", "custom"}, {"text", confirmCustom_}});
     confirmPending_ = false;
     messagesDirty_ = true;
 }
@@ -1063,13 +918,11 @@ void Tui::render() {
     auto ts = getTermSize();
     bool showTP = showTaskPane_.load();
     if (!root_ || ts.rows != layoutRows_ || ts.cols != layoutCols_
-        || showClusterDetail_ != layoutClusterDetail_
         || showTP != layoutShowTaskPane_
         || layoutNeedsRebuild_) {
         buildLayout();
         layoutRows_ = ts.rows;
         layoutCols_ = ts.cols;
-        layoutClusterDetail_ = showClusterDetail_;
         layoutShowTaskPane_ = showTP;
         layoutNeedsRebuild_ = false;
     }
@@ -1094,9 +947,6 @@ void Tui::render() {
     int clusterWidth = (int)YGNodeLayoutGetWidth(clusterNode_);
 
     if (showHeader_) renderHeader(headerRow, headerWidth);
-    if (cluster_ && clusterHeight > 0) {
-        renderCluster(clusterRow, clusterHeight, clusterWidth);
-    }
     if (taskPaneHeight > 0) {
         renderTaskPane(taskPaneRow, taskPaneHeight, taskPaneWidth);
     }
@@ -1185,7 +1035,7 @@ bool Tui::handleInput() {
                 contextMenuOpen_ = false;
                 return true;
             }
-            // Standalone escape: close
+            // Bare escape: close
             contextMenuOpen_ = false;
             return true;
         }
@@ -1278,11 +1128,6 @@ bool Tui::handleInput() {
         }
         flashTime_ = std::chrono::steady_clock::now();
         flush();
-        return true;
-    }
-
-    if (c == 9 && cluster_) { // Tab - toggle cluster detail
-        showClusterDetail_ = !showClusterDetail_;
         return true;
     }
 
@@ -1387,74 +1232,8 @@ bool Tui::handleInput() {
 }
 
 
-void Tui::saveConvo() {
-    std::lock_guard lk(messagesMu_);
-    std::ofstream f("convo.txt");
-    if (!f.is_open()) return;
-    for (auto& m : messages_) {
-        char prefix;
-        if (m.who == Message::USER) prefix = 'U';
-        else switch (m.agentType) {
-            case AgentMessage::THINKING: prefix = 'T'; break;
-            case AgentMessage::SQL:      prefix = 'S'; break;
-            case AgentMessage::RESULT:   prefix = 'R'; break;
-            case AgentMessage::ANSWER:   prefix = 'A'; break;
-            case AgentMessage::ERROR:    prefix = 'E'; break;
-            default: prefix = 'A'; break;
-        }
-        f << prefix << ":" << util::escapeNewlines(m.content) << "\n";
-    }
-}
-
-void Tui::loadConvo() {
-    std::ifstream f("convo.txt");
-    if (!f.is_open()) return;
-    std::string line;
-    while (std::getline(f, line)) {
-        if (line.size() < 2 || line[1] != ':') continue;
-        char prefix = line[0];
-        std::string content = util::unescapeNewlines(line.substr(2));
-        Message msg;
-        if (prefix == 'U') {
-            msg.who = Message::USER;
-            msg.agentType = AgentMessage::THINKING;
-        } else {
-            msg.who = Message::AGENT;
-            switch (prefix) {
-                case 'T': msg.agentType = AgentMessage::THINKING; break;
-                case 'S': msg.agentType = AgentMessage::SQL; break;
-                case 'R': msg.agentType = AgentMessage::RESULT; break;
-                case 'A': msg.agentType = AgentMessage::ANSWER; break;
-                case 'E': msg.agentType = AgentMessage::ERROR; break;
-                default: msg.agentType = AgentMessage::ANSWER; break;
-            }
-        }
-        msg.content = std::move(content);
-        messages_.push_back(std::move(msg));
-    }
-}
-
-void Tui::saveState() {
-    nlohmann::json j;
-    j["current_prompt"] = inputBuffer_;
-    std::ofstream f("state.json");
-    if (f.is_open()) f << j.dump(2) << "\n";
-}
-
-void Tui::loadState() {
-    std::ifstream f("state.json");
-    if (!f.is_open()) return;
-    try {
-        auto j = nlohmann::json::parse(f);
-        if (j.contains("current_prompt")) {
-            inputBuffer_ = j["current_prompt"].get<std::string>();
-            cursorPos_ = (int)inputBuffer_.size();
-        }
-    } catch (...) {}
-}
-
 void Tui::sendToServer(const nlohmann::json& msg) {
-    if (sockFd_ >= 0) ipc::sendLine(sockFd_, msg);
+    ipc::sendLine(sockFd_, msg);
 }
 
 static AgentMessage::Type parseAgentType(const std::string& t) {
@@ -1534,14 +1313,7 @@ void Tui::submit() {
 
     // Handle /clear — wipe context (must work even while processing)
     if (query == "/clear") {
-        if (sockFd_ >= 0) {
-            sendToServer({{"type", "clear_context"}, {"chat_id", currentChatId_}});
-        } else {
-            // Standalone: interrupt in-flight work, then clear
-            if (agent_) agent_->interrupt();
-            if (processingThread_.joinable()) processingThread_.join();
-            if (agent_) agent_->clearHistory();
-        }
+        sendToServer({{"type", "clear_context"}, {"chat_id", currentChatId_}});
         processing_ = false;
         interruptSuppressing_ = false;
         interruptShown_ = false;
@@ -1550,10 +1322,6 @@ void Tui::submit() {
             messages_.clear();
             messagesDirty_ = true;
             scrollOffset_ = 0;
-        }
-        // Persist immediately so a crash doesn't resurrect the old conversation
-        if (sockFd_ < 0) {
-            saveConvo();
         }
         inputBuffer_.clear();
         cursorPos_ = 0;
@@ -1601,68 +1369,8 @@ void Tui::submit() {
     interruptShown_ = false;
     interruptSuppressing_ = false;
 
-    if (sockFd_ >= 0) {
-        // Client mode: send to server
-        processing_ = true;
-        sendToServer({{"type", "user_input"}, {"chat_id", currentChatId_}, {"content", query}});
-        return;
-    }
-
-    // Standalone mode: run agent in-process
     processing_ = true;
-
-    if (processingThread_.joinable()) processingThread_.join();
-    processingThread_ = std::thread([this, query]() {
-        ConfirmCallback confirm = nullptr;
-        if (!dangerousMode_) {
-            confirm = [this](const std::string& desc) -> ConfirmResult {
-                std::unique_lock lk(confirmMu_);
-                confirmDescription_ = desc;
-                confirmSelection_ = 0;
-                confirmCustom_.clear();
-                confirmCursorPos_ = 0;
-                confirmReady_ = false;
-                confirmIsPath_ = (desc.find("SCAN:") == 0);
-                if (confirmIsPath_) {
-                    // Extract just the path from "SCAN: /path | goal"
-                    auto pathStart = desc.find(' ');
-                    if (pathStart != std::string::npos) {
-                        confirmCustom_ = desc.substr(pathStart + 1);
-                        // Stop at pipe separator (goal delimiter)
-                        auto pipePos = confirmCustom_.find('|');
-                        if (pipePos != std::string::npos) {
-                            confirmCustom_ = confirmCustom_.substr(0, pipePos);
-                        }
-                        // Trim trailing whitespace
-                        while (!confirmCustom_.empty() && confirmCustom_.back() == ' ')
-                            confirmCustom_.pop_back();
-                    }
-                    confirmCursorPos_ = (int)confirmCustom_.size();
-                }
-                confirmPending_ = true;
-                messagesDirty_ = true;
-                confirmCv_.wait(lk, [this] { return confirmReady_; });
-                confirmPending_ = false;
-                messagesDirty_ = true;
-                return confirmResult_;
-            };
-        }
-
-        agent_->process(query, [this](const AgentMessage& msg) {
-            if (msg.type == AgentMessage::TUI_CONTROL) {
-                return;
-            }
-            // Suppress in-flight messages after interrupt (including duplicate "(interrupted)")
-            if (interruptShown_) return;
-            std::lock_guard lk(messagesMu_);
-            messages_.push_back({Message::AGENT, msg.type, msg.content, static_cast<int>(animFrame_.load())});
-            messagesDirty_ = true;
-            scrollOffset_ = 0;
-        }, confirm);
-        processing_ = false;
-        messagesDirty_ = true;
-        saveConvo();
-    });
+    sendToServer({{"type", "user_input"}, {"chat_id", currentChatId_}, {"content", query}});
 }
 
 void Tui::run() {
@@ -1680,18 +1388,7 @@ void Tui::run() {
     enableRawMode();
     running_ = true;
 
-    if (sockFd_ >= 0) {
-        // Client mode: attach to default chat, server sends history
-        sendToServer({{"type", "attach"}, {"chat_id", currentChatId_}});
-    } else {
-        // Standalone mode
-        loadConvo();
-        loadState();
-        if (messages_.empty()) {
-            messages_.push_back({Message::AGENT, AgentMessage::ANSWER,
-                "Connected to database. Ask me anything about your data."});
-        }
-    }
+    sendToServer({{"type", "attach"}, {"chat_id", currentChatId_}});
 
     render();
 
@@ -1701,13 +1398,9 @@ void Tui::run() {
         bool fading = (animFrame_ - fadeStartFrame_) < 35;
         int pollMs = (fading || confirmPending_) ? 16 : processing_ ? 33 : 64;
         struct pollfd pfds[2];
-        int nfds = 1;
         pfds[0] = {STDIN_FILENO, POLLIN, 0};
-        if (sockFd_ >= 0) {
-            pfds[1] = {sockFd_, POLLIN, 0};
-            nfds = 2;
-        }
-        poll(pfds, nfds, pollMs);
+        pfds[1] = {sockFd_, POLLIN, 0};
+        poll(pfds, 2, pollMs);
         auto& pfd = pfds[0];
 
         if (g_interrupted) {
@@ -1735,7 +1428,7 @@ void Tui::run() {
                     // Ctrl-C always denies the confirm
                     if (c == 3) { denyConfirm(); break; }
 
-                    // Escape: standalone = deny, with '[' = arrow keys
+                    // Escape = deny, '[' prefix = arrow keys
                     if (c == 27) {
                         struct pollfd ep = {STDIN_FILENO, POLLIN, 0};
                         if (poll(&ep, 1, 30) > 0 && (ep.revents & POLLIN)) {
@@ -1763,7 +1456,7 @@ void Tui::run() {
                                 }
                             }
                         } else {
-                            // Standalone Escape key — deny
+                            // Bare Escape key — deny
                             denyConfirm();
                             break;
                         }
@@ -1816,7 +1509,7 @@ void Tui::run() {
         }
 
         // Read messages from server socket
-        if (sockFd_ >= 0 && nfds > 1 && (pfds[1].revents & POLLIN)) {
+        if (pfds[1].revents & POLLIN) {
             while (auto serverMsg = ipc::readLine(sockFd_)) {
                 handleServerMessage(*serverMsg);
             }
@@ -1859,17 +1552,6 @@ void Tui::run() {
             flush();
             animFrame_++;
         }
-    }
-
-    // Only save locally in standalone mode (server handles its own persistence)
-    if (sockFd_ < 0) {
-        saveConvo();
-        saveState();
-    }
-
-    if (processingThread_.joinable()) {
-        if (agent_) agent_->interrupt();
-        processingThread_.join();
     }
 
     disableRawMode();

@@ -2,25 +2,19 @@
 
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <mutex>
 #include <string>
-#include <thread>
 #include <vector>
 #include <termios.h>
 #include <nlohmann/json.hpp>
 #include <yoga/Yoga.h>
 
 #include "Agent.h"
-#include "ClusterStatus.h"
 
 namespace area {
 
 class Tui {
 public:
-    // Standalone mode (agent runs in-process)
-    Tui(Agent& agent, const std::string& theme = "dark", ClusterStatusProvider* cluster = nullptr);
-    // Client mode (connects to server via socket)
     Tui(int sockFd, const std::string& theme = "dark");
     ~Tui();
 
@@ -65,10 +59,6 @@ private:
 
     bool handleInput();
     void submit();
-    void saveConvo();
-    void loadConvo();
-    void saveState();
-    void loadState();
 
     struct DisplayLine {
         AgentMessage::Type type;
@@ -79,20 +69,16 @@ private:
 
     std::vector<DisplayLine> wrapMessage(const AgentMessage& msg, int width);
 
-    Agent* agent_ = nullptr;  // null in client mode
-    ClusterStatusProvider* cluster_ = nullptr;
-    int sockFd_ = -1;        // >= 0 in client mode
+    int sockFd_;
     std::string currentChatId_ = "default";
     int confirmReqId_ = 0;   // for socket confirm matching
 
     void handleServerMessage(const nlohmann::json& msg);
     void sendToServer(const nlohmann::json& msg);
     bool running_ = false;
-    bool showClusterDetail_ = false;
     std::atomic<bool> processing_{false};
     std::atomic<bool> showTaskPane_{false};  // controlled by agent (TUI: tool) and user (/task)
-    std::atomic<bool> messagesDirty_{false}; // set by processing thread when messages change
-    std::thread processingThread_;
+    std::atomic<bool> messagesDirty_{false}; // set by server messages
     std::mutex messagesMu_;
 
     int scrollOffset_ = 0;
@@ -101,7 +87,6 @@ private:
     int noiseFrame_ = 0;  // slow counter for text noise, increments on full renders
     uint64_t fadeStartFrame_ = 0; // animFrame_ when last new message arrived
     int layoutRows_ = 0, layoutCols_ = 0;
-    bool layoutClusterDetail_ = false;
     bool layoutShowTaskPane_ = false;
     bool layoutNeedsRebuild_ = false;
 
@@ -132,15 +117,12 @@ private:
 
     // Confirm UI state
     std::mutex confirmMu_;
-    std::condition_variable confirmCv_;
     std::atomic<bool> confirmPending_{false};
-    bool confirmReady_ = false;
     bool confirmIsPath_ = false; // SCAN mode: path input with tab completion
     std::string confirmDescription_;
     int confirmSelection_ = 0; // 0=Yes, 1=No, 2=Custom
     std::string confirmCustom_;
     int confirmCursorPos_ = 0;
-    ConfirmResult confirmResult_;
 
     void renderConfirm(int row, int width);
     void tabCompletePath();

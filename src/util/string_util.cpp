@@ -40,4 +40,12 @@ std::string shellQuote(const std::string& s) {
     return "'" + shellEscape(s) + "'";
 }
 
+std::string truncateUTF8(const std::string& s, int maxBytes) {
+    if (maxBytes <= 0) return "";
+    if (static_cast<int>(s.size()) <= maxBytes) return s;
+    int end = maxBytes;
+    while (end > 0 && (s[end] & 0xC0) == 0x80) end--;
+    return s.substr(0, end);
+}
+
 } // namespace area::util

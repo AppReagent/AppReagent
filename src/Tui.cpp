@@ -8,7 +8,9 @@
 #include <fstream>
 #include <sstream>
 #include "IPC.h"
+#include "tui_util.h"
 #include "util/convo_io.h"
+#include "util/string_util.h"
 #include <nlohmann/json.hpp>
 #include <unistd.h>
 #include <poll.h>
@@ -34,33 +36,10 @@ static volatile sig_atomic_t g_interrupted = 0;
 static void handleWinch(int) { g_resized = 1; }
 static void handleInt(int) { g_interrupted = 1; }
 
-// Organic flowing noise from layered harmonics — slow, calm, non-repeating
-// Time parameters scaled for 60fps
-static double flowNoise(double x, double t) {
-    return std::sin(x * 0.3 + t * 0.007) * 0.5
-         + std::sin(x * 0.5 + t * 0.012 + 2.1) * 0.3
-         + std::sin(x * 0.9 + t * 0.018 + 4.7) * 0.2;
-}
+using area::tui::flowNoise;
+using area::tui::noise2d;
 
-// 2D noise for spatial color pulsation, returns 0..1
-// noiseFrame_ advances once per full render (~every 2s), so use larger time coefficients
-static double noise2d(double x, double y, double t) {
-    return (std::sin(x * 0.3 + t * 0.15 + y * 0.2) * 0.5
-          + std::sin(x * 0.7 + t * 0.23 + y * 0.5 + 2.1) * 0.3
-          + std::sin(x * 1.1 + t * 0.31 + y * 0.8 + 4.7) * 0.2
-          + 1.0) * 0.5;
-}
-
-// Truncate a string to at most maxBytes, backing up to avoid splitting a
-// multi-byte UTF-8 character.
-static std::string truncateUTF8(const std::string& s, int maxBytes) {
-    if (maxBytes <= 0) return "";
-    if ((int)s.size() <= maxBytes) return s;
-    int end = maxBytes;
-    // Back up past any UTF-8 continuation bytes (10xxxxxx)
-    while (end > 0 && (s[end] & 0xC0) == 0x80) end--;
-    return s.substr(0, end);
-}
+using area::util::truncateUTF8;
 
 using CT = Tui::ColorTheme;
 using RGB = CT::RGB;
@@ -971,133 +950,175 @@ void Tui::renderInputOnly() {
     flush();
 }
 
-bool Tui::handleInput() {
-    char c;
-    int n = read(STDIN_FILENO, &c, 1);
-    if (n <= 0) return false;
+// ── Shared input helpers ──────────────────────────────────────────────
 
-    // Context menu absorbs all input when open
-    if (contextMenuOpen_) {
-        const int numItems = 2;
-        if (c == 27) {
-            struct pollfd ep = {STDIN_FILENO, POLLIN, 0};
-            if (poll(&ep, 1, 30) > 0 && (ep.revents & POLLIN)) {
-                char seq0;
-                if (read(STDIN_FILENO, &seq0, 1) <= 0) { contextMenuOpen_ = false; return false; }
-                if (seq0 == '[') {
-                    char seq1;
-                    if (read(STDIN_FILENO, &seq1, 1) <= 0) { contextMenuOpen_ = false; return false; }
-                    if (seq1 == 'A') { if (contextMenuSel_ > 0) contextMenuSel_--; return true; }
-                    if (seq1 == 'B') { if (contextMenuSel_ < numItems - 1) contextMenuSel_++; return true; }
-                    if (seq1 == '<') {
-                        // Parse SGR mouse
-                        char buf[32]; int bi = 0;
-                        while (bi < 31) {
-                            if (read(STDIN_FILENO, &buf[bi], 1) <= 0) break;
-                            if (buf[bi] == 'M' || buf[bi] == 'm') { bi++; break; }
-                            bi++;
-                        }
-                        buf[bi] = 0;
-                        bool isPress = (bi > 0 && buf[bi-1] == 'M');
-                        int btn = 0, mx = 0, my = 0;
-                        sscanf(buf, "%d;%d;%d", &btn, &mx, &my);
-                        if (btn == 2 && isPress) {
-                            // Right-click: reposition menu
-                            contextMenuRow_ = my; contextMenuCol_ = mx;
-                            contextMenuSel_ = 0;
-                            return true;
-                        }
-                        if (btn == 0 && isPress) {
-                            // Left-click: toggle item if on menu, else close
-                            auto ts = getTermSize();
-                            const int menuWidth = 17, menuHeight = numItems + 2;
-                            int mr = std::clamp(contextMenuRow_, 1, std::max(1, ts.rows - menuHeight + 1));
-                            int mc = std::clamp(contextMenuCol_, 1, std::max(1, ts.cols - menuWidth + 1));
-                            if (my >= mr + 1 && my <= mr + numItems && mx >= mc && mx < mc + menuWidth) {
-                                int item = my - mr - 1;
-                                if (item == 0) { showHeader_ = !showHeader_; layoutNeedsRebuild_ = true; }
-                                else if (item == 1) { showTaskPane_.store(!showTaskPane_.load()); layoutNeedsRebuild_ = true; }
-                            }
-                            contextMenuOpen_ = false;
-                            return true;
-                        }
-                        if (btn == 64) { scrollOffset_ += 3; contextMenuOpen_ = false; return true; }
-                        if (btn == 65) { scrollOffset_ = std::max(0, scrollOffset_ - 3); contextMenuOpen_ = false; return true; }
+Tui::MouseEvent Tui::readSGRMouse() {
+    char buf[32];
+    int bi = 0;
+    while (bi < 31) {
+        if (read(STDIN_FILENO, &buf[bi], 1) <= 0) break;
+        if (buf[bi] == 'M' || buf[bi] == 'm') { bi++; break; }
+        bi++;
+    }
+    buf[bi] = 0;
+    MouseEvent ev{};
+    ev.press = (bi > 0 && buf[bi - 1] == 'M');
+    sscanf(buf, "%d;%d;%d", &ev.button, &ev.x, &ev.y);
+    return ev;
+}
+
+void Tui::toggleContextMenuItem(int item) {
+    if (item == 0) { showHeader_ = !showHeader_; layoutNeedsRebuild_ = true; }
+    else if (item == 1) { showTaskPane_.store(!showTaskPane_.load()); layoutNeedsRebuild_ = true; }
+}
+
+// ── Context menu input ───────────────────────────────────────────────
+
+bool Tui::handleContextMenuInput(char c) {
+    const int numItems = 2;
+
+    if (c == 27) {
+        struct pollfd ep = {STDIN_FILENO, POLLIN, 0};
+        if (poll(&ep, 1, 30) > 0 && (ep.revents & POLLIN)) {
+            char seq0;
+            if (read(STDIN_FILENO, &seq0, 1) <= 0) { contextMenuOpen_ = false; return false; }
+            if (seq0 == '[') {
+                char seq1;
+                if (read(STDIN_FILENO, &seq1, 1) <= 0) { contextMenuOpen_ = false; return false; }
+                if (seq1 == 'A') { if (contextMenuSel_ > 0) contextMenuSel_--; return true; }
+                if (seq1 == 'B') { if (contextMenuSel_ < numItems - 1) contextMenuSel_++; return true; }
+                if (seq1 == '<') {
+                    auto mouse = readSGRMouse();
+                    if (mouse.button == 2 && mouse.press) {
+                        contextMenuRow_ = mouse.y; contextMenuCol_ = mouse.x;
+                        contextMenuSel_ = 0;
                         return true;
                     }
-                    // Consume other sequences (page up/down)
-                    if (seq1 == '5' || seq1 == '6') { char t; if (read(STDIN_FILENO, &t, 1)) {} }
+                    if (mouse.button == 0 && mouse.press) {
+                        auto ts = getTermSize();
+                        const int menuWidth = 17, menuHeight = numItems + 2;
+                        int mr = std::clamp(contextMenuRow_, 1, std::max(1, ts.rows - menuHeight + 1));
+                        int mc = std::clamp(contextMenuCol_, 1, std::max(1, ts.cols - menuWidth + 1));
+                        if (mouse.y >= mr + 1 && mouse.y <= mr + numItems && mouse.x >= mc && mouse.x < mc + menuWidth) {
+                            toggleContextMenuItem(mouse.y - mr - 1);
+                        }
+                        contextMenuOpen_ = false;
+                        return true;
+                    }
+                    if (mouse.button == 64) { scrollOffset_ += 3; contextMenuOpen_ = false; return true; }
+                    if (mouse.button == 65) { scrollOffset_ = std::max(0, scrollOffset_ - 3); contextMenuOpen_ = false; return true; }
+                    return true;
                 }
-                contextMenuOpen_ = false;
-                return true;
+                if (seq1 == '5' || seq1 == '6') { char t; if (read(STDIN_FILENO, &t, 1)) {} }
             }
-            // Bare escape: close
             contextMenuOpen_ = false;
             return true;
         }
-        if (c == 13 || c == 10) {
-            // Enter: toggle selected item
-            if (contextMenuSel_ == 0) { showHeader_ = !showHeader_; layoutNeedsRebuild_ = true; }
-            else if (contextMenuSel_ == 1) { showTaskPane_.store(!showTaskPane_.load()); layoutNeedsRebuild_ = true; }
-            contextMenuOpen_ = false;
-            return true;
-        }
-        // Any other key: close menu
         contextMenuOpen_ = false;
         return true;
     }
 
-    // Ctrl-C: interrupt or quit
-    if (c == 3) {
-        handleCtrlC();
+    if (c == 13 || c == 10) {
+        toggleContextMenuItem(contextMenuSel_);
+        contextMenuOpen_ = false;
         return true;
     }
 
-    // Any other input clears the Ctrl-C pending state
+    contextMenuOpen_ = false;
+    return true;
+}
+
+// ── Escape sequence handling ─────────────────────────────────────────
+
+bool Tui::handleEscapeSequence() {
+    char seq[2];
+    if (read(STDIN_FILENO, &seq[0], 1) <= 0) return false;
+    if (read(STDIN_FILENO, &seq[1], 1) <= 0) return false;
+
+    if (seq[0] != '[') return true;
+
+    if (seq[1] == '<') {
+        auto mouse = readSGRMouse();
+        if (mouse.button == 2 && mouse.press) {
+            contextMenuOpen_ = true;
+            contextMenuRow_ = mouse.y;
+            contextMenuCol_ = mouse.x;
+            contextMenuSel_ = 0;
+            return true;
+        }
+        if (mouse.button == 64) { scrollOffset_ += 3; return true; }
+        if (mouse.button == 65) { scrollOffset_ = std::max(0, scrollOffset_ - 3); return true; }
+        return true;
+    }
+
+    if (seq[1] == '5') {
+        char tilde; if (read(STDIN_FILENO, &tilde, 1) < 0) return true;
+        scrollOffset_ += 15;
+        return true;
+    }
+    if (seq[1] == '6') {
+        char tilde; if (read(STDIN_FILENO, &tilde, 1) < 0) return true;
+        scrollOffset_ = std::max(0, scrollOffset_ - 15);
+        return true;
+    }
+
+    if (seq[1] == 'A') { // Up - history previous
+        if (!history_.empty()) {
+            if (historyIdx_ == -1) {
+                savedInput_ = inputBuffer_;
+                historyIdx_ = (int)history_.size() - 1;
+            } else if (historyIdx_ > 0) {
+                historyIdx_--;
+            }
+            inputBuffer_ = history_[historyIdx_];
+            cursorPos_ = (int)inputBuffer_.size();
+        }
+    } else if (seq[1] == 'B') { // Down - history next
+        if (historyIdx_ != -1) {
+            if (historyIdx_ < (int)history_.size() - 1) {
+                historyIdx_++;
+                inputBuffer_ = history_[historyIdx_];
+            } else {
+                historyIdx_ = -1;
+                inputBuffer_ = savedInput_;
+                savedInput_.clear();
+            }
+            cursorPos_ = (int)inputBuffer_.size();
+        }
+    } else if (seq[1] == 'C') { // Right
+        if (cursorPos_ < (int)inputBuffer_.size()) cursorPos_++;
+    } else if (seq[1] == 'D') { // Left
+        if (cursorPos_ > 0) cursorPos_--;
+    }
+
+    return true;
+}
+
+// ── Main input dispatcher ────────────────────────────────────────────
+
+bool Tui::handleInput() {
+    char c;
+    if (read(STDIN_FILENO, &c, 1) <= 0) return false;
+
+    if (contextMenuOpen_) return handleContextMenuInput(c);
+
+    if (c == 3) { handleCtrlC(); return true; }
+
     ctrlCPending_ = false;
 
-    if (c == 13 || c == 10) { // Enter
-        if (!inputBuffer_.empty()) {
-            submit();
-        }
+    if (c == 13 || c == 10) {
+        if (!inputBuffer_.empty()) submit();
         return true;
     }
-
-    if (c == 127 || c == 8) { // Backspace
-        if (cursorPos_ > 0) {
-            inputBuffer_.erase(cursorPos_ - 1, 1);
-            cursorPos_--;
-        }
+    if (c == 127 || c == 8) {
+        if (cursorPos_ > 0) { inputBuffer_.erase(cursorPos_ - 1, 1); cursorPos_--; }
         return true;
     }
-
-    // Ctrl+A - move to start of line
-    if (c == 1) {
-        cursorPos_ = 0;
-        return true;
-    }
-
-    // Ctrl+E - move to end of line
-    if (c == 5) {
-        cursorPos_ = (int)inputBuffer_.size();
-        return true;
-    }
-
-    // Ctrl+U - kill to start of line
-    if (c == 21) {
-        inputBuffer_.erase(0, cursorPos_);
-        cursorPos_ = 0;
-        return true;
-    }
-
-    // Ctrl+K - kill to end of line
-    if (c == 11) {
-        inputBuffer_.erase(cursorPos_);
-        return true;
-    }
-
-    // Ctrl+W - kill previous word
-    if (c == 23) {
+    if (c == 1)  { cursorPos_ = 0; return true; }                        // Ctrl+A
+    if (c == 5)  { cursorPos_ = (int)inputBuffer_.size(); return true; }  // Ctrl+E
+    if (c == 21) { inputBuffer_.erase(0, cursorPos_); cursorPos_ = 0; return true; }  // Ctrl+U
+    if (c == 11) { inputBuffer_.erase(cursorPos_); return true; }         // Ctrl+K
+    if (c == 23) { // Ctrl+W
         if (cursorPos_ > 0) {
             int end = cursorPos_;
             while (cursorPos_ > 0 && inputBuffer_[cursorPos_ - 1] == ' ') cursorPos_--;
@@ -1106,15 +1127,8 @@ bool Tui::handleInput() {
         }
         return true;
     }
-
-    // Ctrl+L - redraw screen
-    if (c == 12) {
-        outputBuf_ += "\033[2J";
-        return true;
-    }
-
-    // Ctrl+B - toggle mouse mode (text selection vs scroll wheel)
-    if (c == 2) {
+    if (c == 12) { outputBuf_ += "\033[2J"; return true; }  // Ctrl+L
+    if (c == 2) { // Ctrl+B - toggle mouse mode
         if (mouseMode_) {
             disableMouseTracking();
             inputFlash_ = "mouse off - select text to copy";
@@ -1126,81 +1140,9 @@ bool Tui::handleInput() {
         flush();
         return true;
     }
+    if (c == 27) return handleEscapeSequence();
 
-    if (c == 27) { // Escape sequence
-        char seq[2];
-        if (read(STDIN_FILENO, &seq[0], 1) <= 0) return false;
-        if (read(STDIN_FILENO, &seq[1], 1) <= 0) return false;
-        if (seq[0] == '[') {
-            // SGR mouse: \033[<btn;x;y[Mm]
-            if (seq[1] == '<') {
-                char buf[32];
-                int bi = 0;
-                while (bi < 31) {
-                    if (read(STDIN_FILENO, &buf[bi], 1) <= 0) break;
-                    if (buf[bi] == 'M' || buf[bi] == 'm') { bi++; break; }
-                    bi++;
-                }
-                buf[bi] = 0;
-                bool isPress = (bi > 0 && buf[bi-1] == 'M');
-                int btn = 0, mx = 0, my = 0;
-                sscanf(buf, "%d;%d;%d", &btn, &mx, &my);
-                if (btn == 2 && isPress) {
-                    // Right-click: open context menu
-                    contextMenuOpen_ = true;
-                    contextMenuRow_ = my;
-                    contextMenuCol_ = mx;
-                    contextMenuSel_ = 0;
-                    return true;
-                }
-                if (btn == 64) { scrollOffset_ += 3; return true; }
-                if (btn == 65) { scrollOffset_ = std::max(0, scrollOffset_ - 3); return true; }
-                return true;
-            }
-            // Page Up/Down: \033[5~ / \033[6~
-            if (seq[1] == '5') {
-                char tilde; if (read(STDIN_FILENO, &tilde, 1) < 0) return true;
-                scrollOffset_ += 15;
-                return true;
-            }
-            if (seq[1] == '6') {
-                char tilde; if (read(STDIN_FILENO, &tilde, 1) < 0) return true;
-                scrollOffset_ = std::max(0, scrollOffset_ - 15);
-                return true;
-            }
-            if (seq[1] == 'A') { // Up - history previous
-                if (!history_.empty()) {
-                    if (historyIdx_ == -1) {
-                        savedInput_ = inputBuffer_;
-                        historyIdx_ = (int)history_.size() - 1;
-                    } else if (historyIdx_ > 0) {
-                        historyIdx_--;
-                    }
-                    inputBuffer_ = history_[historyIdx_];
-                    cursorPos_ = (int)inputBuffer_.size();
-                }
-            } else if (seq[1] == 'B') { // Down - history next
-                if (historyIdx_ != -1) {
-                    if (historyIdx_ < (int)history_.size() - 1) {
-                        historyIdx_++;
-                        inputBuffer_ = history_[historyIdx_];
-                    } else {
-                        historyIdx_ = -1;
-                        inputBuffer_ = savedInput_;
-                        savedInput_.clear();
-                    }
-                    cursorPos_ = (int)inputBuffer_.size();
-                }
-            } else if (seq[1] == 'C') { // Right
-                if (cursorPos_ < (int)inputBuffer_.size()) cursorPos_++;
-            } else if (seq[1] == 'D') { // Left
-                if (cursorPos_ > 0) cursorPos_--;
-            }
-        }
-        return true;
-    }
-
-    if (c >= 32 && c < 127) { // Printable ASCII
+    if (c >= 32 && c < 127) {
         inputBuffer_.insert(inputBuffer_.begin() + cursorPos_, c);
         cursorPos_++;
         return true;
@@ -1209,11 +1151,7 @@ bool Tui::handleInput() {
     // UTF-8 multi-byte sequence: lead byte >= 0xC0
     if ((unsigned char)c >= 0xC0) {
         std::string mb(1, c);
-        // Count expected continuation bytes from lead byte
-        int expect = 0;
-        if      ((unsigned char)c >= 0xF0) expect = 3;
-        else if ((unsigned char)c >= 0xE0) expect = 2;
-        else                               expect = 1;
+        int expect = ((unsigned char)c >= 0xF0) ? 3 : ((unsigned char)c >= 0xE0) ? 2 : 1;
         for (int i = 0; i < expect; i++) {
             char cb;
             if (read(STDIN_FILENO, &cb, 1) <= 0) break;
@@ -1232,14 +1170,7 @@ void Tui::sendToServer(const nlohmann::json& msg) {
     ipc::sendLine(sockFd_, msg);
 }
 
-static AgentMessage::Type parseAgentType(const std::string& t) {
-    if (t == "thinking") return AgentMessage::THINKING;
-    if (t == "sql")      return AgentMessage::SQL;
-    if (t == "result")   return AgentMessage::RESULT;
-    if (t == "answer")   return AgentMessage::ANSWER;
-    if (t == "error")    return AgentMessage::ERROR;
-    return AgentMessage::ANSWER;
-}
+using area::tui::parseAgentType;
 
 void Tui::handleServerMessage(const nlohmann::json& msg) {
     std::string type = msg.value("type", "");
@@ -1369,23 +1300,148 @@ void Tui::submit() {
     sendToServer({{"type", "user_input"}, {"chat_id", currentChatId_}, {"content", query}});
 }
 
-void Tui::run() {
+// ── Event loop helpers ───────────────────────────────────────────────
+
+void Tui::setupSignals() {
     struct sigaction sa;
     sa.sa_flags = 0;
     sigemptyset(&sa.sa_mask);
-
     sa.sa_handler = handleWinch;
     sigaction(SIGWINCH, &sa, nullptr);
-
     sa.sa_handler = handleInt;
     sigaction(SIGINT, &sa, nullptr);
+}
 
+void Tui::handleConfirmInput() {
+    char c;
+    while (read(STDIN_FILENO, &c, 1) > 0) {
+        std::lock_guard clk(confirmMu_);
+        if (!confirmPending_) break;
+
+        if (c == 3) { denyConfirm(); break; }
+
+        if (c == 27) {
+            struct pollfd ep = {STDIN_FILENO, POLLIN, 0};
+            if (poll(&ep, 1, 30) > 0 && (ep.revents & POLLIN)) {
+                char seq0;
+                if (read(STDIN_FILENO, &seq0, 1) <= 0) break;
+                if (seq0 == '[') {
+                    char seq1;
+                    if (read(STDIN_FILENO, &seq1, 1) <= 0) break;
+                    if (!confirmIsPath_) {
+                        if (seq1 == 'C') confirmSelection_ = std::min(2, confirmSelection_ + 1);
+                        else if (seq1 == 'D') confirmSelection_ = std::max(0, confirmSelection_ - 1);
+                    }
+                    if (seq1 == '<') readSGRMouse(); // consume
+                    if (seq1 == '5' || seq1 == '6') {
+                        char tilde;
+                        if (read(STDIN_FILENO, &tilde, 1) < 0) break;
+                    }
+                }
+            } else {
+                denyConfirm();
+                break;
+            }
+            continue;
+        }
+
+        if (confirmIsPath_) {
+            if (c == 9) { tabCompletePath(); }
+            else if (c == 13 || c == 10) { submitConfirmCustom(); break; }
+            else if (c == 127 || c == 8) {
+                if (!confirmCustom_.empty()) {
+                    confirmCustom_.pop_back();
+                    confirmCursorPos_ = (int)confirmCustom_.size();
+                }
+            }
+            else if (c >= 32 && c < 127) {
+                confirmCustom_ += c;
+                confirmCursorPos_ = (int)confirmCustom_.size();
+            }
+        } else {
+            if ((c == 'y' || c == 'Y') && confirmSelection_ != 2) { approveConfirm(); break; }
+            else if ((c == 'n' || c == 'N') && confirmSelection_ != 2) { denyConfirm(); break; }
+            else if (c == 9) { confirmSelection_ = 2; }
+            else if (c == 13 || c == 10) {
+                if (confirmSelection_ == 0) { approveConfirm(); break; }
+                else if (confirmSelection_ == 1) { denyConfirm(); break; }
+                else { submitConfirmCustom(); break; }
+            }
+            else if (c == 127 || c == 8) {
+                if (confirmSelection_ == 2 && !confirmCustom_.empty())
+                    confirmCustom_.pop_back();
+            }
+            else if (c >= 32 && c < 127 && confirmSelection_ == 2) {
+                confirmCustom_ += c;
+            }
+        }
+    }
+}
+
+bool Tui::readServerMessages() {
+    while (auto msg = ipc::readLine(sockFd_)) {
+        handleServerMessage(*msg);
+    }
+    char peek;
+    if (recv(sockFd_, &peek, 1, MSG_PEEK | MSG_DONTWAIT) == 0) {
+        return false; // disconnected
+    }
+    return true;
+}
+
+void Tui::processStdin(bool& needsRender, bool& inputChanged) {
+    if (confirmPending_) {
+        contextMenuOpen_ = false;
+        handleConfirmInput();
+        needsRender = true;
+    } else {
+        bool menuWasOpen = contextMenuOpen_;
+        int prevScroll = scrollOffset_;
+        while (handleInput()) {}
+        if (scrollOffset_ != prevScroll || menuWasOpen != contextMenuOpen_) {
+            needsRender = true;
+        } else {
+            inputChanged = true;
+        }
+    }
+}
+
+void Tui::renderWaveBarOnly() {
+    outputBuf_ += "\033[?2026h";
+    auto ts = getTermSize();
+    renderWaveBar(ts.rows, ts.cols);
+    if (!confirmPending_) {
+        int available = ts.cols - 3;
+        int scrollStart = 0;
+        if (cursorPos_ > available) scrollStart = cursorPos_ - available;
+        moveCursor(ts.rows - 1, 3 + (cursorPos_ - scrollStart));
+        outputBuf_ += "\033[?25h";
+    }
+    outputBuf_ += "\033[?2026l";
+    flush();
+    animFrame_++;
+}
+
+void Tui::updateDisplay(bool fullRender, bool inputChanged) {
+    bool fading = (animFrame_ - fadeStartFrame_) < 35;
+    if (fullRender || fading || contextMenuOpen_) {
+        render();
+    } else if (inputChanged || processing_) {
+        renderInputOnly();
+    } else {
+        renderWaveBarOnly();
+    }
+}
+
+// ── Main event loop ──────────────────────────────────────────────────
+
+void Tui::run() {
+    setupSignals();
     enterAltScreen();
     enableRawMode();
     running_ = true;
 
     sendToServer({{"type", "attach"}, {"chat_id", currentChatId_}});
-
     render();
 
     bool needsRender = false;
@@ -1393,129 +1449,18 @@ void Tui::run() {
         // Adaptive frame rate: 60fps during fade/confirm, 30fps processing, ~15fps idle
         bool fading = (animFrame_ - fadeStartFrame_) < 35;
         int pollMs = (fading || confirmPending_) ? 16 : processing_ ? 33 : 64;
+
         struct pollfd pfds[2];
         pfds[0] = {STDIN_FILENO, POLLIN, 0};
         pfds[1] = {sockFd_, POLLIN, 0};
         poll(pfds, 2, pollMs);
-        auto& pfd = pfds[0];
 
-        if (g_interrupted) {
-            g_interrupted = 0;
-            running_ = false;
-            break;
-        }
-        if (g_resized) {
-            g_resized = 0;
-            needsRender = true;
-        }
+        if (g_interrupted) { g_interrupted = 0; break; }
+        if (g_resized)     { g_resized = 0; needsRender = true; }
 
-        // Drain all pending input at once
         bool inputChanged = false;
-        bool menuWasOpen = contextMenuOpen_;
-        if (pfd.revents & POLLIN) {
-            if (confirmPending_) {
-                contextMenuOpen_ = false;
-                // Handle confirm-mode input
-                char c;
-                while (read(STDIN_FILENO, &c, 1) > 0) {
-                    std::lock_guard clk(confirmMu_);
-                    if (!confirmPending_) break;
-
-                    // Ctrl-C always denies the confirm
-                    if (c == 3) { denyConfirm(); break; }
-
-                    // Escape = deny, '[' prefix = arrow keys
-                    if (c == 27) {
-                        struct pollfd ep = {STDIN_FILENO, POLLIN, 0};
-                        if (poll(&ep, 1, 30) > 0 && (ep.revents & POLLIN)) {
-                            char seq0;
-                            if (read(STDIN_FILENO, &seq0, 1) <= 0) break;
-                            if (seq0 == '[') {
-                                char seq1;
-                                if (read(STDIN_FILENO, &seq1, 1) <= 0) break;
-                                if (!confirmIsPath_) {
-                                    if (seq1 == 'C') confirmSelection_ = std::min(2, confirmSelection_ + 1);
-                                    else if (seq1 == 'D') confirmSelection_ = std::max(0, confirmSelection_ - 1);
-                                }
-                                // Consume SGR mouse sequences
-                                if (seq1 == '<') {
-                                    char buf[32]; int bi = 0;
-                                    while (bi < 31) {
-                                        if (read(STDIN_FILENO, &buf[bi], 1) <= 0) break;
-                                        if (buf[bi] == 'M' || buf[bi] == 'm') break;
-                                        bi++;
-                                    }
-                                }
-                                if (seq1 == '5' || seq1 == '6') {
-                                    char tilde;
-                                    if (read(STDIN_FILENO, &tilde, 1) < 0) break;
-                                }
-                            }
-                        } else {
-                            // Bare Escape key — deny
-                            denyConfirm();
-                            break;
-                        }
-                        continue;
-                    }
-
-                    if (confirmIsPath_) {
-                        // Path input mode
-                        if (c == 9) { tabCompletePath(); }
-                        else if (c == 13 || c == 10) { submitConfirmCustom(); break; }
-                        else if (c == 127 || c == 8) {
-                            if (!confirmCustom_.empty()) {
-                                confirmCustom_.pop_back();
-                                confirmCursorPos_ = (int)confirmCustom_.size();
-                            }
-                        }
-                        else if (c >= 32 && c < 127) {
-                            confirmCustom_ += c;
-                            confirmCursorPos_ = (int)confirmCustom_.size();
-                        }
-                    } else {
-                        // Standard Yes/No/Custom — y/n shortcuts when not in custom field
-                        if ((c == 'y' || c == 'Y') && confirmSelection_ != 2) { approveConfirm(); break; }
-                        else if ((c == 'n' || c == 'N') && confirmSelection_ != 2) { denyConfirm(); break; }
-                        else if (c == 9) { confirmSelection_ = 2; }
-                        else if (c == 13 || c == 10) {
-                            if (confirmSelection_ == 0) { approveConfirm(); break; }
-                            else if (confirmSelection_ == 1) { denyConfirm(); break; }
-                            else { submitConfirmCustom(); break; }
-                        }
-                        else if (c == 127 || c == 8) {
-                            if (confirmSelection_ == 2 && !confirmCustom_.empty())
-                                confirmCustom_.pop_back();
-                        }
-                        else if (c >= 32 && c < 127 && confirmSelection_ == 2) {
-                            confirmCustom_ += c;
-                        }
-                    }
-                }
-                needsRender = true;
-            } else {
-                int prevScroll = scrollOffset_;
-                while (handleInput()) {}
-                if (scrollOffset_ != prevScroll || (menuWasOpen != contextMenuOpen_)) {
-                    needsRender = true;
-                } else {
-                    inputChanged = true;
-                }
-            }
-        }
-
-        // Read messages from server socket
-        if (pfds[1].revents & POLLIN) {
-            while (auto serverMsg = ipc::readLine(sockFd_)) {
-                handleServerMessage(*serverMsg);
-            }
-            // Check for server disconnect
-            char peek;
-            if (recv(sockFd_, &peek, 1, MSG_PEEK | MSG_DONTWAIT) == 0) {
-                running_ = false;
-                break;
-            }
-        }
+        if (pfds[0].revents & POLLIN) processStdin(needsRender, inputChanged);
+        if (pfds[1].revents & POLLIN) { if (!readServerMessages()) break; }
 
         if (messagesDirty_.exchange(false)) {
             needsRender = true;
@@ -1523,31 +1468,8 @@ void Tui::run() {
             if (showTaskPane_) layoutNeedsRebuild_ = true;
         }
 
-        fading = (animFrame_ - fadeStartFrame_) < 35;
-        if (needsRender || fading || contextMenuOpen_) {
-            render();
-            needsRender = false;
-        } else if (inputChanged || processing_) {
-            renderInputOnly();
-        } else {
-            // Fast path: only redraw the wave bar (last row)
-            outputBuf_ += "\033[?2026h";
-            auto ts = getTermSize();
-            int waveRow = ts.rows;
-            renderWaveBar(waveRow, ts.cols);
-            if (!confirmPending_) {
-                // Account for horizontal scroll (same logic as renderInput)
-                int available = ts.cols - 3;
-                int scrollStart = 0;
-                if (cursorPos_ > available) scrollStart = cursorPos_ - available;
-                int cursorCol = 3 + (cursorPos_ - scrollStart);
-                moveCursor(waveRow - 1, cursorCol);
-                outputBuf_ += "\033[?25h";
-            }
-            outputBuf_ += "\033[?2026l";
-            flush();
-            animFrame_++;
-        }
+        updateDisplay(needsRender, inputChanged);
+        needsRender = false;
     }
 
     disableRawMode();

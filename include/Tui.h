@@ -58,7 +58,22 @@ private:
     void flush();
 
     bool handleInput();
+    bool handleContextMenuInput(char c);
+    bool handleEscapeSequence();
+    void handleConfirmInput();
     void submit();
+
+    // Event loop helpers (extracted from run())
+    void setupSignals();
+    bool readServerMessages();   // false = server disconnected
+    void processStdin(bool& needsRender, bool& inputChanged);
+    void updateDisplay(bool fullRender, bool inputChanged);
+    void renderWaveBarOnly();
+
+    // Shared input helpers
+    struct MouseEvent { int button = 0, x = 0, y = 0; bool press = false; };
+    MouseEvent readSGRMouse();
+    void toggleContextMenuItem(int item);
 
     struct DisplayLine {
         AgentMessage::Type type;

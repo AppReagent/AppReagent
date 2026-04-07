@@ -106,13 +106,24 @@ void Agent::compressHistory(MessageCallback cb) {
     history_.push_back({"assistant", "THOUGHT: I have the context from our conversation.\nANSWER: Understood. How can I help you next?"});
 }
 
+static std::string templateReplace(const std::string& s, const std::string& key, const std::string& val) {
+    std::string result = s;
+    std::string placeholder = "{{" + key + "}}";
+    size_t pos = result.find(placeholder);
+    if (pos != std::string::npos) {
+        result.replace(pos, placeholder.size(), val);
+    }
+    return result;
+}
+
 std::string Agent::buildSystemPrompt() const {
+    // Try session-specific override, then default prompt file
     std::string prompt;
     if (!promptsDir_.empty()) {
-        try {
-            prompt = util::readFileOrThrow(promptsDir_ + "/agent_system.prompt");
-            prompt += "\n\n";
-        } catch (...) {}
+        try { prompt = util::readFileOrThrow(promptsDir_ + "/agent_system.prompt"); } catch (...) {}
+    }
+    if (prompt.empty()) {
+        prompt = util::readFile("prompts/agent_system.prompt");
     }
     if (prompt.empty()) {
         prompt = "You are AppReagent, an expert Android and Linux application reverse engineering agent. "
@@ -260,27 +271,14 @@ std::string Agent::buildSystemPrompt() const {
         "- Location access in Map/Navigation/Geofence classes\n"
         "- Crypto in HTTPS/TLS/certificate pinning contexts\n"
         "- SMS in messaging app core functionality\n"
-        "- Camera in scanner/QR/photo app contexts\n\n";
+        "- Camera in scanner/QR/photo app contexts\n\n"
+        "{{system_context}}\n{{tools}}\n{{guides}}\n";
     }
 
-    if (!systemContext_.empty()) {
-        prompt += systemContext_ + "\n\n";
-    }
-
-    prompt += tools_.describeAll();
-    prompt += "\nAlways use absolute paths. Expand ~ to the user's home directory.\n";
-    prompt += "If the user refers to code without a path, use FIND_FILES to locate it first.\n";
-    prompt += "When you have gathered sufficient evidence from multiple sources, provide your ANSWER with specific citations.\n";
-    prompt += "Never answer about scan results without first querying method_findings and scan_results tables.\n";
-    prompt += "To find previous scans, run: SELECT run_id, count(*) as files, "
-              "count(CASE WHEN risk_score > 0 THEN 1 END) as flagged, max(risk_score) as max_risk, "
-              "min(file_path) as sample_path, max(created_at)::text as scanned_at "
-              "FROM scan_results GROUP BY run_id ORDER BY max(created_at) DESC LIMIT 10\n\n";
-
-    std::string guides = harness_.guideText();
-    if (!guides.empty()) {
-        prompt += guides;
-    }
+    // Template substitution
+    prompt = templateReplace(prompt, "tools", tools_.describeAll());
+    prompt = templateReplace(prompt, "system_context", systemContext_);
+    prompt = templateReplace(prompt, "guides", harness_.guideText());
 
     return prompt;
 }

@@ -50,6 +50,7 @@ target_link_libraries(area PRIVATE
     Threads::Threads
     OpenSSL::Crypto
     capstone
+    util
 )
 
 # --- Tests ---
@@ -75,6 +76,7 @@ target_link_libraries(area_lib PUBLIC
     Threads::Threads
     OpenSSL::Crypto
     capstone
+    util
 )
 target_include_directories(area_lib PUBLIC include)
 

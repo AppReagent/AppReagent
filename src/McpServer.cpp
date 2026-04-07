@@ -254,7 +254,66 @@ json McpServer::toolList() {
          {"description",
           "Run the scan evaluation pipeline to score current prompt quality, "
           "classification accuracy, and risk calibration."},
-         {"inputSchema", {{"type", "object"}, {"properties", json::object()}}}}
+         {"inputSchema", {{"type", "object"}, {"properties", json::object()}}}},
+
+        // ── Headless TUI tools ──
+
+        {{"name", "area_tui_screen"},
+         {"description",
+          "Get the current TUI screen as plain text. Starts the headless TUI "
+          "if not already running. Use this to see what the TUI displays."},
+         {"inputSchema", {{"type", "object"}, {"properties", {
+              {"wait_ms", {{"type", "integer"},
+                           {"description",
+                            "Milliseconds to wait for output to settle "
+                            "(default: 200, max: 2000)."}}}
+          }}}}},
+
+        {{"name", "area_tui_click"},
+         {"description",
+          "Click at a position in the TUI. Coordinates are 1-based. "
+          "Returns the screen after the click."},
+         {"inputSchema", {{"type", "object"},
+          {"properties", {
+              {"row", {{"type", "integer"}, {"description", "Row (1-based)."}}},
+              {"col", {{"type", "integer"}, {"description", "Column (1-based)."}}},
+              {"button", {{"type", "string"}, {"enum", {"left", "right"}},
+                          {"description", "Mouse button (default: left)."}}}
+          }},
+          {"required", json::array({"row", "col"})}}}},
+
+        {{"name", "area_tui_type"},
+         {"description",
+          "Type text into the TUI. Does not press Enter automatically. "
+          "Returns the screen after typing."},
+         {"inputSchema", {{"type", "object"},
+          {"properties", {
+              {"text", {{"type", "string"},
+                        {"description", "Text to type."}}}
+          }},
+          {"required", json::array({"text"})}}}},
+
+        {{"name", "area_tui_key"},
+         {"description",
+          "Press a special key. Supported: enter, escape, up, down, left, "
+          "right, backspace, tab, pageup, pagedown, ctrl+a, ctrl+b, ctrl+c, "
+          "ctrl+e, ctrl+k, ctrl+l, ctrl+u, ctrl+w. Returns screen after."},
+         {"inputSchema", {{"type", "object"},
+          {"properties", {
+              {"key", {{"type", "string"},
+                       {"description", "Key name (e.g. 'enter', 'ctrl+c')."}}}
+          }},
+          {"required", json::array({"key"})}}}},
+
+        {{"name", "area_tui_resize"},
+         {"description",
+          "Resize the virtual terminal. Returns the screen after resize."},
+         {"inputSchema", {{"type", "object"}, {"properties", {
+              {"rows", {{"type", "integer"},
+                        {"description", "Terminal height (default: 24)."}}},
+              {"cols", {{"type", "integer"},
+                        {"description", "Terminal width (default: 80)."}}}
+          }}}}}
     });
 }
 
@@ -272,6 +331,11 @@ std::pair<std::string, bool> McpServer::dispatch(const std::string& name,
     if (name == "area_test_unit")      return toolTestUnit();
     if (name == "area_test_e2e")       return toolTestE2e(args);
     if (name == "area_evaluate")       return toolEvaluate();
+    if (name == "area_tui_screen")    return toolTuiScreen(args);
+    if (name == "area_tui_click")     return toolTuiClick(args);
+    if (name == "area_tui_type")      return toolTuiType(args);
+    if (name == "area_tui_key")       return toolTuiKey(args);
+    if (name == "area_tui_resize")    return toolTuiResize(args);
     return {"Unknown tool: " + name, true};
 }
 
@@ -489,6 +553,76 @@ std::pair<std::string, bool> McpServer::toolEvaluate() {
     out = trimOutput(out);
     if (out.empty()) out = rc == 0 ? "Evaluation complete." : "Evaluation failed.";
     return {out, rc != 0};
+}
+
+// ── headless TUI tools ─────────────────────────────────────────────
+
+HeadlessTui& McpServer::ensureTui() {
+    if (!headlessTui_) {
+        auto bin = findBin();
+        if (bin.empty()) throw std::runtime_error("Binary not found — run area_build first.");
+        headlessTui_ = std::make_unique<HeadlessTui>(bin, sockPath_);
+    }
+    if (!headlessTui_->isRunning()) {
+        if (!headlessTui_->start())
+            throw std::runtime_error("Failed to start headless TUI.");
+    }
+    return *headlessTui_;
+}
+
+std::string McpServer::tuiScreenResult() {
+    auto& tui = *headlessTui_;
+    return "[" + std::to_string(tui.cols()) + "x" + std::to_string(tui.rows()) +
+           " cursor=" + std::to_string(tui.cursorRow() + 1) + ":" +
+           std::to_string(tui.cursorCol() + 1) + "]\n" + tui.screenText();
+}
+
+std::pair<std::string, bool> McpServer::toolTuiScreen(const json& args) {
+    auto& tui = ensureTui();
+    int waitMs = std::clamp(args.value("wait_ms", 200), 0, 2000);
+    tui.drainAndSettle(waitMs);
+    return {tuiScreenResult(), false};
+}
+
+std::pair<std::string, bool> McpServer::toolTuiClick(const json& args) {
+    auto& tui = ensureTui();
+    int row = args.value("row", 1);
+    int col = args.value("col", 1);
+    std::string button = args.value("button", "left");
+    int btn = (button == "right") ? 2 : 0;
+    tui.sendMouseClick(row, col, btn);
+    tui.sendMouseRelease(row, col, btn);
+    tui.drainAndSettle(200);
+    return {tuiScreenResult(), false};
+}
+
+std::pair<std::string, bool> McpServer::toolTuiType(const json& args) {
+    auto& tui = ensureTui();
+    auto text = args.value("text", "");
+    if (text.empty()) return {"'text' is required.", true};
+    tui.sendText(text);
+    tui.drainAndSettle(100);
+    return {tuiScreenResult(), false};
+}
+
+std::pair<std::string, bool> McpServer::toolTuiKey(const json& args) {
+    auto& tui = ensureTui();
+    auto key = args.value("key", "");
+    if (key.empty()) return {"'key' is required.", true};
+    tui.sendKey(key);
+    tui.drainAndSettle(200);
+    return {tuiScreenResult(), false};
+}
+
+std::pair<std::string, bool> McpServer::toolTuiResize(const json& args) {
+    auto& tui = ensureTui();
+    int rows = args.value("rows", 24);
+    int cols = args.value("cols", 80);
+    rows = std::clamp(rows, 5, 200);
+    cols = std::clamp(cols, 20, 400);
+    tui.resize(rows, cols);
+    tui.drainAndSettle(300);
+    return {tuiScreenResult(), false};
 }
 
 } // namespace area

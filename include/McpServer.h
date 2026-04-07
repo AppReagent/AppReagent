@@ -1,8 +1,11 @@
 #pragma once
 
+#include <memory>
 #include <string>
 #include <utility>
 #include <nlohmann/json.hpp>
+
+#include "HeadlessTui.h"
 
 namespace area {
 
@@ -40,12 +43,24 @@ private:
     std::pair<std::string, bool> toolTestE2e(const nlohmann::json& args);
     std::pair<std::string, bool> toolEvaluate();
 
+    // Headless TUI tools
+    std::pair<std::string, bool> toolTuiScreen(const nlohmann::json& args);
+    std::pair<std::string, bool> toolTuiClick(const nlohmann::json& args);
+    std::pair<std::string, bool> toolTuiType(const nlohmann::json& args);
+    std::pair<std::string, bool> toolTuiKey(const nlohmann::json& args);
+    std::pair<std::string, bool> toolTuiResize(const nlohmann::json& args);
+
+    HeadlessTui& ensureTui();
+    std::string tuiScreenResult();
+
     bool isServerRunning(int* outPid = nullptr);
 
     std::string dataDir_;
     std::string workDir_;
     std::string sockPath_;
     std::string pidPath_;
+
+    std::unique_ptr<HeadlessTui> headlessTui_;
 };
 
 } // namespace area

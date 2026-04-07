@@ -218,14 +218,54 @@ void MockBackend::loadResponseFile(const std::string& path) {
                          std::istreambuf_iterator<char>());
     try {
         auto j = nlohmann::json::parse(content);
-        if (j.is_object()) {
-            for (auto& [key, val] : j.items()) {
-                if (val.is_string()) {
-                    routedResponses_.emplace_back(key, val.get<std::string>());
+        if (!j.is_object()) return;
+
+        // New structured format: {"prompts": [...], "default": "..."}
+        if (j.contains("prompts")) {
+            for (auto& entry : j["prompts"]) {
+                MockPromptEntry e;
+                e.id = entry.value("id", "");
+                if (entry.contains("match")) {
+                    for (auto& m : entry["match"]) e.match.push_back(m.get<std::string>());
                 }
+                if (entry.contains("user_match")) {
+                    for (auto& m : entry["user_match"]) e.user_match.push_back(m.get<std::string>());
+                }
+                e.response = entry.value("response", "");
+                if (entry.contains("data")) {
+                    for (auto& [k, v] : entry["data"].items()) {
+                        e.data[k] = v.get<std::string>();
+                    }
+                }
+                promptEntries_.push_back(std::move(e));
+            }
+            defaultResponse_ = j.value("default", "ANSWER: mock response");
+            canned_ = defaultResponse_;
+            return;
+        }
+
+        // Legacy flat format: {"keyword": "response", ...}
+        for (auto& [key, val] : j.items()) {
+            if (val.is_string()) {
+                routedResponses_.emplace_back(key, val.get<std::string>());
             }
         }
     } catch (...) {}
+}
+
+std::string MockBackend::interpolate(const std::string& tmpl,
+                                      const std::unordered_map<std::string, std::string>& data) {
+    if (data.empty()) return tmpl;
+    std::string result = tmpl;
+    for (auto& [key, val] : data) {
+        std::string placeholder = "{{" + key + "}}";
+        size_t pos = 0;
+        while ((pos = result.find(placeholder, pos)) != std::string::npos) {
+            result.replace(pos, placeholder.size(), val);
+            pos += val.size();
+        }
+    }
+    return result;
 }
 
 std::string MockBackend::chat(const std::string& system,
@@ -260,20 +300,48 @@ std::string MockBackend::chat(const std::string& system,
     {
         std::lock_guard lk(mu_);
 
-        // Check routed responses: match keyword against system + user prompt
+        // Build haystack from system + all messages
+        std::string haystack = system;
+        for (auto& m : messages) haystack += "\n" + m.content;
+
+        // 1. Check structured prompt entries (new format)
+        std::string userMsg = messages.empty() ? "" : messages.back().content;
+        for (auto& entry : promptEntries_) {
+            if (entry.match.empty() && entry.user_match.empty()) continue;
+            bool allMatch = true;
+            for (auto& pattern : entry.match) {
+                if (haystack.find(pattern) == std::string::npos) { allMatch = false; break; }
+            }
+            if (allMatch) {
+                for (auto& pattern : entry.user_match) {
+                    if (userMsg.find(pattern) == std::string::npos) { allMatch = false; break; }
+                }
+            }
+            if (allMatch) {
+                lastMatchedId_ = entry.id;
+                return interpolate(entry.response, entry.data);
+            }
+        }
+
+        // 2. Check legacy routed responses (keyword matching)
         if (!routedResponses_.empty() && !messages.empty()) {
-            std::string haystack = system + "\n" + messages.back().content;
             for (auto& [keyword, response] : routedResponses_) {
                 if (haystack.find(keyword) != std::string::npos) {
+                    lastMatchedId_.clear();
                     return response;
                 }
             }
         }
 
+        // 3. Sequence
         if (!sequence_.empty()) {
             size_t idx = seqIdx_.fetch_add(1) % sequence_.size();
+            lastMatchedId_.clear();
             return sequence_[idx];
         }
+
+        // 4. Default/canned
+        lastMatchedId_.clear();
         return canned_;
     }
 }

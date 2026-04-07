@@ -4,6 +4,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "infra/config/Config.h"
@@ -79,6 +80,17 @@ public:
 };
 
 
+/// Structured mock prompt entry for MockBackend.
+/// Structured mock prompt entry for MockBackend.
+/// `match` checks system+all messages. `user_match` checks only the last user message.
+struct MockPromptEntry {
+    std::string id;                                     // e.g. "triage", "agent_scan"
+    std::vector<std::string> match;                     // ALL must appear in system+messages
+    std::vector<std::string> user_match;                // ALL must appear in last user message only
+    std::string response;                               // response template with {{key}} placeholders
+    std::unordered_map<std::string, std::string> data;  // interpolation values
+};
+
 class MockBackend : public LLMBackend {
 public:
     explicit MockBackend(const AiEndpoint& ep);
@@ -88,6 +100,7 @@ public:
 
     void setResponse(const std::string& response) { std::lock_guard lk(mu_); canned_ = response; }
     void setResponses(std::vector<std::string> responses) { std::lock_guard lk(mu_); sequence_ = std::move(responses); seqIdx_ = 0; }
+    void setPromptEntries(std::vector<MockPromptEntry> entries) { std::lock_guard lk(mu_); promptEntries_ = std::move(entries); }
     void setFailAfter(int n) { failAfter_.store(n); callCount_.store(0); }
     void setLatencyMs(int ms) { latencyMs_.store(ms); }
 
@@ -96,15 +109,20 @@ public:
     int currentConcurrent() const { return concurrent_.load(); }
     ChatMessage lastUserMessage() const { std::lock_guard lk(mu_); return lastUser_; }
     std::string lastSystem() const { std::lock_guard lk(mu_); return lastSystem_; }
+    std::string lastMatchedId() const { std::lock_guard lk(mu_); return lastMatchedId_; }
 
 private:
     void loadResponseFile(const std::string& path);
+    static std::string interpolate(const std::string& tmpl,
+                                   const std::unordered_map<std::string, std::string>& data);
 
-    mutable std::mutex mu_; // protects canned_, sequence_, lastUser_, lastSystem_, routedResponses_
+    mutable std::mutex mu_;
     std::string canned_ = "ANSWER: mock response";
     std::vector<std::string> sequence_;
-    // keyword → response mapping loaded from a JSON file (url field)
     std::vector<std::pair<std::string, std::string>> routedResponses_;
+    std::vector<MockPromptEntry> promptEntries_;
+    std::string defaultResponse_;
+    std::string lastMatchedId_;
     std::atomic<size_t> seqIdx_ = 0;
     std::atomic<int> failAfter_{-1};
     std::atomic<int> callCount_{0};
@@ -112,7 +130,6 @@ private:
     ChatMessage lastUser_;
     std::string lastSystem_;
 
-    // Concurrency tracking
     std::atomic<int> concurrent_{0};
     std::atomic<int> peakConcurrent_{0};
 };

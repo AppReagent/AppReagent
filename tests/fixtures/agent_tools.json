@@ -1,0 +1,40 @@
+{
+  "prompts": [
+    {
+      "id": "gen_runid",
+      "user_match": ["run id"],
+      "response": "GENERATE_RUN_ID:"
+    },
+    {
+      "id": "check_state",
+      "user_match": ["scan", "running"],
+      "response": "STATE:"
+    },
+    {
+      "id": "state_result_answer",
+      "match": ["No active scans"],
+      "response": "ANSWER: There are no active scans running right now."
+    },
+    {
+      "id": "query_tables",
+      "user_match": ["table", "database"],
+      "response": "SQL: SELECT tablename FROM pg_tables WHERE schemaname='public'"
+    },
+    {
+      "id": "sql_result_answer",
+      "match": ["scan_results", "llm_calls", "pg_tables"],
+      "response": "ANSWER: The database contains these tables: scan_results, llm_calls, method_embeddings, method_calls, method_findings, scan_files, analyze_results."
+    },
+    {
+      "id": "remember_secret",
+      "user_match": ["remember", "secret"],
+      "response": "ANSWER: I'll remember that the secret word is pineapple."
+    },
+    {
+      "id": "recall_after_clear",
+      "user_match": ["secret word", "told you"],
+      "response": "ANSWER: I don't have any record of a previous conversation. Could you tell me what you're referring to?"
+    }
+  ],
+  "default": "ANSWER: I processed your request."
+}

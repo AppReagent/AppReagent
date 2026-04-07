@@ -247,7 +247,11 @@ void AreaServer::processUserInput(ChatSession& chat, const std::string& input) {
 
     chat.processing = true;
 
-    broadcastToChat(chat.id, nlohmann::json{{"type", "state"}, {"chat_id", chat.id}, {"processing", true}});
+    broadcastToChat(chat.id, nlohmann::json{
+        {"type", "state"}, {"chat_id", chat.id}, {"processing", true},
+        {"context_tokens", chat.agent ? chat.agent->estimateTokens() : 0},
+        {"context_window", chat.agent ? chat.agent->backend().endpoint().context_window : 0}
+    });
 
     if (chat.processingThread.joinable()) chat.processingThread.join();
     chat.processingThread = std::thread([this, &chat, input]() {
@@ -312,7 +316,11 @@ void AreaServer::processUserInput(ChatSession& chat, const std::string& input) {
 
         chat.processing = false;
         chat.saveConvo();
-        broadcastToChat(chat.id, nlohmann::json{{"type", "state"}, {"chat_id", chat.id}, {"processing", false}});
+        broadcastToChat(chat.id, nlohmann::json{
+            {"type", "state"}, {"chat_id", chat.id}, {"processing", false},
+            {"context_tokens", chat.agent ? chat.agent->estimateTokens() : 0},
+            {"context_window", chat.agent ? chat.agent->backend().endpoint().context_window : 0}
+        });
     });
 }
 
@@ -373,7 +381,9 @@ void AreaServer::handleMessage(int clientFd, const nlohmann::json& msg) {
             {"type", "state"},
             {"chat_id", chatId},
             {"processing", chat.processing.load()},
-            {"dangerous", chat.dangerousMode.load()}
+            {"dangerous", chat.dangerousMode.load()},
+            {"context_tokens", chat.agent ? chat.agent->estimateTokens() : 0},
+            {"context_window", chat.agent ? chat.agent->backend().endpoint().context_window : 0}
         });
 
         if (chat.confirmPending) {

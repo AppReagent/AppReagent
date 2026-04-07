@@ -302,16 +302,34 @@ void Tui::renderHeader(int row, int width) {
     // Inverse video for header bar
     outputBuf_ += "\033[7m";
     std::string title = " App Reagent (aREa) ";
-    std::string subtitle = "";
-    int pct = 0; // context percentage sent by server via state messages
-    std::string ctxLabel = "ctx " + std::to_string(pct) + "%";
-    std::string header = title + subtitle;
+    std::string header = title;
+
+    // Format token counts for right-aligned label
+    auto fmtTokens = [](int n) -> std::string {
+        if (n >= 1000000) {
+            return std::to_string(n / 1000000) + "." + std::to_string((n % 1000000) / 100000) + "M";
+        } else if (n >= 100000) {
+            return std::to_string(n / 1000) + "k";
+        } else if (n >= 1000) {
+            return std::to_string(n / 1000) + "." + std::to_string((n % 1000) / 100) + "k";
+        }
+        return std::to_string(n);
+    };
+
+    int pct = (contextWindow_ > 0) ? std::min(contextTokens_ * 100 / contextWindow_, 100) : 0;
+    std::string ctxLabel;
+    if (contextWindow_ > 0) {
+        ctxLabel = fmtTokens(contextTokens_) + " / " + fmtTokens(contextWindow_);
+    } else {
+        ctxLabel = "ctx " + std::to_string(pct) + "%";
+    }
+
     int rightPad = width - (int)header.size() - (int)ctxLabel.size() - 1;
     outputBuf_ += header;
     if (rightPad > 0) {
         outputBuf_ += std::string(rightPad, ' ');
     }
-    // Color the context percentage based on usage
+    // Color the context label based on usage
     if (pct >= 90) {
         outputBuf_ += "\033[31m"; // red
     } else if (pct >= 70) {
@@ -1206,6 +1224,8 @@ void Tui::handleServerMessage(const nlohmann::json& msg) {
         }
         processing_ = proc;
         if (msg.contains("dangerous")) dangerousMode_ = msg["dangerous"].get<bool>();
+        if (msg.contains("context_tokens")) contextTokens_ = msg["context_tokens"].get<int>();
+        if (msg.contains("context_window")) contextWindow_ = msg["context_window"].get<int>();
         messagesDirty_ = true;
 
     } else if (type == "confirm_req") {

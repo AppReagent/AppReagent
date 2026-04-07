@@ -158,6 +158,8 @@ private:
     std::chrono::steady_clock::time_point flashTime_{};
 
     bool showHeader_ = false;
+    int contextTokens_ = 0;  // estimated tokens in current conversation
+    int contextWindow_ = 0;  // max context window size
     bool mouseMode_ = false;  // false = text selection, true = scroll wheel + right-click
 
     void enableMouseTracking();

@@ -44,13 +44,13 @@ public:
     LLMBackend& backend() const { return *backend_; }
 
     int contextPercent() const;
+    int estimateTokens() const;
     void setSystemContext(const std::string& ctx) { systemContext_ = ctx; }
     void setPromptsDir(const std::string& dir) { promptsDir_ = dir; }
 
 private:
     std::string buildSystemPrompt() const;
     std::string extractThought(const std::string& response, std::string& thought);
-    int estimateTokens() const;
     void compressHistory(MessageCallback cb);
 
     std::unique_ptr<LLMBackend> ownedBackend_;

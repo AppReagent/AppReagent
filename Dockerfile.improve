@@ -34,7 +34,8 @@ ARG UID=1000
 ARG GID=1000
 RUN userdel -r ubuntu 2>/dev/null || true \
     && groupadd -g $GID builder 2>/dev/null || true \
-    && useradd -m -u $UID -g $GID -s /bin/bash builder
+    && useradd -m -u $UID -g $GID -s /bin/bash builder \
+    && mkdir -p /opt/area && chown $UID:$GID /opt/area
 USER builder
 
 RUN git config --global user.name "area-improve" \

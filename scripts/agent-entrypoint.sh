@@ -20,7 +20,17 @@ BASELINE=$(git rev-parse HEAD)
 
 # Pre-build area so the MCP tools work immediately
 echo "[area] building..."
-if make all -j14 > /tmp/area-build.log 2>&1; then
+# Show a dot every 5s so it doesn't look frozen, while logging full output
+make all -j14 > /tmp/area-build.log 2>&1 &
+_BUILD_PID=$!
+while kill -0 "$_BUILD_PID" 2>/dev/null; do
+    sleep 5
+    printf "."
+done
+wait "$_BUILD_PID"
+_BUILD_RC=$?
+echo ""
+if [ $_BUILD_RC -eq 0 ]; then
     echo "[area] build ok"
 else
     echo "[area] build failed — last 20 lines:"

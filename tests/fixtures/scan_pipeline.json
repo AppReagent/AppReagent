@@ -1,0 +1,110 @@
+{
+  "prompts": [
+    {
+      "id": "agent_scan",
+      "user_match": ["scan"],
+      "response": "SCAN: /placeholder"
+    },
+    {
+      "id": "agent_scan_answer",
+      "user_match": ["Scan complete"],
+      "response": "ANSWER: Scan complete. 1 file scanned, classified as relevant with high confidence. Found SMS exfiltration, contact theft, and C2 communication patterns."
+    },
+    {
+      "id": "triage_relevant",
+      "match": ["Determine whether it contains behavior RELEVANT"],
+      "response": "{\"relevant\": true, \"confidence\": 0.92, \"api_calls\": [\"SmsManager.getDefault\", \"SmsManager.sendTextMessage\", \"ContentResolver.query\"], \"findings\": [\"Sends SMS to hardcoded phone number\", \"Queries contacts for data theft\", \"C2 communication pattern\"], \"threat_category\": \"sms_abuse\", \"reasoning\": \"SMS-based data exfiltration malware.\"}"
+    },
+    {
+      "id": "triage_benign",
+      "match": ["Determine whether it contains behavior RELEVANT", "onCreate", "TextView"],
+      "response": "{\"relevant\": false, \"confidence\": 0.95, \"api_calls\": [\"Activity.onCreate\", \"TextView.setText\"], \"findings\": [], \"threat_category\": \"none\", \"reasoning\": \"Standard Android activity lifecycle with UI operations only.\"}"
+    },
+    {
+      "id": "triage_supervisor",
+      "match": ["required fields present"],
+      "response": "PASS"
+    },
+    {
+      "id": "deep_analysis",
+      "match": ["Perform a detailed analysis of HOW"],
+      "response": "{\"detailed_findings\": [\"SMS-based data exfiltration to C2 number\", \"Contact data theft via ContentResolver\", \"Two-stage attack chain\"], \"evidence\": [\"SmsManager.getDefault()\", \"SmsManager.sendTextMessage()\", \"ContentResolver.query()\"], \"data_flows\": [\"Contacts → query → SMS → C2\"], \"relevance_score\": 95, \"reasoning\": \"Complete data exfiltration chain.\"}"
+    },
+    {
+      "id": "deep_analysis_supervisor",
+      "match": ["required fields present", "detailed_findings"],
+      "response": "PASS"
+    },
+    {
+      "id": "synthesis",
+      "match": ["produce a comprehensive answer"],
+      "response": "{\"answer\": \"SMS-based contact exfiltration malware.\", \"relevant_methods\": [{\"method\": \"sendStolenData\", \"finding\": \"Sends via SMS to C2\"}, {\"method\": \"stealContacts\", \"finding\": \"Steals device contacts\"}], \"evidence_summary\": \"SmsManager, ContentResolver, hardcoded C2.\", \"overall_relevance\": \"relevant\", \"relevance_score\": 95, \"recommendation\": \"Flag as malware.\"}"
+    },
+    {
+      "id": "synthesis_supervisor",
+      "match": ["required fields present", "answer"],
+      "response": "PASS"
+    },
+    {
+      "id": "goal_expand",
+      "match": ["expand analysis goals"],
+      "response": "Identify all forms of malware behavior including C2 communication, data exfiltration, unauthorized SMS, dynamic code loading, native exploitation, privilege escalation, anti-analysis techniques, obfuscated strings, and covert operations."
+    },
+    {
+      "id": "network_calls",
+      "user_match": ["network", "call"],
+      "response": "ANSWER: Found network calls: HttpURLConnection.openConnection() with URL https://evil-c2.example.com. The app makes HTTP POST connections to exfiltrate data."
+    },
+    {
+      "id": "find_behavior",
+      "user_match": ["find", "method"],
+      "response": "ANSWER: Found methods matching the query including readExternalFile using FileInputStream for filesystem access, and sendToServer using HTTP URL connections for network communication."
+    },
+    {
+      "id": "xrefs_search",
+      "user_match": ["references", "SmsManager"],
+      "response": "ANSWER: Found SmsManager references: sendTextMessage called in sendStolenData method, getDefault called for SMS initialization."
+    },
+    {
+      "id": "similar_search",
+      "user_match": ["similar", "SMS"],
+      "response": "ANSWER: Found similar methods related to SMS: sendStolenData (similarity 0.92), stealContacts (similarity 0.85)."
+    },
+    {
+      "id": "call_graph_query",
+      "user_match": ["method", "call"],
+      "response": "ANSWER: The method exfiltrateViaSms calls stealContacts and sendStolenData. The call graph shows a two-stage exfiltration chain."
+    },
+    {
+      "id": "analyze_results",
+      "user_match": ["analyze", "result"],
+      "response": "ANSWER: Analysis of scan results shows SMS-based malware with high threat risk. Key findings include contact theft and C2 communication."
+    },
+    {
+      "id": "evaluate_corpus",
+      "user_match": ["evaluate", "corpus"],
+      "response": "IMPROVE: evaluate"
+    },
+    {
+      "id": "improve_result",
+      "user_match": ["score"],
+      "response": "ANSWER: Evaluation complete. Corpus score: 72/100."
+    },
+    {
+      "id": "check_state",
+      "user_match": ["scan", "running"],
+      "response": "STATE:"
+    },
+    {
+      "id": "state_no_active",
+      "user_match": ["No active scans"],
+      "response": "ANSWER: There are no active scans running right now."
+    },
+    {
+      "id": "sensor_feedback",
+      "user_match": ["SENSOR FEEDBACK"],
+      "response": "ANSWER: The scan found relevant malware indicators including SMS exfiltration, contact theft, C2 communication, HttpURLConnection network calls, banking overlay attacks, dropper payload loading, persistence via BOOT_COMPLETED, and obfuscation techniques. Score: 72/100."
+    }
+  ],
+  "default": "ANSWER: Analysis complete."
+}

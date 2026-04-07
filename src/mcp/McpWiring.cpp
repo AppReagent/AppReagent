@@ -3,6 +3,7 @@
 #include "util/file_io.h"
 #include "features/build/BuildFeature.h"
 #include "features/chat/ChatFeature.h"
+#include "features/scan/ScanFeature.h"
 #include "features/server/ServerFeature.h"
 #include "features/test/TestFeature.h"
 #include "features/tui/TuiFeature.h"
@@ -33,6 +34,7 @@ int runMcpServer(const std::string& dataDir, const std::string& workDir) {
     features::server::registerTools(server, dataDir, workDir);
     features::test::registerTools(server, workDir);
     if (!bin.empty()) {
+        features::scan::registerTools(server, bin, dataDir);
         features::tui::registerTools(server, bin, sockPath);
     }
 

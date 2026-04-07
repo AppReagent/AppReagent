@@ -16,7 +16,7 @@ static std::string resolveRunId(Database& db, const std::string& input) {
     if (input.empty() || input == "latest") {
         auto qr = db.execute(
             "SELECT DISTINCT run_id FROM scan_results ORDER BY run_id DESC LIMIT 1");
-        if (qr.ok() && !qr.rows.empty()) return qr.rows[0][0];
+        if (qr.ok() && !qr.rows.empty() && !qr.rows[0].empty()) return qr.rows[0][0];
         return "";
     }
     return input;
@@ -88,6 +88,7 @@ std::optional<ToolResult> ReportTool::tryExecute(const std::string& action, Tool
             int maxScore = 0, totalFiles = (int)qr.rows.size();
             int relevant = 0, partial = 0, irrelevant = 0;
             for (auto& row : qr.rows) {
+                if (row.size() < 5) continue;
                 int score = 0;
                 try { score = std::stoi(row[1]); } catch (...) {}
                 if (score > maxScore) maxScore = score;
@@ -112,6 +113,7 @@ std::optional<ToolResult> ReportTool::tryExecute(const std::string& action, Tool
             // Per-file details
             report << "## File Analysis\n\n";
             for (auto& row : qr.rows) {
+                if (row.size() < 5) continue;
                 std::string emoji;
                 if (row[2] == "relevant") emoji = "[MALICIOUS]";
                 else if (row[2] == "partially_relevant") emoji = "[SUSPICIOUS]";
@@ -151,6 +153,7 @@ std::optional<ToolResult> ReportTool::tryExecute(const std::string& action, Tool
                    << "|-------|--------|------|------------|\n";
 
             for (auto& row : qr.rows) {
+                if (row.size() < 8) continue;
                 std::string apis = row[3].size() > 60 ? row[3].substr(0, 60) + "..." : row[3];
                 report << "| " << row[0] << " | " << row[1]
                        << " | " << apis << " | " << row[7] << " |\n";
@@ -162,6 +165,7 @@ std::optional<ToolResult> ReportTool::tryExecute(const std::string& action, Tool
             int shown = 0;
             for (auto& row : qr.rows) {
                 if (shown++ >= 10) break;
+                if (row.size() < 6) continue;
                 report << "**" << row[0] << "::" << row[1] << "**\n"
                        << "- File: `" << row[2] << "`\n";
                 if (!row[3].empty()) report << "- APIs: " << row[3] << "\n";
@@ -189,6 +193,7 @@ std::optional<ToolResult> ReportTool::tryExecute(const std::string& action, Tool
             report << "## Call Graph (relevant methods)\n\n"
                    << "```\n";
             for (auto& row : qr.rows) {
+                if (row.size() < 5) continue;
                 report << row[0] << "::" << row[1]
                        << " --[" << row[4] << "]--> "
                        << row[2] << "::" << row[3] << "\n";
@@ -212,6 +217,7 @@ std::optional<ToolResult> ReportTool::tryExecute(const std::string& action, Tool
                    << "| Node | Tier | Calls | Avg Latency (ms) | Total (s) |\n"
                    << "|------|------|-------|-------------------|----------|\n";
             for (auto& row : qr.rows) {
+                if (row.size() < 5) continue;
                 report << "| " << row[0] << " | " << row[1]
                        << " | " << row[2] << " | " << row[3]
                        << " | " << row[4] << " |\n";

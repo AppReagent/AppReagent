@@ -77,7 +77,7 @@ std::string SqlTool::formatResults(const QueryResult& qr) {
     std::vector<size_t> widths;
     for (auto& col : qr.columns) widths.push_back(col.size());
     for (auto& row : qr.rows) {
-        for (size_t i = 0; i < row.size(); i++) {
+        for (size_t i = 0; i < row.size() && i < widths.size(); i++) {
             widths[i] = std::max(widths[i], row[i].size());
         }
     }
@@ -103,7 +103,7 @@ std::string SqlTool::formatResults(const QueryResult& qr) {
 
     size_t maxRows = std::min(qr.rows.size(), (size_t)50);
     for (size_t r = 0; r < maxRows; r++) {
-        for (size_t i = 0; i < qr.rows[r].size(); i++) {
+        for (size_t i = 0; i < qr.rows[r].size() && i < widths.size(); i++) {
             if (i > 0) out << " | ";
             std::string val = qr.rows[r][i];
             if (val.size() > MAX_COL_WIDTH) {

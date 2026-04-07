@@ -10,7 +10,7 @@ static std::string resolveRunId(Database& db, const std::string& input) {
     if (input == "latest") {
         auto qr = db.execute(
             "SELECT DISTINCT run_id FROM method_calls ORDER BY run_id DESC LIMIT 1");
-        if (qr.ok() && !qr.rows.empty()) return qr.rows[0][0];
+        if (qr.ok() && !qr.rows.empty() && !qr.rows[0].empty()) return qr.rows[0][0];
         return "";
     }
     return input;
@@ -93,6 +93,7 @@ std::optional<ToolResult> CallGraphTool::tryExecute(const std::string& action, T
     out << direction << " of " << target << " (run " << runId << "):\n\n";
 
     for (auto& row : qr.rows) {
+        if (row.size() < 4) continue;
         out << "  " << row[0] << "::" << row[1]
             << " [" << row[2] << "]"
             << " (file: " << row[3] << ")\n";

@@ -92,6 +92,7 @@ std::optional<ScanLog::ExistingScan> ScanLog::findRecentScan(const std::string& 
         {path + "%"});
     if (!result.ok() || result.rows.empty()) return std::nullopt;
     auto& row = result.rows[0];
+    if (row.size() < 5) return std::nullopt;
     ExistingScan scan;
     scan.run_id = row[0];
     try { scan.file_count = std::stoi(row[1]); } catch (...) {}

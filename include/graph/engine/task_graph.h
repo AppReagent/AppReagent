@@ -1,6 +1,5 @@
 #pragma once
 
-#include <functional>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -19,9 +18,9 @@ struct Edge {
 
 class TaskGraph {
 public:
-    explicit TaskGraph(std::string name) : name_(std::move(name)) {}
+    explicit TaskGraph(std::string name);
 
-    const std::string& name() const { return name_; }
+    const std::string& name() const;
 
     template <typename T, typename... Args>
     std::shared_ptr<T> add(const std::string& name, Args&&... args) {
@@ -30,65 +29,28 @@ public:
         return node;
     }
 
-    void addNode(NodePtr node) {
-        auto name = node->name();
-        if (nodes_.contains(name)) {
-            throw std::runtime_error("duplicate node name: " + name);
-        }
-        order_.push_back(name);
-        nodes_[name] = std::move(node);
-    }
+    void addNode(NodePtr node);
 
-    void edge(const std::string& from, const std::string& to) {
-        edges_.push_back({from, to, ""});
-    }
-    void edge(const NodePtr& from, const NodePtr& to) {
-        edge(from->name(), to->name());
-    }
+    void edge(const std::string& from, const std::string& to);
+    void edge(const NodePtr& from, const NodePtr& to);
 
-    void branch(const std::string& from, const std::string& branch_key, const std::string& to) {
-        edges_.push_back({from, to, branch_key});
-    }
-    void branch(const NodePtr& from, const std::string& branch_key, const NodePtr& to) {
-        branch(from->name(), branch_key, to->name());
-    }
+    void branch(const std::string& from, const std::string& branch_key, const std::string& to);
+    void branch(const NodePtr& from, const std::string& branch_key, const NodePtr& to);
 
-    void setEntry(const std::string& name) { entry_ = name; }
-    void setEntry(const NodePtr& node) { entry_ = node->name(); }
-    void setOutput(const std::string& name) { output_ = name; }
-    void setOutput(const NodePtr& node) { output_ = node->name(); }
+    void setEntry(const std::string& name);
+    void setEntry(const NodePtr& node);
+    void setOutput(const std::string& name);
+    void setOutput(const NodePtr& node);
 
-    Node* getNode(const std::string& name) const {
-        auto it = nodes_.find(name);
-        return it != nodes_.end() ? it->second.get() : nullptr;
-    }
+    Node* getNode(const std::string& name) const;
 
-    const std::string& entry() const { return entry_; }
-    const std::string& output() const { return output_; }
-    const std::vector<Edge>& edges() const { return edges_; }
-    const std::vector<std::string>& nodeOrder() const { return order_; }
+    const std::string& entry() const;
+    const std::string& output() const;
+    const std::vector<Edge>& edges() const;
+    const std::vector<std::string>& nodeOrder() const;
 
-    std::vector<const Edge*> edgesFrom(const std::string& node, const std::string& branch = "") const {
-        std::vector<const Edge*> result;
-        for (auto& e : edges_) {
-            if (e.from == node) {
-                if (branch.empty() && e.branch.empty()) {
-                    result.push_back(&e);
-                } else if (!branch.empty() && e.branch == branch) {
-                    result.push_back(&e);
-                }
-            }
-        }
-        return result;
-    }
-
-    std::vector<const Edge*> allEdgesFrom(const std::string& node) const {
-        std::vector<const Edge*> result;
-        for (auto& e : edges_) {
-            if (e.from == node) result.push_back(&e);
-        }
-        return result;
-    }
+    std::vector<const Edge*> edgesFrom(const std::string& node, const std::string& branch = "") const;
+    std::vector<const Edge*> allEdgesFrom(const std::string& node) const;
 
 private:
     std::string name_;

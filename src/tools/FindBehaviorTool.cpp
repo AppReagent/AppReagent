@@ -76,7 +76,7 @@ std::optional<ToolResult> FindBehaviorTool::tryExecute(const std::string& action
                 "SELECT DISTINCT run_id FROM scan_results "
                 "ORDER BY run_id DESC LIMIT 1");
         }
-        if (qr.ok() && !qr.rows.empty()) {
+        if (qr.ok() && !qr.rows.empty() && !qr.rows[0].empty()) {
             runId = qr.rows[0][0];
         } else {
             return ToolResult{
@@ -176,6 +176,7 @@ std::optional<ToolResult> FindBehaviorTool::tryExecute(const std::string& action
                 << "but found " << profileQr.rows.size()
                 << " matching files in scan_results:\n\n";
             for (size_t i = 0; i < profileQr.rows.size(); i++) {
+                if (profileQr.rows[i].size() < 4) continue;
                 out << (i + 1) << ". " << profileQr.rows[i][0] << "\n"
                     << "   relevance: " << profileQr.rows[i][2]
                     << " (score=" << profileQr.rows[i][3] << ")\n"
@@ -201,6 +202,7 @@ std::optional<ToolResult> FindBehaviorTool::tryExecute(const std::string& action
 
     for (size_t i = 0; i < qr.rows.size(); i++) {
         auto& row = qr.rows[i];
+        if (row.size() < 8) continue;
         std::string filePath = row[0];
         std::string className = row[1];
         std::string methodName = row[2];

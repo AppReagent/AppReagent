@@ -40,6 +40,7 @@ TaskGraph buildAnalyzeTaskGraph(const TierBackends& backends,
 
         nlohmann::json results = nlohmann::json::array();
         for (auto& row : sr.rows) {
+            if (row.size() < 5) continue;
             nlohmann::json entry;
             entry["file_path"] = row[0];
             entry["file_hash"] = row[1];
@@ -48,7 +49,7 @@ TaskGraph buildAnalyzeTaskGraph(const TierBackends& backends,
             } catch (...) {
                 entry["risk_profile"] = row[2];
             }
-            entry["risk_score"] = std::stoi(row[3]);
+            try { entry["risk_score"] = std::stoi(row[3]); } catch (...) { entry["risk_score"] = 0; }
             entry["recommendation"] = row[4];
             results.push_back(std::move(entry));
         }

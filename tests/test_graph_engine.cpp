@@ -281,3 +281,357 @@ TEST(GraphRunner, MissingEntryThrows) {
     GraphRunner runner;
     EXPECT_THROW(runner.run(g, TaskContext{}), std::runtime_error);
 }
+
+// --- TaskContext additional tests ---
+
+TEST(TaskContext, Remove) {
+    TaskContext ctx;
+    ctx.set("a", 1);
+    ctx.set("b", 2);
+    EXPECT_TRUE(ctx.has("a"));
+    ctx.remove("a");
+    EXPECT_FALSE(ctx.has("a"));
+    EXPECT_TRUE(ctx.has("b"));
+}
+
+TEST(TaskContext, DataReturnsJson) {
+    TaskContext ctx;
+    ctx.set("x", "hello");
+    ctx.set("y", 42);
+    auto& d = ctx.data();
+    EXPECT_TRUE(d.is_object());
+    EXPECT_EQ(d["x"], "hello");
+    EXPECT_EQ(d["y"], 42);
+}
+
+TEST(TaskContext, GetThrowsForMissing) {
+    TaskContext ctx;
+    EXPECT_THROW(ctx.get("nonexistent"), std::exception);
+}
+
+TEST(TaskContext, NestedJsonValues) {
+    TaskContext ctx;
+    nlohmann::json nested = {{"inner", {{"deep", true}}}};
+    ctx.set("obj", nested);
+    EXPECT_EQ(ctx.get("obj")["inner"]["deep"], true);
+}
+
+// --- TaskGraph additional tests ---
+
+TEST(TaskGraph, GetNodeReturnsNullForMissing) {
+    TaskGraph g("test");
+    g.add<CodeNode>("exists", [](TaskContext ctx) { return ctx; });
+    EXPECT_NE(g.getNode("exists"), nullptr);
+    EXPECT_EQ(g.getNode("no_such_node"), nullptr);
+}
+
+TEST(TaskGraph, NodeOrderPreservesInsertion) {
+    TaskGraph g("order");
+    g.add<CodeNode>("c", [](TaskContext ctx) { return ctx; });
+    g.add<CodeNode>("a", [](TaskContext ctx) { return ctx; });
+    g.add<CodeNode>("b", [](TaskContext ctx) { return ctx; });
+
+    auto& order = g.nodeOrder();
+    ASSERT_EQ(order.size(), 3);
+    EXPECT_EQ(order[0], "c");
+    EXPECT_EQ(order[1], "a");
+    EXPECT_EQ(order[2], "b");
+}
+
+TEST(TaskGraph, NameAccessor) {
+    TaskGraph g("my_graph");
+    EXPECT_EQ(g.name(), "my_graph");
+}
+
+TEST(TaskGraph, EdgesFromFiltering) {
+    TaskGraph g("branching");
+    auto d = g.add<DecisionCodeNode>("d", [](const TaskContext&) { return "a"; });
+    auto a = g.add<CodeNode>("a", [](TaskContext ctx) { return ctx; });
+    auto b = g.add<CodeNode>("b", [](TaskContext ctx) { return ctx; });
+    auto c = g.add<CodeNode>("c", [](TaskContext ctx) { return ctx; });
+
+    g.branch(d, "alpha", a);
+    g.branch(d, "beta", b);
+    g.edge(d, c); // default edge (empty branch)
+
+    // edgesFrom with specific branch
+    auto alpha = g.edgesFrom("d", "alpha");
+    ASSERT_EQ(alpha.size(), 1);
+    EXPECT_EQ(alpha[0]->to, "a");
+
+    auto beta = g.edgesFrom("d", "beta");
+    ASSERT_EQ(beta.size(), 1);
+    EXPECT_EQ(beta[0]->to, "b");
+
+    // edgesFrom with empty branch returns default edges only
+    auto defaults = g.edgesFrom("d");
+    ASSERT_EQ(defaults.size(), 1);
+    EXPECT_EQ(defaults[0]->to, "c");
+}
+
+TEST(TaskGraph, AllEdgesFrom) {
+    TaskGraph g("all_edges");
+    auto n = g.add<CodeNode>("n", [](TaskContext ctx) { return ctx; });
+    auto a = g.add<CodeNode>("a", [](TaskContext ctx) { return ctx; });
+    auto b = g.add<CodeNode>("b", [](TaskContext ctx) { return ctx; });
+    auto c = g.add<CodeNode>("c", [](TaskContext ctx) { return ctx; });
+
+    g.edge(n, a);
+    g.branch(n, "x", b);
+    g.branch(n, "y", c);
+
+    auto all = g.allEdgesFrom("n");
+    EXPECT_EQ(all.size(), 3);
+
+    // node with no outgoing edges
+    auto none = g.allEdgesFrom("c");
+    EXPECT_EQ(none.size(), 0);
+}
+
+TEST(TaskGraph, SetEntryOutputByString) {
+    TaskGraph g("str");
+    g.add<CodeNode>("first", [](TaskContext ctx) { return ctx; });
+    g.add<CodeNode>("last", [](TaskContext ctx) { return ctx; });
+    g.setEntry("first");
+    g.setOutput("last");
+    EXPECT_EQ(g.entry(), "first");
+    EXPECT_EQ(g.output(), "last");
+}
+
+// --- GraphRunner additional tests ---
+
+TEST(GraphRunner, SingleNodeGraph) {
+    TaskGraph g("single");
+    auto only = g.add<CodeNode>("only", [](TaskContext ctx) {
+        ctx.set("ran", true);
+        return ctx;
+    });
+    g.setEntry(only);
+    // no edges, no output set
+
+    GraphRunner runner;
+    auto result = runner.run(g, TaskContext{});
+    EXPECT_EQ(result.get("ran"), true);
+}
+
+TEST(GraphRunner, AllFanoutDiscarded) {
+    TaskGraph g("all_discard");
+
+    auto splitter = g.add<SplitterNode>("split", [](TaskContext) {
+        std::vector<TaskContext> items;
+        for (int i = 0; i < 3; i++) {
+            TaskContext c;
+            c.set("val", i);
+            items.push_back(std::move(c));
+        }
+        return items;
+    });
+
+    auto discard = g.add<ExitNode>("discard");
+    auto collector = g.add<CollectorNode>("collect");
+
+    g.edge(splitter, discard);
+    g.branch(splitter, "collect", collector);
+    g.setEntry(splitter);
+    g.setOutput(collector);
+
+    GraphRunner runner;
+    auto result = runner.run(g, TaskContext{});
+
+    // Collector receives empty list — default merge produces empty array
+    auto collected = result.get("collected");
+    EXPECT_EQ(collected.size(), 0);
+}
+
+TEST(GraphRunner, DataAccumulatesThroughChain) {
+    TaskGraph g("accum");
+
+    auto a = g.add<CodeNode>("a", [](TaskContext ctx) { ctx.set("a", 1); return ctx; });
+    auto b = g.add<CodeNode>("b", [](TaskContext ctx) { ctx.set("b", 2); return ctx; });
+    auto c = g.add<CodeNode>("c", [](TaskContext ctx) {
+        // Should see both a and b
+        ctx.set("sum", ctx.get("a").get<int>() + ctx.get("b").get<int>());
+        return ctx;
+    });
+
+    g.edge(a, b);
+    g.edge(b, c);
+    g.setEntry(a);
+    g.setOutput(c);
+
+    GraphRunner runner;
+    TaskContext init;
+    init.set("init", true);
+    auto result = runner.run(g, std::move(init));
+
+    EXPECT_EQ(result.get("init"), true);
+    EXPECT_EQ(result.get("a"), 1);
+    EXPECT_EQ(result.get("b"), 2);
+    EXPECT_EQ(result.get("sum"), 3);
+}
+
+TEST(GraphRunner, UnknownBranchFallsToDefault) {
+    TaskGraph g("fallback");
+
+    auto decide = g.add<DecisionCodeNode>("decide", [](const TaskContext&) {
+        return "unknown_branch";
+    });
+    auto fallback = g.add<CodeNode>("fallback", [](TaskContext ctx) {
+        ctx.set("route", "default");
+        return ctx;
+    });
+    auto specific = g.add<CodeNode>("specific", [](TaskContext ctx) {
+        ctx.set("route", "specific");
+        return ctx;
+    });
+
+    g.branch(decide, "known", specific);
+    g.edge(decide, fallback); // default edge
+
+    g.setEntry(decide);
+
+    GraphRunner runner;
+    auto result = runner.run(g, TaskContext{});
+    EXPECT_EQ(result.get("route"), "default");
+}
+
+TEST(GraphRunner, SplitterWithoutCollector) {
+    TaskGraph g("no_collector");
+
+    auto splitter = g.add<SplitterNode>("split", [](TaskContext) {
+        std::vector<TaskContext> items;
+        TaskContext a; a.set("id", "first");
+        TaskContext b; b.set("id", "second");
+        items.push_back(std::move(a));
+        items.push_back(std::move(b));
+        return items;
+    });
+
+    auto process = g.add<CodeNode>("process", [](TaskContext ctx) {
+        ctx.set("processed", true);
+        return ctx;
+    });
+
+    g.edge(splitter, process);
+    // No collector edge
+    g.setEntry(splitter);
+
+    GraphRunner runner;
+    runner.setMaxParallel(1);
+    auto result = runner.run(g, TaskContext{});
+
+    // Returns first non-discarded result
+    EXPECT_TRUE(result.get("processed").get<bool>());
+}
+
+TEST(GraphRunner, NodeNotFoundThrows) {
+    TaskGraph g("bad_ref");
+    auto a = g.add<CodeNode>("a", [](TaskContext ctx) { return ctx; });
+    g.edge("a", "nonexistent");
+    g.setEntry(a);
+
+    GraphRunner runner;
+    EXPECT_THROW(runner.run(g, TaskContext{}), std::runtime_error);
+}
+
+TEST(GraphRunner, SplitterNoDownstreamThrows) {
+    TaskGraph g("no_downstream");
+
+    auto splitter = g.add<SplitterNode>("split", [](TaskContext) {
+        std::vector<TaskContext> items;
+        items.push_back(TaskContext{});
+        items.push_back(TaskContext{});
+        return items;
+    });
+
+    // No edges from splitter at all
+    g.setEntry(splitter);
+
+    GraphRunner runner;
+    EXPECT_THROW(runner.run(g, TaskContext{}), std::runtime_error);
+}
+
+TEST(GraphRunner, ExitNodeNullFn) {
+    TaskGraph g("null_exit");
+    auto exit = g.add<ExitNode>("exit"); // no function
+    g.setEntry(exit);
+
+    GraphRunner runner;
+    auto result = runner.run(g, TaskContext{});
+    EXPECT_TRUE(result.discarded);
+}
+
+// --- CollectorNode additional tests ---
+
+TEST(CollectorNode, CustomFn) {
+    TaskGraph g("custom_collect");
+
+    auto splitter = g.add<SplitterNode>("split", [](TaskContext) {
+        std::vector<TaskContext> items;
+        for (int i = 1; i <= 3; i++) {
+            TaskContext c;
+            c.set("val", i);
+            items.push_back(std::move(c));
+        }
+        return items;
+    });
+
+    auto pass = g.add<CodeNode>("pass", [](TaskContext ctx) { return ctx; });
+
+    auto collector = g.add<CollectorNode>("collect", [](std::vector<TaskContext> items) {
+        int sum = 0;
+        for (auto& item : items) sum += item.get("val").get<int>();
+        TaskContext result;
+        result.set("total", sum);
+        return result;
+    });
+
+    g.edge(splitter, pass);
+    g.branch(splitter, "collect", collector);
+    g.setEntry(splitter);
+    g.setOutput(collector);
+
+    GraphRunner runner;
+    runner.setMaxParallel(1);
+    auto result = runner.run(g, TaskContext{});
+
+    EXPECT_EQ(result.get("total"), 6);
+}
+
+// --- json_extract tests ---
+
+#include "graph/util/json_extract.h"
+
+TEST(JsonExtract, FencedJsonBlock) {
+    std::string input = "Here is the output:\n```json\n{\"key\": \"value\"}\n```\nDone.";
+    auto result = extractJson(input);
+    EXPECT_EQ(result, "{\"key\": \"value\"}\n");
+}
+
+TEST(JsonExtract, FencedBlockNoLanguage) {
+    std::string input = "Result:\n```\n{\"a\": 1}\n```";
+    auto result = extractJson(input);
+    EXPECT_EQ(result, "{\"a\": 1}\n");
+}
+
+TEST(JsonExtract, RawJsonObject) {
+    std::string input = "some text {\"x\": true} more text";
+    auto result = extractJson(input);
+    EXPECT_EQ(result, "{\"x\": true}");
+}
+
+TEST(JsonExtract, NestedBraces) {
+    std::string input = R"({"outer": {"inner": 1}})";
+    auto result = extractJson(input);
+    EXPECT_EQ(result, R"({"outer": {"inner": 1}})");
+}
+
+TEST(JsonExtract, NoJsonReturnsOriginal) {
+    std::string input = "no json here";
+    auto result = extractJson(input);
+    EXPECT_EQ(result, "no json here");
+}
+
+TEST(JsonExtract, EmptyString) {
+    EXPECT_EQ(extractJson(""), "");
+}

@@ -169,6 +169,25 @@ TEST(SupervisedLLMCallNode, ExhaustsRetries) {
     EXPECT_EQ(worker.callCount(), 3);
 }
 
+TEST(TemplateResolver, EmptyTemplate) {
+    TaskContext ctx;
+    ctx.set("x", "ignored");
+    EXPECT_EQ(resolveTemplate("", ctx), "");
+}
+
+TEST(TemplateResolver, AdjacentPlaceholders) {
+    TaskContext ctx;
+    ctx.set("a", "hello");
+    ctx.set("b", "world");
+    EXPECT_EQ(resolveTemplate("{{a}}{{b}}", ctx), "helloworld");
+}
+
+TEST(TemplateResolver, RepeatedVariable) {
+    TaskContext ctx;
+    ctx.set("x", "AB");
+    EXPECT_EQ(resolveTemplate("{{x}}-{{x}}-{{x}}", ctx), "AB-AB-AB");
+}
+
 TEST(LLMCallNode, InGraphChain) {
     area::AiEndpoint ep{"test", "mock", "", "auto"};
     area::MockBackend mock(ep);
@@ -199,4 +218,91 @@ TEST(LLMCallNode, InGraphChain) {
     auto result = runner.run(g, TaskContext{});
 
     EXPECT_EQ(result.get("final_risk"), "high");
+}
+
+TEST(SupervisedLLMCallNode, SkipsSupervisorWhenSameBackend) {
+    area::AiEndpoint ep{"shared", "mock", "", "auto"};
+    area::MockBackend backend(ep);
+    backend.setResponse(R"({"ok": true})");
+
+    TaskGraph g("same_backend");
+    auto node = g.add<SupervisedLLMCallNode>("supervised",
+        SupervisedLLMCallConfig{
+            .tier = 0,
+            .prompt_template = "Analyze",
+            .supervisor_prompt = "Check",
+        },
+        &backend, &backend); // same pointer for worker and supervisor
+    g.setEntry(node);
+
+    GraphRunner runner;
+    auto result = runner.run(g, TaskContext{});
+
+    EXPECT_TRUE(result.has("llm_response"));
+    EXPECT_FALSE(result.has("llm_error"));
+    // Only 1 call — supervisor was skipped
+    EXPECT_EQ(backend.callCount(), 1);
+}
+
+TEST(SupervisedLLMCallNode, ValidationFailsAllRetries) {
+    area::AiEndpoint ep1{"worker", "mock", "", "auto"};
+    area::AiEndpoint ep2{"supervisor", "mock", "", "auto"};
+    area::MockBackend worker(ep1);
+    area::MockBackend supervisor(ep2);
+
+    worker.setResponse("bad output");
+    supervisor.setResponse("PASS");
+
+    TaskGraph g("val_fail");
+    auto node = g.add<SupervisedLLMCallNode>("supervised",
+        SupervisedLLMCallConfig{
+            .tier = 0,
+            .prompt_template = "Analyze",
+            .supervisor_prompt = "Check",
+            .max_retries = 1,
+        },
+        &worker, &supervisor,
+        [](const std::string&, const TaskContext&) { return false; }); // always fails
+    g.setEntry(node);
+
+    GraphRunner runner;
+    auto result = runner.run(g, TaskContext{});
+
+    EXPECT_TRUE(result.has("llm_error"));
+    EXPECT_EQ(worker.callCount(), 2); // initial + 1 retry
+    EXPECT_EQ(supervisor.callCount(), 0); // never reached supervisor
+}
+
+#include "graph/graphs/scan_task_graph.h"
+
+TEST(TierBackends, ExactTierMatch) {
+    area::AiEndpoint ep0{"t0", "mock", "", "auto"};
+    area::AiEndpoint ep1{"t1", "mock", "", "auto"};
+    area::MockBackend b0(ep0);
+    area::MockBackend b1(ep1);
+
+    TierBackends tb;
+    tb.backends[0] = &b0;
+    tb.backends[1] = &b1;
+
+    EXPECT_EQ(tb.at(0), &b0);
+    EXPECT_EQ(tb.at(1), &b1);
+}
+
+TEST(TierBackends, FallsBackToNearestTier) {
+    area::AiEndpoint ep{"t1", "mock", "", "auto"};
+    area::MockBackend b1(ep);
+
+    TierBackends tb;
+    tb.backends[1] = &b1;
+
+    // Tier 0 and 2 both at distance 1 from tier 1 — should return b1
+    EXPECT_EQ(tb.at(0), &b1);
+    EXPECT_EQ(tb.at(2), &b1);
+    EXPECT_EQ(tb.at(5), &b1);
+}
+
+TEST(TierBackends, ThrowsWhenEmpty) {
+    TierBackends tb;
+    EXPECT_THROW(tb.at(0), std::runtime_error);
 }

@@ -89,10 +89,10 @@ AnalysisResult AnalyzeCommand::run(const std::string& run_id) {
         "SELECT threat_level, confidence, risk_score, summary, full_json, findings_count, created_at "
         "FROM analyze_results WHERE run_id = $1 ORDER BY created_at DESC LIMIT 1",
         {resolvedId});
-    if (prev.ok() && !prev.rows.empty() && !forceReanalyze_) {
+    if (prev.ok() && !prev.rows.empty() && prev.rows[0].size() >= 7 && !forceReanalyze_) {
         result.threat_level = prev.rows[0][0];
-        result.confidence = std::stoi(prev.rows[0][1]);
-        result.risk_score = std::stoi(prev.rows[0][2]);
+        try { result.confidence = std::stoi(prev.rows[0][1]); } catch (...) {}
+        try { result.risk_score = std::stoi(prev.rows[0][2]); } catch (...) {}
         result.summary = prev.rows[0][3];
         result.full_json = prev.rows[0][4];
         emitLog("Returning cached analysis for run " + resolvedId +
@@ -101,7 +101,7 @@ AnalysisResult AnalyzeCommand::run(const std::string& run_id) {
                 "). Use ANALYZE:reanalyze " + resolvedId + " to force re-analysis.");
         return result;
     }
-    if (prev.ok() && !prev.rows.empty() && forceReanalyze_) {
+    if (prev.ok() && !prev.rows.empty() && prev.rows[0].size() >= 2 && forceReanalyze_) {
         emitLog("Re-analyzing run " + resolvedId + " (previous: " +
                 prev.rows[0][0] + ", confidence=" + prev.rows[0][1] + "%)");
     }

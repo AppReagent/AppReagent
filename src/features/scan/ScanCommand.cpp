@@ -166,6 +166,13 @@ void ScanCommand::processFile(const std::string& filePath, const std::string& ru
     }
 
     auto profile = result.get("risk_profile");
+    if (!profile.is_object()) {
+        emitLog(fileName + ": risk_profile parse error");
+        summary.files_error++;
+        log_.logScanResult(runId, filePath, fileHash, "{}", "error", 0);
+        output_.writeFileResult(filePath, fileHash, "error", 0, "error", {}, 0);
+        return;
+    }
     std::string relevance = profile.value("overall_relevance", "unknown");
     std::string recommendation = profile.value("recommendation", "unknown");
     int score = profile.value("relevance_score", 0);

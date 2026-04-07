@@ -2,7 +2,7 @@
   "prompts": [
     {
       "id": "agent_scan",
-      "user_match": ["scan"],
+      "user_match": ["scan /"],
       "response": "SCAN: /placeholder"
     },
     {
@@ -38,12 +38,17 @@
     {
       "id": "synthesis",
       "match": ["produce a comprehensive answer"],
-      "response": "{\"answer\": \"SMS-based contact exfiltration malware.\", \"relevant_methods\": [{\"method\": \"sendStolenData\", \"finding\": \"Sends via SMS to C2\"}, {\"method\": \"stealContacts\", \"finding\": \"Steals device contacts\"}], \"evidence_summary\": \"SmsManager, ContentResolver, hardcoded C2.\", \"overall_relevance\": \"relevant\", \"relevance_score\": 95, \"recommendation\": \"Flag as malware.\"}"
+      "response": "{\"answer\": \"SMS-based contact exfiltration malware.\", \"relevant_methods\": [{\"method\": \"sendStolenData\", \"finding\": \"Sends via SMS to C2\"}, {\"method\": \"stealContacts\", \"finding\": \"Steals device contacts\"}], \"evidence_summary\": \"SmsManager, ContentResolver, hardcoded C2.\", \"overall_relevance\": \"relevant\", \"threat_type\": \"data_theft\", \"mitre_techniques\": [\"T1432 -- Access Contact List\"], \"relevance_score\": 95, \"recommendation\": \"Flag as malware.\"}"
     },
     {
       "id": "synthesis_supervisor",
       "match": ["required fields present", "answer"],
       "response": "PASS"
+    },
+    {
+      "id": "scan_synthesis",
+      "match": ["final threat assessment"],
+      "response": "{\"answer\": \"The scanned files contain SMS-based data exfiltration malware with contact theft and C2 communication.\", \"risk_score\": 85, \"top_threats\": [\"data_theft\", \"c2\"]}"
     },
     {
       "id": "goal_expand",

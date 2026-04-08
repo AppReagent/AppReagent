@@ -31,7 +31,7 @@ static std::string ghidraHome() {
     if (!fs::is_directory(optDir)) return "";
     for (auto& entry : fs::directory_iterator(optDir)) {
         auto name = entry.path().filename().string();
-        if (name.find("ghidra_") == 0 && entry.is_directory()) {
+        if (name.starts_with("ghidra_") && entry.is_directory()) {
             return entry.path().string();
         }
     }
@@ -45,7 +45,7 @@ static std::string javaHome() {
     if (!fs::is_directory(optDir)) return "";
     for (auto& entry : fs::directory_iterator(optDir)) {
         auto name = entry.path().filename().string();
-        if (name.find("jdk-") == 0 && entry.is_directory()) {
+        if (name.starts_with("jdk-") && entry.is_directory()) {
             return entry.path().string();
         }
     }

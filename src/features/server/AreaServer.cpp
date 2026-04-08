@@ -273,7 +273,7 @@ void AreaServer::processUserInput(ChatSession& chat, const std::string& input) {
                     int reqId = chat.confirmReqId;
                     chat.confirmPending = true;
                     chat.confirmDescription = desc;
-                    chat.confirmIsPath = (desc.find("SCAN:") == 0);
+                    chat.confirmIsPath = desc.starts_with("SCAN:");
                     chat.confirmResponded = false;
 
                     msg["type"] = "confirm_req";

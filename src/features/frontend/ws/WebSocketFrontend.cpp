@@ -86,14 +86,16 @@ void WebSocketFrontend::onMessage(ws::ClientId id, const std::string& text) {
         }
         server_.handleExternalMessage(
             json{{"type", "get_history"}, {"chat_id", chatId}},
-            [this, id](const json& reply) { ws_.sendText(id, reply.dump()); }
-        );
+            [this, id](const json& reply) {
+                ws_.sendText(id, reply.dump());
+            });
         return;
     }
 
     server_.handleExternalMessage(msg,
-        [this, id](const json& reply) { ws_.sendText(id, reply.dump()); }
-    );
+        [this, id](const json& reply) {
+            ws_.sendText(id, reply.dump());
+        });
 }
 
 void WebSocketFrontend::onEvent(const Event& event) {

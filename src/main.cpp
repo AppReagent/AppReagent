@@ -1,6 +1,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <curl/curl.h>
@@ -8,6 +9,7 @@
 #include <csignal>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <functional>
 #include <map>
@@ -57,7 +59,22 @@ static std::string getSockPath() {
     return getDataDir() + "/area.sock";
 }
 
+static bool isServerAlive(const std::string& dataDir) {
+    std::string pidPath = dataDir + "/area.pid";
+    std::ifstream pf(pidPath);
+    if (!pf) return false;
+    pid_t pid = 0;
+    pf >> pid;
+    if (pid <= 0) return false;
+    return kill(pid, 0) == 0;
+}
+
 static bool launchServer(const std::string& dataDir, const std::string& sockPath) {
+    if (isServerAlive(dataDir)) {
+        std::cerr << "Server process is running but socket is not responding" << std::endl;
+        return false;
+    }
+
     std::string bin = area::util::selfExe();
     if (bin.empty() || !fs::exists(bin)) {
         std::cerr << "Cannot find binary to launch server" << std::endl;
@@ -105,6 +122,13 @@ static bool launchServer(const std::string& dataDir, const std::string& sockPath
 
 static int connectToServer() {
     std::string sockPath = getSockPath();
+
+    struct stat st;
+    if (stat(sockPath.c_str(), &st) == 0 && st.st_uid == 0 && getuid() != 0) {
+        std::cerr << "Requires root" << std::endl;
+        _exit(1);
+    }
+
     int fd = area::ipc::connectTo(sockPath);
     if (fd >= 0) return fd;
 

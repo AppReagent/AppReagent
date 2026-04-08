@@ -1,9 +1,10 @@
 [Unit]
-Description=Area malware analysis server
+Description=area
 After=network.target postgresql.service
 
 [Service]
 Type=simple
+WorkingDirectory=/opt/area
 ExecStart=/bin/area server
 Restart=on-failure
 RestartSec=5

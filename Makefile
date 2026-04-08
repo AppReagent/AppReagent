@@ -105,19 +105,6 @@ lint-diff:
 	CPPS=$$(echo $$FILES | tr ' ' '\n' | grep '\.cpp$$' || true); \
 	if [ -n "$$CPPS" ]; then ./scripts/lint-iwyu.sh $$CPPS; fi
 
-install: all install-systemd
-
-install-systemd:
-	ln -sf $(CURDIR)/area /bin/area
-	cp $(CURDIR)/area.service /etc/systemd/system/area.service
-	systemctl daemon-reload
-	systemctl enable area.service
-
-uninstall:
-	systemctl disable area.service || true
-	rm -f /etc/systemd/system/area.service
-	rm -f /bin/area
-	systemctl daemon-reload
 
 clean:
 	rm -rf $(BUILD_DIR) area area_tests

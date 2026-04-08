@@ -1,0 +1,12 @@
+[Unit]
+Description=Area malware analysis server
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+ExecStart=/bin/area server
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

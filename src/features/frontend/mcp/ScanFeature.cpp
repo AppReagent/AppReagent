@@ -1,11 +1,11 @@
-#include "features/scan/ScanFeature.h"
+#include "features/frontend/mcp/ScanFeature.h"
 
 #include <iostream>
 #include <map>
 #include <vector>
 
-#include "mcp/McpTool.h"
-#include "mcp/McpUtil.h"
+#include "features/frontend/mcp/McpTool.h"
+#include "features/frontend/mcp/McpUtil.h"
 #include "nlohmann/detail/json_ref.hpp"
 #include "nlohmann/json.hpp"
 using json = nlohmann::json;

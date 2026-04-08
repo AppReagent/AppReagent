@@ -1,11 +1,11 @@
-#include "features/chat/ChatFeature.h"
+#include "features/frontend/mcp/ChatFeature.h"
 
 #include <iostream>
 #include <map>
 #include <memory>
 
 #include "features/chat/ChatService.h"
-#include "mcp/McpTool.h"
+#include "features/frontend/mcp/McpTool.h"
 #include "nlohmann/detail/json_ref.hpp"
 #include "nlohmann/json.hpp"
 using json = nlohmann::json;

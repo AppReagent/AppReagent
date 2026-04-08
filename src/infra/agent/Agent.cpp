@@ -7,6 +7,7 @@
 #include <optional>
 #include <utility>
 
+#include "infra/events/EventBus.h"
 #include "infra/tools/ToolContext.h"
 #include "util/file_io.h"
 #include "util/string_util.h"
@@ -31,6 +32,28 @@ void Agent::interrupt() {
 
 void Agent::clearHistory() {
     history_.clear();
+}
+
+void Agent::setEventBus(EventBus* bus, const std::string& chatId) {
+    eventBus_ = bus;
+    chatId_ = chatId;
+}
+
+void Agent::emitEvent(const AgentMessage& msg) {
+    if (!eventBus_) return;
+
+    EventType type;
+    switch (msg.type) {
+        case AgentMessage::THINKING:    type = EventType::AGENT_THOUGHT; break;
+        case AgentMessage::ANSWER:      type = EventType::AGENT_ANSWER; break;
+        case AgentMessage::SQL:         type = EventType::AGENT_MSG_SQL; break;
+        case AgentMessage::RESULT:      type = EventType::AGENT_MSG_RESULT; break;
+        case AgentMessage::ERROR:       type = EventType::AGENT_MSG_ERROR; break;
+        case AgentMessage::TUI_CONTROL: type = EventType::AGENT_MSG_TUI_CONTROL; break;
+        default: return;
+    }
+
+    eventBus_->emit({type, "agent", msg.content, chatId_});
 }
 
 std::string Agent::extractThought(const std::string& response, std::string& thought) {
@@ -98,13 +121,17 @@ void Agent::compressHistory(MessageCallback cb) {
             "Discard raw query results and failed attempts.";
     }
 
-    cb({AgentMessage::THINKING, "Compressing context..."});
+    AgentMessage thinkMsg{AgentMessage::THINKING, "Compressing context..."};
+    cb(thinkMsg);
+    emitEvent(thinkMsg);
 
     std::string summary;
     try {
         summary = backend_->chat(compressPrompt, history_);
     } catch (const std::exception& e) {
-        cb({AgentMessage::ERROR, std::string("Compression failed: ") + e.what()});
+        AgentMessage errMsg{AgentMessage::ERROR, std::string("Compression failed: ") + e.what()};
+        cb(errMsg);
+        emitEvent(errMsg);
         return;
     }
 
@@ -160,7 +187,9 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
 
     for (int iter = 0; iter < MAX_ITERATIONS; iter++) {
         if (interrupted_.load()) {
-            cb({AgentMessage::ANSWER, "(interrupted)"});
+            AgentMessage msg{AgentMessage::ANSWER, "(interrupted)"};
+            cb(msg);
+            emitEvent(msg);
             return;
         }
 
@@ -180,13 +209,17 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
         try {
             rawResponse = backend_->chat(systemPrompt, history_);
         } catch (const std::exception& e) {
-            cb({AgentMessage::ERROR, std::string("API error: ") + e.what()});
+            AgentMessage msg{AgentMessage::ERROR, std::string("API error: ") + e.what()};
+            cb(msg);
+            emitEvent(msg);
             return;
         }
 
         if (interrupted_.load()) {
             history_.push_back({"assistant", rawResponse});
-            cb({AgentMessage::ANSWER, "(interrupted)"});
+            AgentMessage msg{AgentMessage::ANSWER, "(interrupted)"};
+            cb(msg);
+            emitEvent(msg);
             return;
         }
 
@@ -194,7 +227,9 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
         std::string action = extractThought(rawResponse, thought);
 
         if (!thought.empty()) {
-            cb({AgentMessage::THINKING, thought});
+            AgentMessage msg{AgentMessage::THINKING, thought};
+            cb(msg);
+            emitEvent(msg);
         }
 
         if (action.empty()) action = rawResponse;
@@ -212,7 +247,9 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
             }
 
             history_.push_back({"assistant", rawResponse});
-            cb({AgentMessage::ANSWER, answer});
+            AgentMessage msg{AgentMessage::ANSWER, answer};
+            cb(msg);
+            emitEvent(msg);
             return;
         }
 
@@ -250,10 +287,14 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
         }
 
         history_.push_back({"assistant", rawResponse});
-        cb({AgentMessage::ANSWER, action});
+        AgentMessage msg{AgentMessage::ANSWER, action};
+        cb(msg);
+        emitEvent(msg);
         return;
     }
 
-    cb({AgentMessage::ANSWER, "(max iterations reached)"});
+    AgentMessage msg{AgentMessage::ANSWER, "(max iterations reached)"};
+    cb(msg);
+    emitEvent(msg);
 }
 }  // namespace area

@@ -1,4 +1,4 @@
-#include "features/build/BuildFeature.h"
+#include "features/frontend/mcp/BuildFeature.h"
 
 #include <stddef.h>
 
@@ -6,8 +6,8 @@
 #include <map>
 #include <vector>
 
-#include "mcp/McpTool.h"
-#include "mcp/McpUtil.h"
+#include "features/frontend/mcp/McpTool.h"
+#include "features/frontend/mcp/McpUtil.h"
 #include "nlohmann/detail/json_ref.hpp"
 #include "nlohmann/json.hpp"
 using json = nlohmann::json;

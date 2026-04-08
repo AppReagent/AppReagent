@@ -4,7 +4,7 @@
 
 #include <string>
 
-#include "features/tui/VtScreen.h"
+#include "features/frontend/tui/VtScreen.h"
 namespace area {
 
 class HeadlessTui {

@@ -1,4 +1,4 @@
-#include "features/tui/Tui.h"
+#include "features/frontend/tui/Tui.h"
 
 #include <bits/termios-c_cc.h>
 #include <bits/termios-c_cflag.h>
@@ -19,7 +19,7 @@
 
 #include <nlohmann/json.hpp>
 
-#include "features/tui/tui_util.h"
+#include "features/frontend/tui/tui_util.h"
 #include "infra/ipc/IPC.h"
 #include "nlohmann/detail/iterators/iter_impl.hpp"
 #include "nlohmann/detail/json_ref.hpp"

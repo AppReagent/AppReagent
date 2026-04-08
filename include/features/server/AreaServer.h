@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -37,6 +38,7 @@ struct ChatSession {
     std::vector<DisplayMsg> messages;
     std::mutex messagesMu;
 
+    std::mutex processingMu;
     std::atomic<bool> processing{false};
     std::thread processingThread;
 
@@ -67,15 +69,21 @@ class AreaServer {
     void run();
     void shutdown();
 
+    EventBus& eventBus() { return eventBus_; }
+
+    using ReplyCallback = std::function<void(const nlohmann::json&)>;
+    void handleExternalMessage(const nlohmann::json& msg, ReplyCallback reply);
+
  private:
     void handleClient(int clientFd);
     void handleMessage(int clientFd, const nlohmann::json& msg);
 
-    void processUserInput(ChatSession& chat, const std::string& input);
+    void processUserInput(std::shared_ptr<ChatSession> chat, const std::string& input);
     void sendToClient(int fd, const nlohmann::json& msg);
     void broadcastToChat(const std::string& chatId, const nlohmann::json& msg);
 
-    ChatSession& getOrCreateChat(const std::string& id, const std::string& name = "");
+    std::shared_ptr<ChatSession> getOrCreateChat(const std::string& id,
+                                                  const std::string& name = "");
     std::string generateId();
 
     Config config_;
@@ -87,7 +95,7 @@ class AreaServer {
     ScanState scanState_;
     EventBus eventBus_;
     std::unique_ptr<BackendPool> chatPool_;
-    std::unordered_map<std::string, std::unique_ptr<ChatSession>> chats_;
+    std::unordered_map<std::string, std::shared_ptr<ChatSession>> chats_;
     std::mutex chatsMu_;
 
     std::vector<int> clientFds_;

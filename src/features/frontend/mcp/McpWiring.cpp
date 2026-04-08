@@ -1,15 +1,15 @@
-#include "mcp/McpWiring.h"
+#include "features/frontend/mcp/McpWiring.h"
 
 #include <filesystem>
 
-#include "mcp/McpServer.h"
+#include "features/frontend/mcp/McpServer.h"
 #include "util/file_io.h"
-#include "features/build/BuildFeature.h"
-#include "features/chat/ChatFeature.h"
-#include "features/scan/ScanFeature.h"
-#include "features/server/ServerFeature.h"
-#include "features/test/TestFeature.h"
-#include "features/tui/TuiFeature.h"
+#include "features/frontend/mcp/BuildFeature.h"
+#include "features/frontend/mcp/ChatFeature.h"
+#include "features/frontend/mcp/ScanFeature.h"
+#include "features/frontend/mcp/ServerFeature.h"
+#include "features/frontend/mcp/TestFeature.h"
+#include "features/frontend/mcp/TuiFeature.h"
 
 namespace fs = std::filesystem;
 

@@ -1,12 +1,12 @@
-#include "features/tui/TuiFeature.h"
+#include "features/frontend/mcp/TuiFeature.h"
 
 #include <algorithm>
 #include <map>
 #include <memory>
 #include <stdexcept>
 
-#include "features/tui/HeadlessTui.h"
-#include "mcp/McpTool.h"
+#include "features/frontend/tui/HeadlessTui.h"
+#include "features/frontend/mcp/McpTool.h"
 #include "nlohmann/detail/json_ref.hpp"
 #include "nlohmann/json.hpp"
 using json = nlohmann::json;

@@ -121,6 +121,7 @@ AreaServer::~AreaServer() {
 
     std::lock_guard lk(chatsMu_);
     for (auto& [id, chat] : chats_) {
+        std::lock_guard plk(chat->processingMu);
         if (chat->processingThread.joinable()) {
             chat->processingThread.join();
         }
@@ -135,12 +136,13 @@ std::string AreaServer::generateId() {
     return id;
 }
 
-ChatSession& AreaServer::getOrCreateChat(const std::string& id, const std::string& name) {
+std::shared_ptr<ChatSession> AreaServer::getOrCreateChat(const std::string& id,
+                                                          const std::string& name) {
     std::lock_guard lk(chatsMu_);
     auto it = chats_.find(id);
-    if (it != chats_.end()) return *it->second;
+    if (it != chats_.end()) return it->second;
 
-    auto session = std::make_unique<ChatSession>();
+    auto session = std::make_shared<ChatSession>();
     session->id = id;
     session->name = name.empty() ? id : name;
     session->dataDir = dataDir_ + "/chats/" + id;
@@ -186,6 +188,7 @@ ChatSession& AreaServer::getOrCreateChat(const std::string& id, const std::strin
         h.loadConstitution(dataDir_ + "/constitution.md");
 
         session->agent = std::make_unique<Agent>(chatPool_.get(), *session->tools, std::move(h));
+        session->agent->setEventBus(&eventBus_, id);
 
         std::string promptsDir = "prompts";
         if (auto envDir = std::getenv("AREA_PROMPTS_DIR")) {
@@ -221,9 +224,8 @@ ChatSession& AreaServer::getOrCreateChat(const std::string& id, const std::strin
 
     session->loadConvo();
 
-    auto& ref = *session;
-    chats_[id] = std::move(session);
-    return ref;
+    chats_[id] = session;
+    return session;
 }
 
 void AreaServer::sendToClient(int fd, const nlohmann::json& msg) {
@@ -241,67 +243,78 @@ void AreaServer::broadcastToChat(const std::string& chatId, const nlohmann::json
     }
 }
 
-void AreaServer::processUserInput(ChatSession& chat, const std::string& input) {
-    if (chat.processing) {
-        if (chat.processingThread.joinable()) chat.processingThread.join();
+void AreaServer::processUserInput(std::shared_ptr<ChatSession> chat, const std::string& input) {
+    std::lock_guard plk(chat->processingMu);
 
-        chat.processing = false;
+    if (chat->processingThread.joinable()) {
+        chat->processingThread.join();
+    }
+
+    if (!chat->agent) {
+        broadcastToChat(chat->id, nlohmann::json{
+            {"type", "agent_msg"},
+            {"chat_id", chat->id},
+            {"msg", {{"type", "error"}, {"content", "No AI endpoints configured."}}}
+        });
+        broadcastToChat(chat->id, nlohmann::json{
+            {"type", "state"}, {"chat_id", chat->id}, {"processing", false}
+        });
+        return;
     }
 
     {
-        std::lock_guard lk(chat.messagesMu);
-        chat.messages.push_back({"user", "thinking", input});
+        std::lock_guard lk(chat->messagesMu);
+        chat->messages.push_back({"user", "thinking", input});
     }
 
-    chat.processing = true;
+    chat->processing = true;
 
-    broadcastToChat(chat.id, nlohmann::json{
-        {"type", "state"}, {"chat_id", chat.id}, {"processing", true},
-        {"context_tokens", chat.agent ? chat.agent->estimateTokens() : 0},
-        {"context_window", chat.agent ? chat.agent->backend().endpoint().context_window : 0}
+    broadcastToChat(chat->id, nlohmann::json{
+        {"type", "state"}, {"chat_id", chat->id}, {"processing", true},
+        {"context_tokens", chat->agent->estimateTokens()},
+        {"context_window", chat->agent->backend().endpoint().context_window}
     });
 
-    if (chat.processingThread.joinable()) chat.processingThread.join();
-    chat.processingThread = std::thread([this, &chat, input]() {
+    chat->processingThread = std::thread([this, chat, input]() {
         ConfirmCallback confirm = nullptr;
-        if (!chat.dangerousMode) {
-            confirm = [this, &chat](const std::string& desc) -> ConfirmResult {
+        if (!chat->dangerousMode) {
+            confirm = [this, chat](const std::string& desc) -> ConfirmResult {
                 nlohmann::json msg;
                 {
-                    std::lock_guard lk(chat.confirmMu);
-                    chat.confirmReqId++;
-                    int reqId = chat.confirmReqId;
-                    chat.confirmPending = true;
-                    chat.confirmDescription = desc;
-                    chat.confirmIsPath = desc.starts_with("SCAN:");
-                    chat.confirmResponded = false;
+                    std::lock_guard lk(chat->confirmMu);
+                    chat->confirmReqId++;
+                    int reqId = chat->confirmReqId;
+                    chat->confirmPending = true;
+                    chat->confirmDescription = desc;
+                    chat->confirmIsPath = desc.starts_with("SCAN:");
+                    chat->confirmResponded = false;
 
                     msg["type"] = "confirm_req";
-                    msg["chat_id"] = chat.id;
+                    msg["chat_id"] = chat->id;
                     msg["req_id"] = reqId;
                     msg["description"] = desc;
-                    msg["is_path"] = chat.confirmIsPath;
+                    msg["is_path"] = chat->confirmIsPath;
                 }
 
-                broadcastToChat(chat.id, msg);
+                broadcastToChat(chat->id, msg);
 
-                std::unique_lock lk(chat.confirmMu);
-                bool ok = chat.confirmCv.wait_for(lk, std::chrono::minutes(5),
-                    [&] { return chat.confirmResponded; });
+                std::unique_lock lk(chat->confirmMu);
+                bool ok = chat->confirmCv.wait_for(lk, std::chrono::minutes(5),
+                    [&] { return chat->confirmResponded; });
 
-                chat.confirmPending = false;
+                chat->confirmPending = false;
                 if (!ok) return ConfirmResult{ConfirmResult::DENY, ""};
-                return chat.confirmResult;
+                return chat->confirmResult;
             };
         }
 
-        chat.agent->process(input, [this, &chat](const AgentMessage& msg) {
+        chat->agent->process(input, [this, chat](const AgentMessage& msg) {
             if (msg.type == AgentMessage::TUI_CONTROL) {
                 try {
                     auto payload = nlohmann::json::parse(msg.content);
                     payload["type"] = "tui_control";
-                    payload["chat_id"] = chat.id;
-                    broadcastToChat(chat.id, payload);
+                    payload["chat_id"] = chat->id;
+                    broadcastToChat(chat->id, payload);
                 } catch (...) {}
                 return;
             }
@@ -309,23 +322,23 @@ void AreaServer::processUserInput(ChatSession& chat, const std::string& input) {
             std::string typeStr = msgTypeStr(msg.type);
 
             {
-                std::lock_guard lk(chat.messagesMu);
-                chat.messages.push_back({"agent", typeStr, msg.content});
+                std::lock_guard lk(chat->messagesMu);
+                chat->messages.push_back({"agent", typeStr, msg.content});
             }
 
-            broadcastToChat(chat.id, nlohmann::json{
+            broadcastToChat(chat->id, nlohmann::json{
                 {"type", "agent_msg"},
-                {"chat_id", chat.id},
+                {"chat_id", chat->id},
                 {"msg", {{"type", typeStr}, {"content", msg.content}}}
             });
         }, confirm);
 
-        chat.processing = false;
-        chat.saveConvo();
-        broadcastToChat(chat.id, nlohmann::json{
-            {"type", "state"}, {"chat_id", chat.id}, {"processing", false},
-            {"context_tokens", chat.agent ? chat.agent->estimateTokens() : 0},
-            {"context_window", chat.agent ? chat.agent->backend().endpoint().context_window : 0}
+        chat->processing = false;
+        chat->saveConvo();
+        broadcastToChat(chat->id, nlohmann::json{
+            {"type", "state"}, {"chat_id", chat->id}, {"processing", false},
+            {"context_tokens", chat->agent->estimateTokens()},
+            {"context_window", chat->agent->backend().endpoint().context_window}
         });
     });
 }
@@ -336,28 +349,28 @@ void AreaServer::handleMessage(int clientFd, const nlohmann::json& msg) {
     if (type == "user_input") {
         std::string chatId = msg.value("chat_id", "default");
         std::string content = msg.value("content", "");
-        auto& chat = getOrCreateChat(chatId);
+        auto chat = getOrCreateChat(chatId);
         processUserInput(chat, content);
     } else if (type == "confirm_resp") {
         std::string chatId = msg.value("chat_id", "default");
         std::lock_guard lk(chatsMu_);
         auto it = chats_.find(chatId);
         if (it == chats_.end()) return;
-        auto& chat = *it->second;
+        auto& chat = it->second;
 
-        std::lock_guard clk(chat.confirmMu);
+        std::lock_guard clk(chat->confirmMu);
         std::string action = msg.value("action", "deny");
         if (action == "approve")
-            chat.confirmResult = {ConfirmResult::APPROVE, ""};
+            chat->confirmResult = {ConfirmResult::APPROVE, ""};
         else if (action == "custom")
-            chat.confirmResult = {ConfirmResult::CUSTOM, msg.value("text", "")};
+            chat->confirmResult = {ConfirmResult::CUSTOM, msg.value("text", "")};
         else
-            chat.confirmResult = {ConfirmResult::DENY, ""};
-        chat.confirmResponded = true;
-        chat.confirmCv.notify_one();
+            chat->confirmResult = {ConfirmResult::DENY, ""};
+        chat->confirmResponded = true;
+        chat->confirmCv.notify_one();
     } else if (type == "attach") {
         std::string chatId = msg.value("chat_id", "default");
-        auto& chat = getOrCreateChat(chatId);
+        auto chat = getOrCreateChat(chatId);
 
         {
             std::lock_guard lk(chatsMu_);
@@ -366,12 +379,12 @@ void AreaServer::handleMessage(int clientFd, const nlohmann::json& msg) {
             }
         }
 
-        chat.clientFd = clientFd;
+        chat->clientFd = clientFd;
 
         nlohmann::json history = nlohmann::json::array();
         {
-            std::lock_guard lk(chat.messagesMu);
-            for (auto& m : chat.messages) {
+            std::lock_guard lk(chat->messagesMu);
+            for (auto& m : chat->messages) {
                 history.push_back({{"who", m.who}, {"type", m.type}, {"content", m.content}});
             }
         }
@@ -384,20 +397,20 @@ void AreaServer::handleMessage(int clientFd, const nlohmann::json& msg) {
         sendToClient(clientFd, nlohmann::json{
             {"type", "state"},
             {"chat_id", chatId},
-            {"processing", chat.processing.load()},
-            {"dangerous", chat.dangerousMode.load()},
-            {"context_tokens", chat.agent ? chat.agent->estimateTokens() : 0},
-            {"context_window", chat.agent ? chat.agent->backend().endpoint().context_window : 0}
+            {"processing", chat->processing.load()},
+            {"dangerous", chat->dangerousMode.load()},
+            {"context_tokens", chat->agent ? chat->agent->estimateTokens() : 0},
+            {"context_window", chat->agent ? chat->agent->backend().endpoint().context_window : 0}
         });
 
-        if (chat.confirmPending) {
-            std::lock_guard clk(chat.confirmMu);
+        if (chat->confirmPending) {
+            std::lock_guard clk(chat->confirmMu);
             sendToClient(clientFd, nlohmann::json{
                 {"type", "confirm_req"},
                 {"chat_id", chatId},
-                {"req_id", chat.confirmReqId},
-                {"description", chat.confirmDescription},
-                {"is_path", chat.confirmIsPath}
+                {"req_id", chat->confirmReqId},
+                {"description", chat->confirmDescription},
+                {"is_path", chat->confirmIsPath}
             });
         }
     } else if (type == "list_chats") {
@@ -415,8 +428,8 @@ void AreaServer::handleMessage(int clientFd, const nlohmann::json& msg) {
     } else if (type == "create_chat") {
         std::string name = msg.value("name", "");
         std::string id = generateId();
-        auto& chat = getOrCreateChat(id, name.empty() ? id : name);
-        sendToClient(clientFd, nlohmann::json{{"type", "chat_created"}, {"chat_id", chat.id}, {"name", chat.name}});
+        auto chat = getOrCreateChat(id, name.empty() ? id : name);
+        sendToClient(clientFd, nlohmann::json{{"type", "chat_created"}, {"chat_id", chat->id}, {"name", chat->name}});
     } else if (type == "interrupt") {
         std::string chatId = msg.value("chat_id", "default");
         std::lock_guard lk(chatsMu_);
@@ -439,15 +452,18 @@ void AreaServer::handleMessage(int clientFd, const nlohmann::json& msg) {
         }
     } else if (type == "clear_context") {
         std::string chatId = msg.value("chat_id", "default");
-        ChatSession* session = nullptr;
+        std::shared_ptr<ChatSession> session;
         {
             std::lock_guard lk(chatsMu_);
             auto it = chats_.find(chatId);
-            if (it != chats_.end()) session = it->second.get();
+            if (it != chats_.end()) session = it->second;
         }
         if (session) {
             if (session->agent) session->agent->interrupt();
-            if (session->processingThread.joinable()) session->processingThread.join();
+            {
+                std::lock_guard plk(session->processingMu);
+                if (session->processingThread.joinable()) session->processingThread.join();
+            }
             session->processing = false;
             {
                 std::lock_guard mlk(session->messagesMu);
@@ -466,6 +482,123 @@ void AreaServer::handleMessage(int clientFd, const nlohmann::json& msg) {
         for (auto& [id, c] : chats_) {
             if (c->clientFd == clientFd) c->clientFd = -1;
         }
+    }
+}
+
+void AreaServer::handleExternalMessage(const nlohmann::json& msg, ReplyCallback reply) {
+    std::string type = msg.value("type", "");
+
+    if (type == "user_input") {
+        std::string chatId = msg.value("chat_id", "default");
+        std::string content = msg.value("content", "");
+        auto chat = getOrCreateChat(chatId);
+        processUserInput(chat, content);
+    } else if (type == "confirm_resp") {
+        std::string chatId = msg.value("chat_id", "default");
+        std::lock_guard lk(chatsMu_);
+        auto it = chats_.find(chatId);
+        if (it == chats_.end()) return;
+        auto& chat = it->second;
+
+        std::lock_guard clk(chat->confirmMu);
+        std::string action = msg.value("action", "deny");
+        if (action == "approve")
+            chat->confirmResult = {ConfirmResult::APPROVE, ""};
+        else if (action == "custom")
+            chat->confirmResult = {ConfirmResult::CUSTOM, msg.value("text", "")};
+        else
+            chat->confirmResult = {ConfirmResult::DENY, ""};
+        chat->confirmResponded = true;
+        chat->confirmCv.notify_one();
+    } else if (type == "list_chats") {
+        nlohmann::json list = nlohmann::json::array();
+        std::lock_guard lk(chatsMu_);
+        for (auto& [id, c] : chats_) {
+            list.push_back({
+                {"id", c->id},
+                {"name", c->name},
+                {"processing", c->processing.load()},
+                {"attached", c->clientFd >= 0}
+            });
+        }
+        if (reply) reply(nlohmann::json{{"type", "chat_list"}, {"chats", list}});
+    } else if (type == "create_chat") {
+        std::string name = msg.value("name", "");
+        std::string id = generateId();
+        auto chat = getOrCreateChat(id, name.empty() ? id : name);
+        if (reply) reply(nlohmann::json{{"type", "chat_created"}, {"chat_id", chat->id}, {"name", chat->name}});
+    } else if (type == "interrupt") {
+        std::string chatId = msg.value("chat_id", "default");
+        std::lock_guard lk(chatsMu_);
+        auto it = chats_.find(chatId);
+        if (it != chats_.end() && it->second->agent) {
+            it->second->agent->interrupt();
+            std::lock_guard clk(it->second->confirmMu);
+            if (it->second->confirmPending) {
+                it->second->confirmResult = {ConfirmResult::DENY, ""};
+                it->second->confirmResponded = true;
+                it->second->confirmCv.notify_one();
+            }
+        }
+    } else if (type == "set_dangerous") {
+        std::string chatId = msg.value("chat_id", "default");
+        std::lock_guard lk(chatsMu_);
+        auto it = chats_.find(chatId);
+        if (it != chats_.end()) {
+            it->second->dangerousMode = msg.value("enabled", false);
+        }
+    } else if (type == "clear_context") {
+        std::string chatId = msg.value("chat_id", "default");
+        std::shared_ptr<ChatSession> session;
+        {
+            std::lock_guard lk(chatsMu_);
+            auto it = chats_.find(chatId);
+            if (it != chats_.end()) session = it->second;
+        }
+        if (session) {
+            if (session->agent) session->agent->interrupt();
+            {
+                std::lock_guard plk(session->processingMu);
+                if (session->processingThread.joinable()) session->processingThread.join();
+            }
+            session->processing = false;
+            {
+                std::lock_guard mlk(session->messagesMu);
+                session->messages.clear();
+            }
+            if (session->agent) session->agent->clearHistory();
+            session->saveConvo();
+
+            broadcastToChat(chatId, nlohmann::json{
+                {"type", "state"}, {"chat_id", chatId}, {"processing", false}});
+        }
+    } else if (type == "get_history") {
+        std::string chatId = msg.value("chat_id", "default");
+        auto chat = getOrCreateChat(chatId);
+        nlohmann::json history = nlohmann::json::array();
+        {
+            std::lock_guard lk(chat->messagesMu);
+            for (auto& m : chat->messages) {
+                history.push_back({{"who", m.who}, {"type", m.type}, {"content", m.content}});
+            }
+        }
+        if (reply) {
+            reply(nlohmann::json{
+                {"type", "history"},
+                {"chat_id", chatId},
+                {"messages", history}
+            });
+            reply(nlohmann::json{
+                {"type", "state"},
+                {"chat_id", chatId},
+                {"processing", chat->processing.load()},
+                {"dangerous", chat->dangerousMode.load()},
+                {"context_tokens", chat->agent ? chat->agent->estimateTokens() : 0},
+                {"context_window", chat->agent ? chat->agent->backend().endpoint().context_window : 0}
+            });
+        }
+    } else if (type == "shutdown") {
+        running_ = false;
     }
 }
 
@@ -527,10 +660,13 @@ void AreaServer::run() {
             int clientFd = accept(listenFd_, nullptr, nullptr);
             if (clientFd >= 0) {
                 int flags = fcntl(clientFd, F_GETFL, 0);
-                if (flags >= 0) fcntl(clientFd, F_SETFL, flags | O_NONBLOCK);
-                std::cerr << "[server] client connected fd=" << clientFd << std::endl;
-                std::lock_guard lk(clientsMu_);
-                clientFds_.push_back(clientFd);
+                if (flags < 0 || fcntl(clientFd, F_SETFL, flags | O_NONBLOCK) < 0) {
+                    close(clientFd);
+                } else {
+                    std::cerr << "[server] client connected fd=" << clientFd << std::endl;
+                    std::lock_guard lk(clientsMu_);
+                    clientFds_.push_back(clientFd);
+                }
             }
         }
 
@@ -572,6 +708,7 @@ void AreaServer::run() {
     {
         std::lock_guard lk(chatsMu_);
         for (auto& [id, c] : chats_) {
+            std::lock_guard plk(c->processingMu);
             if (c->processingThread.joinable()) c->processingThread.join();
             c->saveConvo();
         }

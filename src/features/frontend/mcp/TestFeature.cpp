@@ -1,12 +1,12 @@
-#include "features/test/TestFeature.h"
+#include "features/frontend/mcp/TestFeature.h"
 
 #include <filesystem>
 #include <iostream>
 #include <map>
 #include <vector>
 
-#include "mcp/McpTool.h"
-#include "mcp/McpUtil.h"
+#include "features/frontend/mcp/McpTool.h"
+#include "features/frontend/mcp/McpUtil.h"
 #include "nlohmann/detail/json_ref.hpp"
 #include "nlohmann/json.hpp"
 #include "util/file_io.h"

@@ -12,6 +12,8 @@
 
 namespace area {
 
+class EventBus;
+
 struct AgentMessage {
     enum Type { THINKING, SQL, RESULT, ANSWER, ERROR, TUI_CONTROL };
     Type type;
@@ -47,11 +49,13 @@ class Agent {
     int estimateTokens() const;
     void setSystemContext(const std::string& ctx) { systemContext_ = ctx; }
     void setPromptsDir(const std::string& dir) { promptsDir_ = dir; }
+    void setEventBus(EventBus* bus, const std::string& chatId = "");
 
  private:
     std::string buildSystemPrompt() const;
     std::string extractThought(const std::string& response, std::string& thought);
     void compressHistory(MessageCallback cb);
+    void emitEvent(const AgentMessage& msg);
 
     std::unique_ptr<LLMBackend> ownedBackend_;
     LLMBackend* backend_ = nullptr;
@@ -61,6 +65,9 @@ class Agent {
     std::string promptsDir_;
     std::vector<ChatMessage> history_;
     std::atomic<bool> interrupted_{false};
+
+    EventBus* eventBus_ = nullptr;
+    std::string chatId_;
 
     static constexpr int MAX_ITERATIONS = 25;
     static constexpr int ITERATION_WARNING = 20;

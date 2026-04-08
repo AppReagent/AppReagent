@@ -1,4 +1,4 @@
-#include "features/server/ServerFeature.h"
+#include "features/frontend/mcp/ServerFeature.h"
 
 #include <fcntl.h>
 #include <signal.h>
@@ -13,7 +13,7 @@
 #include <system_error>
 
 #include "infra/ipc/IPC.h"
-#include "mcp/McpTool.h"
+#include "features/frontend/mcp/McpTool.h"
 #include "nlohmann/detail/json_ref.hpp"
 #include "nlohmann/json.hpp"
 #include "util/file_io.h"

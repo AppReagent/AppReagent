@@ -2,11 +2,11 @@
 
 #include <string>
 
-#include "mcp/McpServer.h"
-namespace area::features::scan {
+#include "features/frontend/mcp/McpServer.h"
+namespace area::features::tui {
 
 void registerTools(mcp::McpServer& server,
                    const std::string& binary,
-                   const std::string& dataDir);
+                   const std::string& sockPath);
 
 }

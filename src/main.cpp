@@ -25,10 +25,11 @@
 #include "infra/db/Database.h"
 #include "infra/agent/Harness.h"
 #include "features/scan/ScanCommand.h"
-#include "features/tui/Tui.h"
+#include "features/frontend/tui/Tui.h"
+#include "features/frontend/ws/WebSocketFrontend.h"
 #include "features/server/AreaServer.h"
 #include "infra/ipc/IPC.h"
-#include "mcp/McpWiring.h"
+#include "features/frontend/mcp/McpWiring.h"
 #include "infra/tools/ToolRegistry.h"
 #include "features/improve/ImproveTool.h"
 #include "infra/tools/ToolContext.h"
@@ -163,7 +164,17 @@ static int cmdTest(area::Config& config) {
 
 static int cmdServer(area::Config& config) {
     area::AreaServer server(config, getDataDir());
+
+    std::unique_ptr<area::WebSocketFrontend> wsFrontend;
+    if (config.ws_port > 0) {
+        wsFrontend = std::make_unique<area::WebSocketFrontend>(
+            server, server.eventBus(), config.ws_port);
+        wsFrontend->start();
+    }
+
     server.run();
+
+    if (wsFrontend) wsFrontend->stop();
     return 0;
 }
 

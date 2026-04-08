@@ -1,4 +1,4 @@
-#include "features/tui/HeadlessTui.h"
+#include "features/frontend/tui/HeadlessTui.h"
 
 #include <poll.h>
 #include <pty.h>

@@ -32,6 +32,7 @@ struct Config {
     std::optional<EmbeddingEndpoint> embedding;
     int job_batch_size = 10;
     int flush_timeout_sec = 15;
+    int ws_port = 0;
     std::string theme = "dark";
 
     static Config load(const std::string& path = "config.json");

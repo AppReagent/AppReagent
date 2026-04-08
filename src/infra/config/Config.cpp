@@ -45,6 +45,9 @@ Config Config::load(const std::string& path) {
     if (j.contains("theme")) {
         c.theme = j.at("theme").get<std::string>();
     }
+    if (j.contains("ws_port")) {
+        c.ws_port = j.at("ws_port").get<int>();
+    }
 
     if (j.contains("embedding")) {
         auto& emb = j.at("embedding");

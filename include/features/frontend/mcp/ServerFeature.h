@@ -2,7 +2,7 @@
 
 #include <string>
 
-#include "mcp/McpServer.h"
+#include "features/frontend/mcp/McpServer.h"
 namespace area::features::server {
 
 void registerTools(mcp::McpServer& server,

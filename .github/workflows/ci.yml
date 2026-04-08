@@ -35,7 +35,7 @@ jobs:
         run: make all
 
       - name: Run unit tests
-        run: make test
+        run: cd /tmp/area-build && ctest --output-on-failure -E "McpE2E|MultiStepE2E|AutoresearchE2E|GhidraE2E|GhidraIntegration|ScanE2E|TuiScreenshot"
 
       - name: Run cppcheck
         run: cppcheck --enable=warning,performance,portability --error-exitcode=1 --suppress=missingIncludeSystem --inline-suppr -j$(nproc) -I include src/

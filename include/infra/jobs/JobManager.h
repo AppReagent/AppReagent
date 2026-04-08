@@ -4,19 +4,18 @@
 #include <memory>
 #include <thread>
 #include <vector>
+#include <algorithm>
 
 #include "features/server/ClusterStatus.h"
 #include "infra/config/Config.h"
 #include "infra/db/Database.h"
 #include "infra/jobs/JobQueue.h"
 #include "features/server/ServerRunner.h"
+#include "infra/llm/LLMBackend.h"
 
 namespace area {
-
 class JobManager : public ClusterStatusProvider {
-public:
-    // Takes ownership of runners. Dependency-injected: you build the runners,
-    // the manager just routes jobs to them.
+ public:
     JobManager(std::vector<std::unique_ptr<ServerRunner>> runners,
                JobQueue& queue, int pollIntervalMs = 500,
                int flushTimeoutSec = 15);
@@ -25,7 +24,6 @@ public:
     void start();
     void stop();
 
-    // Convenience: build runners from config and wire up the callbacks
     static std::unique_ptr<JobManager> fromConfig(const Config& config,
                                                    Database& db,
                                                    JobQueue& queue);
@@ -47,11 +45,9 @@ public:
         return snap;
     }
 
-private:
+ private:
     void mainLoop();
 
-    // Find a healthy server with capacity, starting at minTier and moving up.
-    // Returns nullptr if nothing available.
     ServerRunner* findServer(int minTier);
 
     std::vector<std::unique_ptr<ServerRunner>> runners_;
@@ -59,11 +55,9 @@ private:
     int pollIntervalMs_;
     int flushTimeoutSec_;
 
-    // Max tier across all runners
     int maxTier_ = 0;
 
     std::atomic<bool> running_{false};
     std::thread mainThread_;
 };
-
-} // namespace area
+}  // namespace area

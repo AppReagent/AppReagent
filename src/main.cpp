@@ -1,20 +1,27 @@
-#include <chrono>
-#include <csignal>
-#include <cstdlib>
-#include <filesystem>
-#include <iostream>
-#include <functional>
-#include <map>
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <curl/curl.h>
+#include <bits/chrono.h>
+#include <csignal>
+#include <cstdlib>
+#include <filesystem>
+#include <iostream>
+#include <functional>
+#include <map>
+#include <algorithm>
+#include <exception>
+#include <memory>
+#include <optional>
+#include <string>
+#include <system_error>
+#include <utility>
+#include <vector>
 
 #include "infra/config/ArgParse.h"
 #include "infra/config/Config.h"
-#include "features/scan/ScanLog.h"
 #include "infra/db/Database.h"
 #include "infra/agent/Harness.h"
 #include "features/scan/ScanCommand.h"
@@ -26,10 +33,15 @@
 #include "features/improve/ImproveTool.h"
 #include "infra/tools/ToolContext.h"
 #include "util/file_io.h"
+#include "infra/agent/Agent.h"
+#include "infra/llm/LLMBackend.h"
+#include "infra/tools/Tool.h"
+#include "nlohmann/detail/json_ref.hpp"
+#include "nlohmann/json.hpp"
 
 namespace fs = std::filesystem;
 
-static constexpr int kServerStartPollIter = 24; // x 500ms = 12s
+static constexpr int kServerStartPollIter = 24;
 static constexpr int kChatPollTimeoutMs = 60000;
 static constexpr int kStatePollIter = 50;
 static constexpr int kStatePollIntervalMs = 200;
@@ -58,14 +70,18 @@ static bool launchServer(const std::string& dataDir, const std::string& sockPath
     std::cerr << "Starting server..." << std::endl;
 
     pid_t child = fork();
-    if (child < 0) { std::cerr << "fork() failed" << std::endl; return false; }
+    if (child < 0) {
+        std::cerr << "fork() failed" << std::endl; return false;
+    }
 
     if (child == 0) {
         setsid();
         pid_t server = fork();
         if (server == 0) {
             int devnull = open("/dev/null", O_WRONLY);
-            if (devnull >= 0) { dup2(devnull, STDOUT_FILENO); close(devnull); }
+            if (devnull >= 0) {
+                dup2(devnull, STDOUT_FILENO); close(devnull);
+            }
             setenv("AREA_DATA_DIR", dataDir.c_str(), 1);
             execl(bin.c_str(), bin.c_str(), "server", nullptr);
             _exit(1);
@@ -94,8 +110,6 @@ static int connectToServer() {
     if (!launchServer(getDataDir(), sockPath)) return -1;
     return area::ipc::connectTo(sockPath);
 }
-
-// --- Command handlers ---
 
 static int cmdMcp() {
     signal(SIGPIPE, SIG_IGN);
@@ -234,7 +248,7 @@ static int cmdChat(area::ArgParse& args) {
 
 static area::ToolContext makeImproveContext() {
     area::ToolRegistry dummyTools;
-    area::Harness dummyHarness;
+    static area::Harness dummyHarness;
     return area::ToolContext{
         [](const area::AgentMessage& msg) {
             if (msg.type == area::AgentMessage::THINKING)
@@ -303,14 +317,12 @@ int main(int argc, char* argv[]) {
 
     auto command = args.getPositionalArg(1).value_or("tui");
 
-    // MCP server: lightweight protocol bridge — no config or DB needed.
     if (command == "mcp") return cmdMcp();
 
     area::Config config;
     try {
         auto configPath = args.getNamedArg("config").value_or("");
         if (configPath.empty()) {
-            // Check AREA_DATA_DIR first, then cwd
             auto dataConfig = getDataDir() + "/config.json";
             configPath = fs::exists(dataConfig) ? dataConfig : "config.json";
         }
@@ -349,7 +361,8 @@ int main(int argc, char* argv[]) {
         exitCode = it->second();
     } else {
         std::cerr << "Unknown command: " << command << std::endl;
-        std::cerr << "Usage: area [server | kill-server | chat | scan <path> | tui | test | evaluate | improve <task> | mcp]" << std::endl;
+        std::cerr << "Usage: area [server | kill-server | chat | scan <path>"
+                  << " | tui | test | evaluate | improve <task> | mcp]" << std::endl;
         exitCode = 1;
     }
 

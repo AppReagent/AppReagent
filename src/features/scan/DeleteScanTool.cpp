@@ -1,16 +1,18 @@
 #include "features/scan/DeleteScanTool.h"
+
+#include <cstdio>
+#include <functional>
+
 #include "infra/tools/ToolContext.h"
 #include "infra/agent/Agent.h"
 #include "infra/llm/Embedding.h"
 #include "features/scan/ScanLog.h"
 #include "features/scan/ScanState.h"
 
-#include <cstdio>
-
 namespace area {
 
 std::optional<ToolResult> DeleteScanTool::tryExecute(const std::string& action, ToolContext& ctx) {
-    if (action.find("DELETE_SCAN:") != 0)
+    if (!action.starts_with("DELETE_SCAN:"))
         return std::nullopt;
 
     std::string runId = action.substr(12);
@@ -26,7 +28,6 @@ std::optional<ToolResult> DeleteScanTool::tryExecute(const std::string& action, 
     ScanLog log(db_);
     log.deleteRun(runId);
 
-    // Also clean up embeddings
     EmbeddingStore embStore(db_);
     embStore.deleteRun(runId);
 
@@ -40,4 +41,4 @@ std::optional<ToolResult> DeleteScanTool::tryExecute(const std::string& action, 
     return ToolResult{"OBSERVATION: " + result};
 }
 
-} // namespace area
+}  // namespace area

@@ -1,6 +1,9 @@
 #include "util/file_io.h"
 
 #include <unistd.h>
+#include <fstream>
+#include <sstream>
+#include <stdexcept>
 
 namespace area::util {
 
@@ -10,9 +13,9 @@ std::string selfExe() {
     if (n <= 0) return {};
     buf[n] = '\0';
     std::string p(buf);
-    // cmake rebuild replaces the binary; running process shows " (deleted)"
+
     auto del = p.find(" (deleted)");
-    if (del != std::string::npos) p = p.substr(0, del);
+    if (del != std::string::npos) p.resize(del);
     return p;
 }
 
@@ -34,4 +37,4 @@ std::string readFileOrThrow(const std::string& path) {
     return ss.str();
 }
 
-} // namespace area::util
+}  // namespace area::util

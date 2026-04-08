@@ -1,11 +1,20 @@
 #include "domains/graph/nodes/supervised_llm_call_node.h"
 
+#include <bits/chrono.h>
+#include <stddef.h>
 #include <algorithm>
-#include <chrono>
 #include <iostream>
 #include <thread>
+#include <cctype>
+#include <exception>
+#include <map>
+#include <utility>
+#include <vector>
 
 #include "util/string_util.h"
+#include "domains/graph/engine/node.h"
+#include "domains/graph/nodes/llm_call_node.h"
+#include "nlohmann/json.hpp"
 
 namespace area::graph {
 
@@ -18,7 +27,8 @@ SupervisedLLMCallNode::SupervisedLLMCallNode(const std::string& name,
     , config_(std::move(config))
     , workerBackend_(worker_backend)
     , supervisorBackend_(supervisor_backend)
-    , validation_(std::move(validation)) {}
+    , validation_(std::move(validation)) {
+}
 
 NodeResult SupervisedLLMCallNode::execute(TaskContext ctx) {
     std::string prompt = resolveTemplate(config_.prompt_template, ctx);
@@ -34,19 +44,17 @@ NodeResult SupervisedLLMCallNode::execute(TaskContext ctx) {
         } catch (const std::exception& e) {
             std::cerr << "[supervised:" << name() << "] worker error (attempt "
                       << attempt + 1 << "): " << e.what() << std::endl;
-            int backoffMs = 1000 * (1 << std::min(attempt, 4)); // 1s, 2s, 4s, 8s, 16s
+            int backoffMs = 1000 * (1 << std::min(attempt, 4));
             std::this_thread::sleep_for(std::chrono::milliseconds(backoffMs));
             continue;
         }
 
-        // code-level validation
         if (validation_ && !validation_(workerResponse, ctx)) {
             std::cerr << "[supervised:" << name() << "] validation failed, attempt "
                       << attempt + 1 << "/" << config_.max_retries + 1 << std::endl;
             continue;
         }
 
-        // supervisor check (skip when worker and supervisor are the same backend)
         std::string supervisorVerdict;
         if (workerBackend_ != supervisorBackend_) {
             try {
@@ -64,7 +72,7 @@ NodeResult SupervisedLLMCallNode::execute(TaskContext ctx) {
             std::string trimmed = supervisorVerdict;
             area::util::ltrimInPlace(trimmed);
             std::string prefix;
-            for (size_t i = 0; i < std::min(trimmed.size(), (size_t)4); i++)
+            for (size_t i = 0; i < std::min(trimmed.size(), static_cast<size_t>(4)); i++)
                 prefix += std::toupper(static_cast<unsigned char>(trimmed[i]));
             if (prefix == "FAIL") {
                 std::cerr << "[supervised:" << name() << "] supervisor rejected, attempt "
@@ -81,10 +89,9 @@ NodeResult SupervisedLLMCallNode::execute(TaskContext ctx) {
         return NodeResult::single(std::move(ctx));
     }
 
-    // all retries exhausted
     ctx.set("llm_error", "max retries exhausted after " +
             std::to_string(config_.max_retries + 1) + " attempts");
     return NodeResult::single(std::move(ctx));
 }
 
-} // namespace area::graph
+}  // namespace area::graph

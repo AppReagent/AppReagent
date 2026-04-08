@@ -1,16 +1,21 @@
 #include "infra/llm/LLMBackend.h"
 
-#include <chrono>
+#include <bits/chrono.h>
 #include <curl/curl.h>
+#include <curl/system.h>
+
 #include <fstream>
-#include <iostream>
-#include <nlohmann/json.hpp>
+#include <iterator>
+#include <map>
 #include <stdexcept>
 #include <thread>
 
-namespace area {
+#include <nlohmann/json.hpp>
 
-// RAII wrapper to prevent curl handle/slist leaks on any code path
+#include "nlohmann/detail/iterators/iter_impl.hpp"
+#include "nlohmann/detail/iterators/iteration_proxy.hpp"
+#include "nlohmann/detail/json_ref.hpp"
+namespace area {
 struct CurlHandle {
     CURL* curl = nullptr;
     struct curl_slist* headers = nullptr;
@@ -34,7 +39,6 @@ std::unique_ptr<LLMBackend> LLMBackend::create(const AiEndpoint& ep) {
     throw std::runtime_error("unknown provider: " + ep.provider);
 }
 
-
 static size_t curlWriteCb(char* data, size_t size, size_t nmemb, std::string* out) {
     size_t total = size * nmemb;
     out->append(data, total);
@@ -43,13 +47,13 @@ static size_t curlWriteCb(char* data, size_t size, size_t nmemb, std::string* ou
 
 static int cancelProgressCb(void* clientp, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
     auto* flag = static_cast<std::atomic<bool>*>(clientp);
-    return (flag && flag->load()) ? 1 : 0;  // non-zero aborts the transfer
+    return (flag && flag->load()) ? 1 : 0;
 }
 
 static std::string httpPost(const std::string& url,
                             const std::string& body,
                             const std::string& api_key = "",
-                            long timeoutSec = 60,
+                            int64_t timeoutSec = 60,
                             std::atomic<bool>* cancelFlag = nullptr) {
     CurlHandle ch;
 
@@ -135,7 +139,6 @@ static ChatResult extractResult(const std::string& raw, const std::string& endpo
     return r;
 }
 
-
 std::string OllamaBackend::chat(const std::string& system,
                                 const std::vector<ChatMessage>& messages) {
     nlohmann::json body = {
@@ -143,7 +146,6 @@ std::string OllamaBackend::chat(const std::string& system,
         {"stream", false},
     };
 
-    // omit model field when "auto" so ollama uses whatever is loaded
     if (endpoint_.model != "auto") {
         body["model"] = endpoint_.model;
     }
@@ -151,7 +153,6 @@ std::string OllamaBackend::chat(const std::string& system,
     std::string url = endpoint_.url + "/api/chat";
     std::string raw = httpPost(url, body.dump(), "", 60, cancelFlag_);
 
-    // Ollama native API returns {"message": {"content": "..."}}
     auto j = nlohmann::json::parse(raw);
     if (j.contains("error")) {
         throw std::runtime_error("ollama " + endpoint_.id + ": " + j["error"].dump());
@@ -170,7 +171,6 @@ std::string OllamaBackend::chat(const std::string& system,
     return content;
 }
 
-
 std::string OpenAIBackend::chat(const std::string& system,
                                 const std::vector<ChatMessage>& messages) {
     return chatWithUsage(system, messages).content;
@@ -184,8 +184,6 @@ ChatResult OpenAIBackend::chatWithUsage(const std::string& system,
         {"stream", false},
     };
 
-    // Only send max_tokens when explicitly requested.
-    // Many providers reject values that exceed their own limits.
     if (max_tokens > 0) {
         int ctx = endpoint_.context_window;
         if (max_tokens > ctx && ctx > 0) max_tokens = ctx;
@@ -204,9 +202,7 @@ ChatResult OpenAIBackend::chatWithUsage(const std::string& system,
     return result;
 }
 
-
 MockBackend::MockBackend(const AiEndpoint& ep) : LLMBackend(ep) {
-    // If url points to a .json file, load keyword→response mappings
     if (!ep.url.empty() && ep.url.size() > 5 && ep.url.substr(ep.url.size() - 5) == ".json") {
         loadResponseFile(ep.url);
     }
@@ -221,7 +217,6 @@ void MockBackend::loadResponseFile(const std::string& path) {
         auto j = nlohmann::json::parse(content);
         if (!j.is_object()) return;
 
-        // New structured format: {"prompts": [...], "default": "..."}
         if (j.contains("prompts")) {
             for (auto& entry : j["prompts"]) {
                 MockPromptEntry e;
@@ -245,7 +240,6 @@ void MockBackend::loadResponseFile(const std::string& path) {
             return;
         }
 
-        // Legacy flat format: {"keyword": "response", ...}
         for (auto& [key, val] : j.items()) {
             if (val.is_string()) {
                 routedResponses_.emplace_back(key, val.get<std::string>());
@@ -271,7 +265,6 @@ std::string MockBackend::interpolate(const std::string& tmpl,
 
 std::string MockBackend::chat(const std::string& system,
                               const std::vector<ChatMessage>& messages) {
-    // Track concurrent calls (all atomics for thread safety)
     int now = ++concurrent_;
     int prev = peakConcurrent_.load();
     while (now > prev && !peakConcurrent_.compare_exchange_weak(prev, now)) {}
@@ -301,21 +294,23 @@ std::string MockBackend::chat(const std::string& system,
     {
         std::lock_guard lk(mu_);
 
-        // Build haystack from system + all messages
         std::string haystack = system;
         for (auto& m : messages) haystack += "\n" + m.content;
 
-        // 1. Check structured prompt entries (new format)
         std::string userMsg = messages.empty() ? "" : messages.back().content;
         for (auto& entry : promptEntries_) {
             if (entry.match.empty() && entry.user_match.empty()) continue;
             bool allMatch = true;
             for (auto& pattern : entry.match) {
-                if (haystack.find(pattern) == std::string::npos) { allMatch = false; break; }
+                if (haystack.find(pattern) == std::string::npos) {
+                    allMatch = false; break;
+                }
             }
             if (allMatch) {
                 for (auto& pattern : entry.user_match) {
-                    if (userMsg.find(pattern) == std::string::npos) { allMatch = false; break; }
+                    if (userMsg.find(pattern) == std::string::npos) {
+                        allMatch = false; break;
+                    }
                 }
             }
             if (allMatch) {
@@ -324,7 +319,6 @@ std::string MockBackend::chat(const std::string& system,
             }
         }
 
-        // 2. Check legacy routed responses (keyword matching)
         if (!routedResponses_.empty() && !messages.empty()) {
             for (auto& [keyword, response] : routedResponses_) {
                 if (haystack.find(keyword) != std::string::npos) {
@@ -334,17 +328,14 @@ std::string MockBackend::chat(const std::string& system,
             }
         }
 
-        // 3. Sequence
         if (!sequence_.empty()) {
             size_t idx = seqIdx_.fetch_add(1) % sequence_.size();
             lastMatchedId_.clear();
             return sequence_[idx];
         }
 
-        // 4. Default/canned
         lastMatchedId_.clear();
         return canned_;
     }
 }
-
-} // namespace area
+}  // namespace area

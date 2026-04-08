@@ -1,10 +1,10 @@
 #pragma once
 
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <utility>
 
 #include "node.h"
 
@@ -13,11 +13,11 @@ namespace area::graph {
 struct Edge {
     std::string from;
     std::string to;
-    std::string branch; // empty = default, otherwise branch key for decision/predicate
+    std::string branch;
 };
 
 class TaskGraph {
-public:
+ public:
     explicit TaskGraph(std::string name);
 
     const std::string& name() const;
@@ -52,13 +52,13 @@ public:
     std::vector<const Edge*> edgesFrom(const std::string& node, const std::string& branch = "") const;
     std::vector<const Edge*> allEdgesFrom(const std::string& node) const;
 
-private:
+ private:
     std::string name_;
     std::unordered_map<std::string, NodePtr> nodes_;
-    std::vector<std::string> order_; // insertion order
+    std::vector<std::string> order_;
     std::vector<Edge> edges_;
     std::string entry_;
     std::string output_;
 };
 
-} // namespace area::graph
+}  // namespace area::graph

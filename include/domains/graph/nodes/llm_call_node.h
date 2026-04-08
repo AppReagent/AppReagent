@@ -4,6 +4,7 @@
 
 #include "../engine/node.h"
 #include "infra/llm/LLMBackend.h"
+#include "domains/graph/engine/task_context.h"
 
 namespace area::graph {
 
@@ -18,16 +19,16 @@ struct LLMCallConfig {
 std::string resolveTemplate(const std::string& tmpl, const TaskContext& ctx);
 
 class LLMCallNode : public Node {
-public:
+ public:
     LLMCallNode(const std::string& name, LLMCallConfig config, area::LLMBackend* backend);
 
     NodeResult execute(TaskContext ctx) override;
 
     const LLMCallConfig& config() const;
 
-private:
+ private:
     LLMCallConfig config_;
     area::LLMBackend* backend_;
 };
 
-} // namespace area::graph
+}  // namespace area::graph

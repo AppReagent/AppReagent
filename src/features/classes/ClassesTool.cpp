@@ -1,20 +1,25 @@
 #include "features/classes/ClassesTool.h"
-#include "infra/tools/ToolContext.h"
-#include "infra/agent/Agent.h"
 
+#include <bits/chrono.h>
 #include <algorithm>
-#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <map>
 #include <sstream>
 #include <vector>
+#include <cctype>
+#include <compare>
+#include <functional>
+#include <system_error>
+#include <utility>
+
+#include "infra/tools/ToolContext.h"
+#include "infra/agent/Agent.h"
 
 namespace fs = std::filesystem;
 
 namespace area {
-
 static std::string toLowerCL(const std::string& s) {
     std::string out = s;
     for (auto& c : out) c = std::tolower(static_cast<unsigned char>(c));
@@ -29,12 +34,12 @@ static bool shouldSkipDirCL(const std::string& name) {
 
 struct ClassInfo {
     std::string filePath;
-    std::string className;      // full smali class e.g. Lcom/example/Foo;
-    std::string javaName;       // com.example.Foo
-    std::string packageName;    // com.example
-    std::string simpleName;     // Foo
-    std::string superClass;     // Landroid/app/Service;
-    std::string superJava;      // android.app.Service
+    std::string className;
+    std::string javaName;
+    std::string packageName;
+    std::string simpleName;
+    std::string superClass;
+    std::string superJava;
     std::vector<std::string> interfaces;
     std::vector<std::string> interfacesJava;
     int methodCount = 0;
@@ -43,7 +48,7 @@ struct ClassInfo {
     bool isAbstract = false;
     bool isInterface = false;
     bool isEnum = false;
-    std::vector<std::string> methodNames;  // first 10 method names for preview
+    std::vector<std::string> methodNames;
 };
 
 static std::string smaliToJava(const std::string& desc) {
@@ -83,7 +88,6 @@ static ClassInfo parseSmaliFile(const std::string& path) {
         std::string trimmed = line.substr(start);
 
         if (trimmed.starts_with(".class")) {
-            // .class public abstract Lcom/example/Foo;
             info.className = trimmed;
             if (trimmed.find("public") != std::string::npos) info.isPublic = true;
             if (trimmed.find("abstract") != std::string::npos) info.isAbstract = true;
@@ -117,8 +121,7 @@ static ClassInfo parseSmaliFile(const std::string& path) {
             info.fieldCount++;
         } else if (trimmed.starts_with(".method")) {
             info.methodCount++;
-            if ((int)info.methodNames.size() < 15) {
-                // Extract method name
+            if (static_cast<int>(info.methodNames.size()) < 15) {
                 auto paren = trimmed.find('(');
                 if (paren != std::string::npos) {
                     std::string before = trimmed.substr(0, paren);
@@ -135,7 +138,7 @@ static ClassInfo parseSmaliFile(const std::string& path) {
 }
 
 std::optional<ToolResult> ClassesTool::tryExecute(const std::string& action, ToolContext& ctx) {
-    if (action.find("CLASSES:") != 0)
+    if (!action.starts_with("CLASSES:"))
         return std::nullopt;
 
     std::string args = action.substr(8);
@@ -146,7 +149,6 @@ std::optional<ToolResult> ClassesTool::tryExecute(const std::string& action, Too
         return ToolResult{"OBSERVATION: Error — provide a directory path after CLASSES:"};
     }
 
-    // Parse: path | filter
     std::string path, filter;
     auto pipePos = args.find('|');
     if (pipePos != std::string::npos) {
@@ -182,13 +184,14 @@ std::optional<ToolResult> ClassesTool::tryExecute(const std::string& action, Too
     auto processFile = [&](const fs::path& filePath) {
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - startTime).count();
-        if (elapsed > MAX_MS || filesScanned > MAX_FILES) { truncated = true; return; }
+        if (elapsed > MAX_MS || filesScanned > MAX_FILES) {
+            truncated = true; return;
+        }
 
         filesScanned++;
         auto info = parseSmaliFile(filePath.string());
         if (info.javaName.empty()) return;
 
-        // Apply filter
         if (!filter.empty()) {
             std::string nameLower = toLowerCL(info.javaName);
             std::string simpleLower = toLowerCL(info.simpleName);
@@ -216,15 +219,21 @@ std::optional<ToolResult> ClassesTool::tryExecute(const std::string& action, Too
         auto it = fs::recursive_directory_iterator(
             path, fs::directory_options::skip_permission_denied, ec);
         for (; it != fs::recursive_directory_iterator(); it.increment(ec)) {
-            if (ec) { ec.clear(); continue; }
+            if (ec) {
+                ec.clear(); continue;
+            }
             if (truncated) break;
 
             if (it->is_directory(ec) && !ec && shouldSkipDirCL(it->path().filename().string())) {
                 it.disable_recursion_pending();
                 continue;
             }
-            if (ec) { ec.clear(); continue; }
-            if (!it->is_regular_file(ec) || ec) { ec.clear(); continue; }
+            if (ec) {
+                ec.clear(); continue;
+            }
+            if (!it->is_regular_file(ec) || ec) {
+                ec.clear(); continue;
+            }
 
             std::string ext = it->path().extension().string();
             for (auto& c : ext) c = std::tolower(static_cast<unsigned char>(c));
@@ -241,13 +250,11 @@ std::optional<ToolResult> ClassesTool::tryExecute(const std::string& action, Too
         return ToolResult{obs};
     }
 
-    // Group by package
     std::map<std::string, std::vector<ClassInfo*>> byPackage;
     for (auto& cls : classes) {
         byPackage[cls.packageName].push_back(&cls);
     }
 
-    // Sort packages, and classes within packages
     std::vector<std::string> sortedPackages;
     for (auto& [pkg, _] : byPackage) sortedPackages.push_back(pkg);
     std::sort(sortedPackages.begin(), sortedPackages.end());
@@ -258,14 +265,12 @@ std::optional<ToolResult> ClassesTool::tryExecute(const std::string& action, Too
         });
     }
 
-    // Build output
     std::ostringstream out;
     out << classes.size() << " class(es) in " << sortedPackages.size()
         << " package(s) (" << filesScanned << " files scanned)";
     if (!filter.empty()) out << ", filter: \"" << filter << "\"";
     out << ":\n\n";
 
-    // Summary stats
     int totalMethods = 0, totalFields = 0;
     int interfaceCount = 0, enumCount = 0, abstractCount = 0;
     for (auto& cls : classes) {
@@ -286,7 +291,6 @@ std::optional<ToolResult> ClassesTool::tryExecute(const std::string& action, Too
         out << "== " << pkg << " (" << pkgClasses.size() << " classes) ==\n";
 
         for (auto* cls : pkgClasses) {
-            // Type indicator
             std::string typeTag;
             if (cls->isInterface) typeTag = "[interface] ";
             else if (cls->isEnum) typeTag = "[enum] ";
@@ -294,7 +298,6 @@ std::optional<ToolResult> ClassesTool::tryExecute(const std::string& action, Too
 
             out << "  " << typeTag << cls->simpleName;
 
-            // Hierarchy
             std::string superSimple = smaliSimpleName(cls->superJava);
             if (!superSimple.empty() && superSimple != "Object") {
                 out << " extends " << superSimple;
@@ -309,7 +312,6 @@ std::optional<ToolResult> ClassesTool::tryExecute(const std::string& action, Too
 
             out << " — " << cls->methodCount << " methods, " << cls->fieldCount << " fields\n";
 
-            // Show methods preview (skip <init>, <clinit>)
             std::vector<std::string> interesting;
             for (auto& m : cls->methodNames) {
                 if (m != "<init>" && m != "<clinit>") {
@@ -342,5 +344,4 @@ std::optional<ToolResult> ClassesTool::tryExecute(const std::string& action, Too
         "Use READ: or DECOMPILE: to examine specific classes. "
         "Use XREFS: to find cross-references between classes."};
 }
-
-} // namespace area
+}  // namespace area

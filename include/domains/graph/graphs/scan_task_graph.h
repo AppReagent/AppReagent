@@ -22,4 +22,4 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
                              const std::string& prompts_dir = "prompts",
                              area::EmbeddingStore* embeddingStore = nullptr);
 
-} // namespace area::graph
+}  // namespace area::graph

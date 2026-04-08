@@ -1,8 +1,13 @@
 #include "features/scan/ScanFeature.h"
-#include "mcp/McpUtil.h"
 
 #include <iostream>
+#include <map>
+#include <vector>
 
+#include "mcp/McpTool.h"
+#include "mcp/McpUtil.h"
+#include "nlohmann/detail/json_ref.hpp"
+#include "nlohmann/json.hpp"
 using json = nlohmann::json;
 
 namespace area::features::scan {
@@ -31,14 +36,17 @@ void registerTools(mcp::McpServer& server,
 
             std::vector<std::string> argv = {binary, "scan", path};
             auto goal = args.value("goal", "");
-            if (!goal.empty()) { argv.push_back("--goal"); argv.push_back(goal); }
+            if (!goal.empty()) {
+                argv.push_back("--goal"); argv.push_back(goal);
+            }
             auto runId = args.value("run_id", "");
-            if (!runId.empty()) { argv.push_back("--run-id"); argv.push_back(runId); }
+            if (!runId.empty()) {
+                argv.push_back("--run-id"); argv.push_back(runId);
+            }
 
             std::cerr << "[area-mcp] scan: " << path << std::endl;
             auto [out, rc] = mcp::exec("", argv);
-            // Set AREA_DATA_DIR for the scan subprocess
-            // Actually exec inherits env, and AREA_DATA_DIR is set by McpTestClient
+
             out = mcp::trimOutput(out);
             if (rc != 0)
                 return {"Scan failed (exit " + std::to_string(rc) + "):\n" + out, true};
@@ -47,4 +55,4 @@ void registerTools(mcp::McpServer& server,
     });
 }
 
-} // namespace area::features::scan
+}  // namespace area::features::scan

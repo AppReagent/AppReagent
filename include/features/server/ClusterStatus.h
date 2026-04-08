@@ -19,9 +19,9 @@ struct ClusterSnapshot {
 };
 
 class ClusterStatusProvider {
-public:
+ public:
     virtual ~ClusterStatusProvider() = default;
     virtual ClusterSnapshot snapshot() const = 0;
 };
 
-} // namespace area
+}  // namespace area

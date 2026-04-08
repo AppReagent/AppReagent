@@ -1,5 +1,7 @@
 #include "util/convo_io.h"
 
+#include <stddef.h>
+
 namespace area::util {
 
 std::string escapeNewlines(const std::string& s) {
@@ -16,9 +18,13 @@ std::string unescapeNewlines(const std::string& s) {
     std::string out;
     for (size_t i = 0; i < s.size(); i++) {
         if (s[i] == '\\' && i + 1 < s.size()) {
-            if (s[i+1] == 'n') { out += '\n'; i++; }
-            else if (s[i+1] == '\\') { out += '\\'; i++; }
-            else out += s[i];
+            if (s[i+1] == 'n') {
+                out += '\n'; i++;
+            } else if (s[i+1] == '\\') {
+                out += '\\'; i++;
+            } else {
+                out += s[i];
+            }
         } else {
             out += s[i];
         }
@@ -26,4 +32,4 @@ std::string unescapeNewlines(const std::string& s) {
     return out;
 }
 
-} // namespace area::util
+}  // namespace area::util

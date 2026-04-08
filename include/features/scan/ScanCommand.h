@@ -5,22 +5,23 @@
 #include <memory>
 #include <string>
 #include <vector>
-
 #include <unordered_set>
-
-#include <nlohmann/json.hpp>
 
 #include "infra/config/Config.h"
 #include "infra/db/Database.h"
 #include "infra/llm/Embedding.h"
 #include "features/scan/ScanLog.h"
 #include "features/scan/ScanOutputFile.h"
+#include <nlohmann/json.hpp>
 
-namespace area { class EventBus; }
+namespace area {
+class EventBus;
+}  // namespace area
+
 namespace area::graph {
-    class GraphRunner;
-    class TaskGraph;
-    struct TierBackends;
+class GraphRunner;
+class TaskGraph;
+struct TierBackends;
 }
 
 namespace area {
@@ -40,7 +41,7 @@ struct ScanSummary {
 };
 
 class ScanCommand {
-public:
+ public:
     ScanCommand(const Config& config, Database& db);
 
     ScanSummary run(const std::string& target_path, const std::string& run_id = "",
@@ -50,10 +51,10 @@ public:
 
     void setPromptsDir(const std::string& dir) { promptsOverride_ = dir; }
 
-    using ProgressCallback = std::function<void(int files_scanned, int files_total)>;
+using ProgressCallback = std::function<void(int files_scanned, int files_total)>;
     void setProgressCallback(ProgressCallback cb) { progressCb_ = cb; }
 
-    using LogCallback = std::function<void(const std::string& message)>;
+using LogCallback = std::function<void(const std::string& message)>;
     void setLogCallback(LogCallback cb) { logCb_ = cb; }
 
     void setInterruptFlag(std::shared_ptr<std::atomic<bool>> flag) { interrupt_ = flag; }
@@ -62,7 +63,7 @@ public:
 
     std::string outputPath() const { return output_.path(); }
 
-private:
+ private:
     std::vector<std::string> findScanFiles(const std::string& dir);
     std::string readFile(const std::string& path);
     void emitLog(const std::string& msg);
@@ -93,4 +94,4 @@ private:
     std::unique_ptr<EmbeddingStore> embeddingStore_;
 };
 
-} // namespace area
+}  // namespace area

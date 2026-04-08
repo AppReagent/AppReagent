@@ -1,4 +1,7 @@
 #include "features/scan/PauseScanTool.h"
+
+#include <functional>
+
 #include "infra/tools/ToolContext.h"
 #include "infra/agent/Agent.h"
 #include "features/scan/ScanState.h"
@@ -6,7 +9,7 @@
 namespace area {
 
 std::optional<ToolResult> PauseScanTool::tryExecute(const std::string& action, ToolContext& ctx) {
-    if (action.find("PAUSE_SCAN:") != 0)
+    if (!action.starts_with("PAUSE_SCAN:"))
         return std::nullopt;
 
     std::string runId = action.substr(11);
@@ -28,4 +31,4 @@ std::optional<ToolResult> PauseScanTool::tryExecute(const std::string& action, T
     return ToolResult{"OBSERVATION: " + result};
 }
 
-} // namespace area
+}  // namespace area

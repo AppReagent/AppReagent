@@ -1,11 +1,13 @@
 #include "features/callgraph/CallGraphTool.h"
+
+#include <sstream>
+#include <functional>
+#include <vector>
+
 #include "infra/tools/ToolContext.h"
 #include "infra/agent/Agent.h"
 
-#include <sstream>
-
 namespace area {
-
 static std::string resolveRunId(Database& db, const std::string& input) {
     if (input == "latest") {
         auto qr = db.execute(
@@ -17,13 +19,12 @@ static std::string resolveRunId(Database& db, const std::string& input) {
 }
 
 std::optional<ToolResult> CallGraphTool::tryExecute(const std::string& action, ToolContext& ctx) {
-    if (action.find("CALLGRAPH:") != 0)
+    if (!action.starts_with("CALLGRAPH:"))
         return std::nullopt;
 
     std::string args = action.substr(10);
     while (!args.empty() && args[0] == ' ') args.erase(0, 1);
 
-    // Parse: <run_id> <class>::<method> [callers|callees]
     std::istringstream ss(args);
     std::string runIdRaw, target, direction;
     ss >> runIdRaw >> target >> direction;
@@ -39,7 +40,6 @@ std::optional<ToolResult> CallGraphTool::tryExecute(const std::string& action, T
 
     if (direction.empty()) direction = "callees";
 
-    // Split target on "::" to get class and method
     auto sepPos = target.find("::");
     std::string targetClass, targetMethod;
     if (sepPos != std::string::npos) {
@@ -53,10 +53,9 @@ std::optional<ToolResult> CallGraphTool::tryExecute(const std::string& action, T
 
     std::string sql;
     std::vector<std::string> params;
-    params.push_back(runId);  // $1
+    params.push_back(runId);
 
     if (direction == "callers") {
-        // Who calls this method?
         sql = "SELECT caller_class, caller_method, invoke_type, file_path "
               "FROM method_calls WHERE run_id = $1";
         if (!targetClass.empty()) {
@@ -67,7 +66,6 @@ std::optional<ToolResult> CallGraphTool::tryExecute(const std::string& action, T
         sql += " AND callee_method = $" + std::to_string(params.size());
         sql += " ORDER BY caller_class, caller_method";
     } else {
-        // What does this method call?
         sql = "SELECT callee_class, callee_method, invoke_type, file_path "
               "FROM method_calls WHERE run_id = $1";
         if (!targetClass.empty()) {
@@ -105,5 +103,4 @@ std::optional<ToolResult> CallGraphTool::tryExecute(const std::string& action, T
 
     return ToolResult{"OBSERVATION: " + formatted};
 }
-
-} // namespace area
+}  // namespace area

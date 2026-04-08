@@ -1,4 +1,22 @@
 #include "features/server/AreaServer.h"
+
+#include <fcntl.h>
+#include <sys/socket.h>
+#include <poll.h>
+#include <unistd.h>
+#include <bits/chrono.h>
+#include <errno.h>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <random>
+#include <algorithm>
+#include <cstdlib>
+#include <exception>
+#include <map>
+#include <optional>
+#include <utility>
+
 #include "infra/ipc/IPC.h"
 #include "util/convo_io.h"
 #include "features/scan/ScanLog.h"
@@ -30,23 +48,14 @@
 #include "features/read/ReadCodeTool.h"
 #include "features/classes/ClassesTool.h"
 #include "features/ghidra/GhidraTool.h"
-
-#include <csignal>
-#include <filesystem>
-#include <fcntl.h>
-#include <sys/socket.h>
-#include <filesystem>
-#include <fstream>
-#include <iostream>
-#include <poll.h>
-#include <random>
-#include <sstream>
-#include <unistd.h>
+#include "infra/agent/Harness.h"
+#include "infra/tools/Tool.h"
+#include "nlohmann/detail/json_ref.hpp"
+#include "nlohmann/json.hpp"
 
 namespace fs = std::filesystem;
 
 namespace area {
-
 static const char* msgTypeStr(AgentMessage::Type t) {
     switch (t) {
         case AgentMessage::THINKING: return "thinking";
@@ -86,8 +95,9 @@ void ChatSession::loadConvo() {
         char prefix = line[0];
         std::string content = util::unescapeNewlines(line.substr(2));
         DisplayMsg msg;
-        if (prefix == 'U') { msg.who = "user"; msg.type = "thinking"; }
-        else {
+        if (prefix == 'U') {
+            msg.who = "user"; msg.type = "thinking";
+        } else {
             msg.who = "agent";
             switch (prefix) {
                 case 'T': msg.type = "thinking"; break;
@@ -108,8 +118,7 @@ AreaServer::AreaServer(Config config, const std::string& dataDir)
 
 AreaServer::~AreaServer() {
     shutdown();
-    // Join all processing threads before destroying ChatSessions to prevent
-    // use-after-free / std::terminate from destroying a joinable thread.
+
     std::lock_guard lk(chatsMu_);
     for (auto& [id, chat] : chats_) {
         if (chat->processingThread.joinable()) {
@@ -119,7 +128,7 @@ AreaServer::~AreaServer() {
 }
 
 std::string AreaServer::generateId() {
-    static thread_local std::mt19937 rng(std::random_device{}());
+    static thread_local std::mt19937 rng(std::random_device {}());
     static const char chars[] = "abcdefghijklmnopqrstuvwxyz0123456789";
     std::string id;
     for (int i = 0; i < 8; i++) id += chars[rng() % (sizeof(chars) - 1)];
@@ -182,7 +191,7 @@ ChatSession& AreaServer::getOrCreateChat(const std::string& id, const std::strin
         if (auto envDir = std::getenv("AREA_PROMPTS_DIR")) {
             promptsDir = envDir;
         }
-        // Per-session prompt overrides take priority
+
         std::string sessionPrompts = dataDir_ + "/chats/" + id + "/prompts";
         if (std::filesystem::exists(sessionPrompts + "/agent_system.prompt")) {
             promptsDir = sessionPrompts;
@@ -191,7 +200,9 @@ ChatSession& AreaServer::getOrCreateChat(const std::string& id, const std::strin
 
         std::string systemCtx;
         std::string ddl;
-        try { ddl = ScanLog::loadDDL(); } catch (...) {}
+        try {
+            ddl = ScanLog::loadDDL(); } catch (...) {
+        }
         if (!ddl.empty()) {
             systemCtx += "Database DDL:\n```sql\n" + ddl + "```\n";
         }
@@ -232,11 +243,8 @@ void AreaServer::broadcastToChat(const std::string& chatId, const nlohmann::json
 
 void AreaServer::processUserInput(ChatSession& chat, const std::string& input) {
     if (chat.processing) {
-        // Old query may still be winding down after an interrupt.
-        // Wait for it to finish (should be fast since it was interrupted),
-        // then proceed with the new input.
         if (chat.processingThread.joinable()) chat.processingThread.join();
-        // processing flag is cleared by the thread; double-check
+
         chat.processing = false;
     }
 
@@ -274,9 +282,7 @@ void AreaServer::processUserInput(ChatSession& chat, const std::string& input) {
                     msg["description"] = desc;
                     msg["is_path"] = chat.confirmIsPath;
                 }
-                // Broadcast without holding confirmMu — the event loop
-                // acquires chatsMu_ then confirmMu, so holding confirmMu
-                // here while broadcastToChat acquires chatsMu_ would deadlock.
+
                 broadcastToChat(chat.id, msg);
 
                 std::unique_lock lk(chat.confirmMu);
@@ -332,7 +338,6 @@ void AreaServer::handleMessage(int clientFd, const nlohmann::json& msg) {
         std::string content = msg.value("content", "");
         auto& chat = getOrCreateChat(chatId);
         processUserInput(chat, content);
-
     } else if (type == "confirm_resp") {
         std::string chatId = msg.value("chat_id", "default");
         std::lock_guard lk(chatsMu_);
@@ -350,7 +355,6 @@ void AreaServer::handleMessage(int clientFd, const nlohmann::json& msg) {
             chat.confirmResult = {ConfirmResult::DENY, ""};
         chat.confirmResponded = true;
         chat.confirmCv.notify_one();
-
     } else if (type == "attach") {
         std::string chatId = msg.value("chat_id", "default");
         auto& chat = getOrCreateChat(chatId);
@@ -396,7 +400,6 @@ void AreaServer::handleMessage(int clientFd, const nlohmann::json& msg) {
                 {"is_path", chat.confirmIsPath}
             });
         }
-
     } else if (type == "list_chats") {
         nlohmann::json list = nlohmann::json::array();
         std::lock_guard lk(chatsMu_);
@@ -409,13 +412,11 @@ void AreaServer::handleMessage(int clientFd, const nlohmann::json& msg) {
             });
         }
         sendToClient(clientFd, nlohmann::json{{"type", "chat_list"}, {"chats", list}});
-
     } else if (type == "create_chat") {
         std::string name = msg.value("name", "");
         std::string id = generateId();
         auto& chat = getOrCreateChat(id, name.empty() ? id : name);
         sendToClient(clientFd, nlohmann::json{{"type", "chat_created"}, {"chat_id", chat.id}, {"name", chat.name}});
-
     } else if (type == "interrupt") {
         std::string chatId = msg.value("chat_id", "default");
         std::lock_guard lk(chatsMu_);
@@ -429,7 +430,6 @@ void AreaServer::handleMessage(int clientFd, const nlohmann::json& msg) {
                 it->second->confirmCv.notify_one();
             }
         }
-
     } else if (type == "set_dangerous") {
         std::string chatId = msg.value("chat_id", "default");
         std::lock_guard lk(chatsMu_);
@@ -437,7 +437,6 @@ void AreaServer::handleMessage(int clientFd, const nlohmann::json& msg) {
         if (it != chats_.end()) {
             it->second->dangerousMode = msg.value("enabled", false);
         }
-
     } else if (type == "clear_context") {
         std::string chatId = msg.value("chat_id", "default");
         ChatSession* session = nullptr;
@@ -447,8 +446,6 @@ void AreaServer::handleMessage(int clientFd, const nlohmann::json& msg) {
             if (it != chats_.end()) session = it->second.get();
         }
         if (session) {
-            // Interrupt any in-flight processing so the processing thread
-            // doesn't re-save messages after we clear.
             if (session->agent) session->agent->interrupt();
             if (session->processingThread.joinable()) session->processingThread.join();
             session->processing = false;
@@ -458,14 +455,12 @@ void AreaServer::handleMessage(int clientFd, const nlohmann::json& msg) {
             }
             if (session->agent) session->agent->clearHistory();
             session->saveConvo();
-            // Tell the TUI processing is done so it can accept input
+
             broadcastToChat(chatId, nlohmann::json{
                 {"type", "state"}, {"chat_id", chatId}, {"processing", false}});
         }
-
     } else if (type == "shutdown") {
         running_ = false;
-
     } else if (type == "detach") {
         std::lock_guard lk(chatsMu_);
         for (auto& [id, c] : chats_) {
@@ -542,8 +537,7 @@ void AreaServer::run() {
         std::vector<int> toRemove;
         for (size_t i = 1; i < pfds.size(); i++) {
             int fd = pfds[i].fd;
-            // Always drain pending data before handling disconnect — a client
-            // may send clear_context or other messages right before closing.
+
             if (pfds[i].revents & (POLLIN | POLLHUP)) {
                 while (auto msg = ipc::readLine(fd)) {
                     handleMessage(fd, *msg);
@@ -599,5 +593,4 @@ void AreaServer::run() {
 void AreaServer::shutdown() {
     running_ = false;
 }
-
-} // namespace area
+}  // namespace area

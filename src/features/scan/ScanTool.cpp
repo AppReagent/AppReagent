@@ -1,4 +1,10 @@
 #include "features/scan/ScanTool.h"
+
+#include <bits/chrono.h>
+#include <sstream>
+#include <functional>
+#include <memory>
+
 #include "infra/tools/ToolContext.h"
 #include "infra/agent/Agent.h"
 #include "infra/agent/Harness.h"
@@ -6,12 +12,9 @@
 #include "features/scan/ScanLog.h"
 #include "features/scan/ScanState.h"
 
-#include <sstream>
-
 namespace area {
-
 std::optional<ToolResult> ScanTool::tryExecute(const std::string& action, ToolContext& ctx) {
-    if (action.find("SCAN:") != 0)
+    if (!action.starts_with("SCAN:"))
         return std::nullopt;
 
     std::string args = action.substr(5);
@@ -30,7 +33,6 @@ std::optional<ToolResult> ScanTool::tryExecute(const std::string& action, ToolCo
         return ToolResult{"OBSERVATION: Error — scan not available, no config provided."};
     }
 
-    // Parse: path | goal
     std::string path, goal;
     auto pipePos = args.find('|');
     if (pipePos != std::string::npos) {
@@ -42,7 +44,6 @@ std::optional<ToolResult> ScanTool::tryExecute(const std::string& action, ToolCo
         path = args;
     }
 
-    // Check for existing scan results before spending LLM tokens
     bool forceRescan = (goal.find("rescan") != std::string::npos);
     if (!forceRescan && !path.ends_with(".jsonl")) {
         ScanLog log(db_);
@@ -75,7 +76,6 @@ std::optional<ToolResult> ScanTool::tryExecute(const std::string& action, ToolCo
     if (path.ends_with(".jsonl")) {
         summary = scan.runFromFile(path);
     } else {
-        // Allow "rescan" goal to bypass the existing-scan check
         runId = ScanLog::generateRunId();
 
         if (state_) {
@@ -125,7 +125,8 @@ std::optional<ToolResult> ScanTool::tryExecute(const std::string& action, ToolCo
                     "3. Use XREFS or CALLGRAPH to trace connections\n"
                     "4. Then give a thorough ANSWER with concrete evidence";
     } else if (summary.answer.empty()) {
-        feedback += "\nNo suspicious findings. You may query the database for run_id '" + summary.run_id + "' to confirm.";
+        feedback += "\nNo suspicious findings. You may query the database for run_id '" +
+                    summary.run_id + "' to confirm.";
     } else {
         feedback += "\nFor per-file details, query the database for run_id '" + summary.run_id + "'.";
     }
@@ -134,5 +135,4 @@ std::optional<ToolResult> ScanTool::tryExecute(const std::string& action, ToolCo
     }
     return ToolResult{feedback};
 }
-
-} // namespace area
+}  // namespace area

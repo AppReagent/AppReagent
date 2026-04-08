@@ -1,20 +1,22 @@
 #include "features/manifest/PermissionsTool.h"
-#include "infra/tools/ToolContext.h"
-#include "infra/agent/Agent.h"
-#include "util/file_io.h"
 
-#include <algorithm>
 #include <filesystem>
 #include <map>
 #include <set>
 #include <sstream>
 #include <vector>
+#include <functional>
+#include <initializer_list>
+#include <system_error>
+#include <utility>
+
+#include "infra/tools/ToolContext.h"
+#include "infra/agent/Agent.h"
+#include "util/file_io.h"
 
 namespace fs = std::filesystem;
 
 namespace area {
-
-// Dangerous permissions that deserve extra scrutiny
 static const std::set<std::string> DANGEROUS_PERMISSIONS = {
     "android.permission.READ_SMS",
     "android.permission.SEND_SMS",
@@ -48,7 +50,6 @@ static const std::set<std::string> DANGEROUS_PERMISSIONS = {
     "android.permission.CHANGE_NETWORK_STATE",
 };
 
-// Suspicious permission combinations
 struct SuspiciousCombination {
     std::vector<std::string> perms;
     std::string warning;
@@ -91,7 +92,7 @@ struct ManifestInfo {
     std::vector<std::string> uses_features;
 
     struct Component {
-        std::string type; // activity, service, receiver, provider
+        std::string type;
         std::string name;
         bool exported = false;
         std::vector<std::string> intent_filters;
@@ -99,9 +100,7 @@ struct ManifestInfo {
     std::vector<Component> components;
 };
 
-// Simple XML attribute parser (no dependency on libxml)
 static std::string getAttr(const std::string& line, const std::string& attr) {
-    // Look for android:attr="value" or attr="value"
     for (auto prefix : {"android:", "a:", ""}) {
         std::string needle = std::string(prefix) + attr + "=\"";
         auto pos = line.find(needle);
@@ -118,8 +117,6 @@ static std::string getAttr(const std::string& line, const std::string& attr) {
 static ManifestInfo parseManifest(const std::string& contents) {
     ManifestInfo info;
 
-    // Pre-process: join multi-line tags into single lines.
-    // XML tags can span multiple lines; join them so attribute parsing works.
     std::string normalized;
     {
         std::istringstream stream(contents);
@@ -135,7 +132,7 @@ static ManifestInfo parseManifest(const std::string& contents) {
             } else {
                 if (!normalized.empty()) normalized += "\n";
                 normalized += trimmed;
-                // Check if tag is unclosed (has < but no >)
+
                 if (trimmed.find('<') != std::string::npos &&
                     trimmed.find('>') == std::string::npos)
                     inTag = true;
@@ -152,47 +149,41 @@ static ManifestInfo parseManifest(const std::string& contents) {
     std::string currentIntentFilter;
 
     while (std::getline(stream, line)) {
-        // Trim
         auto trimStart = line.find_first_not_of(" \t");
         if (trimStart == std::string::npos) continue;
         std::string trimmed = line.substr(trimStart);
 
-        // Package and version
         if (trimmed.find("<manifest") != std::string::npos) {
             info.package_name = getAttr(trimmed, "package");
             info.version_name = getAttr(trimmed, "versionName");
             info.version_code = getAttr(trimmed, "versionCode");
         }
 
-        // SDK versions
         if (trimmed.find("<uses-sdk") != std::string::npos) {
             info.min_sdk = getAttr(trimmed, "minSdkVersion");
             info.target_sdk = getAttr(trimmed, "targetSdkVersion");
         }
 
-        // Permissions
         if (trimmed.find("<uses-permission") != std::string::npos) {
             std::string perm = getAttr(trimmed, "name");
             if (!perm.empty()) info.permissions.push_back(perm);
         }
 
-        // Features
         if (trimmed.find("<uses-feature") != std::string::npos) {
             std::string feat = getAttr(trimmed, "name");
             if (!feat.empty()) info.uses_features.push_back(feat);
         }
 
-        // Components
         for (auto& type : {"activity", "service", "receiver", "provider"}) {
             std::string open = std::string("<") + type;
-            if (trimmed.find(open) == 0 || trimmed.find(open + " ") != std::string::npos) {
+            if (trimmed.starts_with(open) || trimmed.find(open + " ") != std::string::npos) {
                 inComponent = true;
                 currentComponent = {};
                 currentComponent.type = type;
                 currentComponent.name = getAttr(trimmed, "name");
                 std::string exp = getAttr(trimmed, "exported");
                 currentComponent.exported = (exp == "true");
-                // Self-closing tag
+
                 if (trimmed.find("/>") != std::string::npos) {
                     info.components.push_back(currentComponent);
                     inComponent = false;
@@ -201,7 +192,6 @@ static ManifestInfo parseManifest(const std::string& contents) {
             }
         }
 
-        // Intent filters
         if (trimmed.find("<intent-filter") != std::string::npos) {
             inIntentFilter = true;
             currentIntentFilter.clear();
@@ -214,7 +204,7 @@ static ManifestInfo parseManifest(const std::string& contents) {
                     if (!currentIntentFilter.empty()) currentIntentFilter += ", ";
                     currentIntentFilter += "action:" + action;
                 }
-                // Also: implicit export if LAUNCHER action
+
                 if (action.find("MAIN") != std::string::npos) {
                     currentComponent.exported = true;
                 }
@@ -233,7 +223,12 @@ static ManifestInfo parseManifest(const std::string& contents) {
                 std::string dataStr;
                 if (!scheme.empty()) dataStr += scheme + "://";
                 if (!host.empty()) dataStr += host;
-                if (!mime.empty()) { if (!dataStr.empty()) dataStr += " "; dataStr += mime; }
+                if (!mime.empty()) {
+                    if (!dataStr.empty()) {
+                        dataStr += " ";
+                    }
+                    dataStr += mime;
+                }
                 if (!dataStr.empty()) {
                     if (!currentIntentFilter.empty()) currentIntentFilter += ", ";
                     currentIntentFilter += "data:" + dataStr;
@@ -243,13 +238,12 @@ static ManifestInfo parseManifest(const std::string& contents) {
                 inIntentFilter = false;
                 if (!currentIntentFilter.empty() && inComponent) {
                     currentComponent.intent_filters.push_back(currentIntentFilter);
-                    // Components with intent-filters are implicitly exported (pre-API 31)
+
                     currentComponent.exported = true;
                 }
             }
         }
 
-        // Component end
         for (auto& type : {"activity", "service", "receiver", "provider"}) {
             std::string close = std::string("</") + type + ">";
             if (trimmed.find(close) != std::string::npos && inComponent) {
@@ -264,7 +258,7 @@ static ManifestInfo parseManifest(const std::string& contents) {
 }
 
 std::optional<ToolResult> PermissionsTool::tryExecute(const std::string& action, ToolContext& ctx) {
-    if (action.find("PERMISSIONS:") != 0)
+    if (!action.starts_with("PERMISSIONS:"))
         return std::nullopt;
 
     std::string path = action.substr(12);
@@ -275,18 +269,18 @@ std::optional<ToolResult> PermissionsTool::tryExecute(const std::string& action,
         return ToolResult{"OBSERVATION: Error — provide a path to AndroidManifest.xml or a directory."};
     }
 
-    // Find the manifest
     std::string manifestPath;
     if (fs::is_directory(path)) {
-        if (fs::exists(path + "/AndroidManifest.xml"))
+        if (fs::exists(path + "/AndroidManifest.xml")) {
             manifestPath = path + "/AndroidManifest.xml";
-        else {
-            // Search recursively (apktool output structure)
+        } else {
             std::error_code ec2;
             auto pit = fs::recursive_directory_iterator(path,
                 fs::directory_options::skip_permission_denied, ec2);
             for (; pit != fs::recursive_directory_iterator(); pit.increment(ec2)) {
-                if (ec2) { ec2.clear(); continue; }
+                if (ec2) {
+                    ec2.clear(); continue;
+                }
                 if (pit->path().filename() == "AndroidManifest.xml") {
                     manifestPath = pit->path().string();
                     break;
@@ -315,7 +309,6 @@ std::optional<ToolResult> PermissionsTool::tryExecute(const std::string& action,
     std::ostringstream out;
     out << "AndroidManifest Analysis: " << manifestPath << "\n\n";
 
-    // App info
     if (!info.package_name.empty())
         out << "Package: " << info.package_name << "\n";
     if (!info.version_name.empty())
@@ -324,7 +317,6 @@ std::optional<ToolResult> PermissionsTool::tryExecute(const std::string& action,
         out << "SDK: min=" << info.min_sdk << " target=" << info.target_sdk << "\n";
     out << "\n";
 
-    // Permissions
     if (!info.permissions.empty()) {
         int dangerousCount = 0;
         out << "--- Permissions (" << info.permissions.size() << ") ---\n";
@@ -336,14 +328,15 @@ std::optional<ToolResult> PermissionsTool::tryExecute(const std::string& action,
         out << "  (" << dangerousCount << " dangerous permission(s) marked with [!])\n\n";
     }
 
-    // Suspicious combinations
     {
         std::set<std::string> permSet(info.permissions.begin(), info.permissions.end());
         std::vector<std::string> warnings;
         for (auto& combo : SUSPICIOUS_COMBOS) {
             bool allPresent = true;
             for (auto& p : combo.perms) {
-                if (!permSet.count(p)) { allPresent = false; break; }
+                if (!permSet.count(p)) {
+                    allPresent = false; break;
+                }
             }
             if (allPresent) warnings.push_back(combo.warning);
         }
@@ -356,9 +349,7 @@ std::optional<ToolResult> PermissionsTool::tryExecute(const std::string& action,
         }
     }
 
-    // Components
     if (!info.components.empty()) {
-        // Group by type
         std::map<std::string, std::vector<ManifestInfo::Component*>> byType;
         for (auto& c : info.components) byType[c.type].push_back(&c);
 
@@ -378,7 +369,6 @@ std::optional<ToolResult> PermissionsTool::tryExecute(const std::string& action,
         }
     }
 
-    // Features
     if (!info.uses_features.empty()) {
         out << "--- Required Features (" << info.uses_features.size() << ") ---\n";
         for (auto& f : info.uses_features) {
@@ -387,7 +377,6 @@ std::optional<ToolResult> PermissionsTool::tryExecute(const std::string& action,
         out << "\n";
     }
 
-    // Summary risk indicators
     {
         std::set<std::string> permSet(info.permissions.begin(), info.permissions.end());
         std::vector<std::string> indicators;
@@ -410,7 +399,8 @@ std::optional<ToolResult> PermissionsTool::tryExecute(const std::string& action,
         if (exportedServices > 0)
             indicators.push_back(std::to_string(exportedServices) + " exported service(s) — attack surface");
         if (exportedReceivers > 0)
-            indicators.push_back(std::to_string(exportedReceivers) + " exported receiver(s) — can be triggered externally");
+            indicators.push_back(std::to_string(exportedReceivers) +
+                " exported receiver(s) — can be triggered externally");
 
         if (!indicators.empty()) {
             out << "--- Risk Indicators ---\n";
@@ -429,5 +419,4 @@ std::optional<ToolResult> PermissionsTool::tryExecute(const std::string& action,
         "Use SCAN: to perform LLM-powered analysis of the smali code, "
         "or STRINGS: to extract hardcoded values."};
 }
-
-} // namespace area
+}  // namespace area

@@ -1,15 +1,18 @@
 #include "features/tui/TuiFeature.h"
-#include "features/tui/HeadlessTui.h"
 
 #include <algorithm>
+#include <map>
 #include <memory>
 #include <stdexcept>
 
+#include "features/tui/HeadlessTui.h"
+#include "mcp/McpTool.h"
+#include "nlohmann/detail/json_ref.hpp"
+#include "nlohmann/json.hpp"
 using json = nlohmann::json;
 
 namespace area::features::tui {
 
-/// Shared state across TUI tool calls (lazy init, kept alive).
 struct TuiState {
     std::string binary;
     std::string sockPath;
@@ -147,4 +150,4 @@ void registerTools(mcp::McpServer& server,
     });
 }
 
-} // namespace area::features::tui
+}  // namespace area::features::tui

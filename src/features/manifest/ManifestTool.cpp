@@ -1,28 +1,29 @@
 #include "features/manifest/ManifestTool.h"
-#include "infra/tools/ToolContext.h"
-#include "infra/agent/Agent.h"
 
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <vector>
-#include <algorithm>
+#include <cctype>
+#include <cstdlib>
+#include <functional>
+#include <system_error>
+
+#include "infra/tools/ToolContext.h"
+#include "infra/agent/Agent.h"
 
 namespace fs = std::filesystem;
 
 namespace area {
-
 static std::string toLowerMF(const std::string& s) {
     std::string out = s;
     for (auto& c : out) c = std::tolower(static_cast<unsigned char>(c));
     return out;
 }
 
-// Extract attribute value: android:name="value" -> value
 static std::string extractAttr(const std::string& line, const std::string& attr) {
     auto pos = line.find(attr + "=\"");
     if (pos == std::string::npos) {
-        // Try without namespace prefix
         auto shortAttr = attr;
         auto colon = shortAttr.find(':');
         if (colon != std::string::npos) {
@@ -45,14 +46,15 @@ static std::string findManifest(const std::string& path) {
         return "";
     }
 
-    // Search directory for AndroidManifest.xml
     std::error_code ec;
     auto it = fs::recursive_directory_iterator(
         path, fs::directory_options::skip_permission_denied, ec);
     if (ec) return "";
 
     for (; it != fs::recursive_directory_iterator(); it.increment(ec)) {
-        if (ec) { ec.clear(); continue; }
+        if (ec) {
+            ec.clear(); continue;
+        }
         if (it->is_regular_file(ec) && !ec &&
             it->path().filename() == "AndroidManifest.xml") {
             return it->path().string();
@@ -63,7 +65,7 @@ static std::string findManifest(const std::string& path) {
 }
 
 std::optional<ToolResult> ManifestTool::tryExecute(const std::string& action, ToolContext& ctx) {
-    if (action.find("MANIFEST:") != 0)
+    if (!action.starts_with("MANIFEST:"))
         return std::nullopt;
 
     std::string path = action.substr(9);
@@ -122,13 +124,11 @@ std::optional<ToolResult> ManifestTool::tryExecute(const std::string& action, To
         std::string& l = lines[i];
         std::string lower = toLowerMF(l);
 
-        // Package name
         if (lower.find("<manifest") != std::string::npos) {
             std::string pkg = extractAttr(l, "package");
             if (!pkg.empty()) packageName = pkg;
         }
 
-        // SDK versions
         if (lower.find("<uses-sdk") != std::string::npos || lower.find("usesSdk") != std::string::npos) {
             std::string ms = extractAttr(l, "android:minSdkVersion");
             std::string ts = extractAttr(l, "android:targetSdkVersion");
@@ -136,13 +136,11 @@ std::optional<ToolResult> ManifestTool::tryExecute(const std::string& action, To
             if (!ts.empty()) targetSdk = ts;
         }
 
-        // Permissions
         if (lower.find("<uses-permission") != std::string::npos) {
             std::string perm = extractAttr(l, "android:name");
             if (!perm.empty()) permissions.push_back(perm);
         }
 
-        // Components
         if (lower.find("<activity") != std::string::npos && lower.find("<activity-alias") == std::string::npos) {
             std::string name = extractAttr(l, "android:name");
             std::string exp = extractAttr(l, "android:exported");
@@ -182,7 +180,6 @@ std::optional<ToolResult> ManifestTool::tryExecute(const std::string& action, To
             currentComponent = name;
         }
 
-        // Intent filters
         if (lower.find("<action") != std::string::npos && lower.find("android:name") != std::string::npos) {
             std::string actionName = extractAttr(l, "android:name");
             if (!actionName.empty() && !currentComponent.empty()) {
@@ -190,7 +187,6 @@ std::optional<ToolResult> ManifestTool::tryExecute(const std::string& action, To
             }
         }
 
-        // Meta-data
         if (lower.find("<meta-data") != std::string::npos) {
             std::string name = extractAttr(l, "android:name");
             std::string value = extractAttr(l, "android:value");
@@ -201,7 +197,6 @@ std::optional<ToolResult> ManifestTool::tryExecute(const std::string& action, To
             }
         }
 
-        // Close tags reset section
         if (lower.find("</activity") != std::string::npos ||
             lower.find("</service") != std::string::npos ||
             lower.find("</receiver") != std::string::npos ||
@@ -211,7 +206,6 @@ std::optional<ToolResult> ManifestTool::tryExecute(const std::string& action, To
         }
     }
 
-    // Format output
     std::ostringstream out;
     out << "AndroidManifest.xml analysis (" << manifestPath << "):\n\n";
 
@@ -222,7 +216,7 @@ std::optional<ToolResult> ManifestTool::tryExecute(const std::string& action, To
 
     if (!permissions.empty()) {
         out << "== Permissions (" << permissions.size() << ") ==\n";
-        // Classify dangerous permissions
+
         static const std::vector<std::string> dangerous = {
             "INTERNET", "READ_CONTACTS", "WRITE_CONTACTS", "READ_PHONE_STATE",
             "CALL_PHONE", "READ_CALL_LOG", "SEND_SMS", "RECEIVE_SMS", "READ_SMS",
@@ -238,7 +232,9 @@ std::optional<ToolResult> ManifestTool::tryExecute(const std::string& action, To
             for (auto& c : upper) c = std::toupper(static_cast<unsigned char>(c));
             bool isDangerous = false;
             for (auto& d : dangerous) {
-                if (upper.find(d) != std::string::npos) { isDangerous = true; break; }
+                if (upper.find(d) != std::string::npos) {
+                    isDangerous = true; break;
+                }
             }
             out << "  " << (isDangerous ? "[!] " : "    ") << p << "\n";
         }
@@ -285,5 +281,4 @@ std::optional<ToolResult> ManifestTool::tryExecute(const std::string& action, To
     ctx.cb({AgentMessage::RESULT, result});
     return ToolResult{"OBSERVATION: " + result};
 }
-
-} // namespace area
+}  // namespace area

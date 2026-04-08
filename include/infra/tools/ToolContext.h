@@ -15,4 +15,4 @@ struct ToolContext {
     Harness& harness;
 };
 
-} // namespace area
+}  // namespace area

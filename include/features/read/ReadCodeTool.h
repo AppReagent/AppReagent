@@ -1,11 +1,14 @@
 #pragma once
 
+#include <optional>
+#include <string>
+
 #include "infra/tools/Tool.h"
 
 namespace area {
 
 class ReadCodeTool : public Tool {
-public:
+ public:
     std::string name() const override { return "READ"; }
     std::string description() const override {
         return "<path> [method_name] — read and display source code from a file. "
@@ -19,4 +22,4 @@ public:
     std::optional<ToolResult> tryExecute(const std::string& action, ToolContext& ctx) override;
 };
 
-} // namespace area
+}  // namespace area

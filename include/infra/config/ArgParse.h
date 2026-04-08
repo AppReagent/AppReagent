@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -10,13 +11,13 @@
 namespace area {
 
 class ArgParse {
-public:
+ public:
     ArgParse(int argc, char *argv[]);
     std::optional<Error> parse();
     std::optional<std::string> getPositionalArg(size_t idx) const;
     std::optional<std::string> getNamedArg(const std::string& key) const;
 
-private:
+ private:
     bool parsed_ = false;
 
     int argc_;
@@ -26,4 +27,4 @@ private:
     std::unordered_map<std::string, std::string> namedArgs_;
 };
 
-} // namespace area
+}  // namespace area

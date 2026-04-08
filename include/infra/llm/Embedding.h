@@ -9,9 +9,8 @@
 
 namespace area {
 
-// Computes embedding vectors from text via Ollama or OpenAI-compatible APIs.
 class EmbeddingBackend {
-public:
+ public:
     virtual ~EmbeddingBackend() = default;
 
     virtual std::vector<float> embed(const std::string& text) = 0;
@@ -20,35 +19,34 @@ public:
 
     static std::unique_ptr<EmbeddingBackend> create(const EmbeddingEndpoint& ep);
 
-protected:
+ protected:
     int dimensions_ = 1536;
 };
 
 class OllamaEmbeddingBackend : public EmbeddingBackend {
-public:
+ public:
     explicit OllamaEmbeddingBackend(const EmbeddingEndpoint& ep);
     std::vector<float> embed(const std::string& text) override;
 
-private:
+ private:
     std::string url_;
     std::string model_;
 };
 
 class OpenAIEmbeddingBackend : public EmbeddingBackend {
-public:
+ public:
     explicit OpenAIEmbeddingBackend(const EmbeddingEndpoint& ep);
     std::vector<float> embed(const std::string& text) override;
 
-private:
+ private:
     std::string url_;
     std::string model_;
     std::string api_key_;
 };
 
-// Stores and retrieves embeddings from PostgreSQL via pgvector.
 class EmbeddingStore {
-public:
-    EmbeddingStore(Database& db, EmbeddingBackend* backend = nullptr);
+ public:
+    explicit EmbeddingStore(Database& db, EmbeddingBackend* backend = nullptr);
 
     void store(const std::string& run_id,
                const std::string& file_path,
@@ -67,18 +65,14 @@ public:
         double similarity;
     };
 
-    // Find top-K similar methods by cosine similarity.
-    // If exclude_run_id is non-empty, excludes that run from results.
     std::vector<SearchResult> search(const std::vector<float>& query_embedding,
                                      int top_k = 5,
                                      const std::string& exclude_run_id = "");
 
-    // Convenience: embed text then search.
     std::vector<SearchResult> searchByText(const std::string& text,
                                            int top_k = 5,
                                            const std::string& exclude_run_id = "");
 
-    // Embed and store a method in one call.
     void embedAndStore(const std::string& run_id,
                        const std::string& file_path,
                        const std::string& file_hash,
@@ -88,12 +82,11 @@ public:
 
     bool hasBackend() const { return backend_ != nullptr; }
 
-    // Delete all embeddings for a run_id.
     void deleteRun(const std::string& run_id);
 
-private:
+ private:
     Database& db_;
     EmbeddingBackend* backend_;
 };
 
-} // namespace area
+}  // namespace area

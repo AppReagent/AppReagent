@@ -1,13 +1,13 @@
 #include "infra/agent/Harness.h"
 
+#include <stddef.h>
 #include <algorithm>
-#include <fstream>
 #include <sstream>
+#include <cctype>
 
 #include "util/file_io.h"
 
 namespace area {
-
 std::string Harness::guideText() const {
     if (guides_.empty()) return "";
     std::ostringstream out;
@@ -123,7 +123,9 @@ Harness Harness::createDefault() {
         "5. Scanning a whole directory when the user asked about one specific behavior — use GREP first.\n"
         "\n"
         "AFTER A SCAN COMPLETES — always do this before answering:\n"
-        "  SQL: SELECT class_name, method_name, threat_category, findings, confidence FROM method_findings WHERE run_id = '<run_id>' AND relevant = true ORDER BY confidence DESC\n"
+        "  SQL: SELECT class_name, method_name, threat_category, findings, confidence "
+        "FROM method_findings WHERE run_id = '<run_id>' AND relevant = true "
+        "ORDER BY confidence DESC\n"
         "  SQL: SELECT risk_score, recommendation, risk_profile FROM scan_results WHERE run_id = '<run_id>'\n"
         "  Then: DECOMPILE the top suspicious methods to verify findings with actual code.\n"
         "\n"
@@ -187,7 +189,7 @@ Harness Harness::createDefault() {
     h.addSensor({"sql_read_only", "sql",
         [](const std::string& action, const std::string&) -> std::string {
             std::string upper;
-            for (size_t i = 0; i < std::min(action.size(), (size_t)20); i++)
+            for (size_t i = 0; i < std::min(action.size(), static_cast<size_t>(20)); i++)
                 upper += std::toupper(action[i]);
             if (upper.find("DROP") != std::string::npos ||
                 upper.find("TRUNCATE") != std::string::npos ||
@@ -202,7 +204,9 @@ Harness Harness::createDefault() {
         [](const std::string&, const std::string& observation) -> std::string {
             if (observation.find("ERROR:") == std::string::npos) return "";
             if (observation.find("does not exist") != std::string::npos) {
-                return "HINT: Table or column not found. Try: SELECT table_name FROM information_schema.tables WHERE table_schema='public'";
+                return "HINT: Table or column not found. Try: "
+                       "SELECT table_name FROM information_schema.tables "
+                       "WHERE table_schema='public'";
             }
             if (observation.find("syntax error") != std::string::npos) {
                 return "HINT: SQL syntax error. Check quotes, parentheses, keywords.";
@@ -239,7 +243,6 @@ Harness Harness::createDefault() {
 
     h.addSensor({"answer_evidence", "answer",
         [](const std::string& answer, const std::string&) -> std::string {
-            // Check if the answer discusses scan results without citing specifics
             bool mentionsScan = answer.find("scan") != std::string::npos ||
                                 answer.find("Scan") != std::string::npos ||
                                 answer.find("SCAN") != std::string::npos;
@@ -276,7 +279,6 @@ Harness Harness::createDefault() {
 
     h.addSensor({"answer_completeness", "answer",
         [](const std::string& answer, const std::string&) -> std::string {
-            // Check for scan summary regurgitation without follow-up
             if (answer.find("Scan ") != std::string::npos &&
                 answer.find("complete:") != std::string::npos &&
                 answer.find("method_findings") == std::string::npos &&
@@ -292,9 +294,7 @@ Harness Harness::createDefault() {
 
     h.addSensor({"scan_followup", "scan",
         [](const std::string&, const std::string& observation) -> std::string {
-            // After a scan completes, nudge the agent to query the database
             if (observation.find("complete:") != std::string::npos) {
-                // Extract run_id for convenience
                 auto pos = observation.find("Scan ");
                 auto end = observation.find(" complete:");
                 if (pos != std::string::npos && end != std::string::npos) {
@@ -309,7 +309,6 @@ Harness Harness::createDefault() {
         }
     });
 
-    // Tool error recovery: suggest next steps when common errors occur
     h.addSensor({"file_not_found", "read",
         [](const std::string&, const std::string& observation) -> std::string {
             if (observation.find("No such file") != std::string::npos ||
@@ -363,5 +362,4 @@ Harness Harness::createDefault() {
 
     return h;
 }
-
-} // namespace area
+}  // namespace area

@@ -1,25 +1,28 @@
 #include "features/similar/SimilarTool.h"
+
+#include <stddef.h>
+#include <iomanip>
+#include <sstream>
+#include <exception>
+#include <functional>
+#include <vector>
+
 #include "infra/tools/ToolContext.h"
 #include "infra/agent/Agent.h"
 
-#include <iomanip>
-#include <sstream>
-
 namespace area {
-
 SimilarTool::SimilarTool(const Config* config, Database& db) {
     if (config && config->embedding.has_value()) {
         try {
             backend_ = EmbeddingBackend::create(*config->embedding);
             store_ = std::make_unique<EmbeddingStore>(db, backend_.get());
         } catch (const std::exception& e) {
-            // Embedding not available — tool will report unavailable
         }
     }
 }
 
 std::optional<ToolResult> SimilarTool::tryExecute(const std::string& action, ToolContext& ctx) {
-    if (action.find("SIMILAR:") != 0)
+    if (!action.starts_with("SIMILAR:"))
         return std::nullopt;
 
     std::string query = action.substr(8);
@@ -61,11 +64,12 @@ std::optional<ToolResult> SimilarTool::tryExecute(const std::string& action, Too
             << "   file: " << r.file_path << "\n"
             << "   run:  " << r.run_id << "\n";
 
-        // Show a truncated preview of the content
         std::string preview = r.content.substr(0, 200);
         if (r.content.size() > 200) preview += "...";
-        // Replace newlines for compact display
-        for (auto& c : preview) { if (c == '\n') c = ' '; }
+
+        for (auto& c : preview) {
+            if (c == '\n') c = ' ';
+        }
         out << "   preview: " << preview << "\n\n";
     }
 
@@ -75,5 +79,4 @@ std::optional<ToolResult> SimilarTool::tryExecute(const std::string& action, Too
     return ToolResult{"OBSERVATION: " + formatted +
         "Use SQL queries on scan_results or llm_calls with the run_id to get full details."};
 }
-
-} // namespace area
+}  // namespace area

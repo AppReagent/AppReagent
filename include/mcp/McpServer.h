@@ -1,26 +1,22 @@
 #pragma once
 
-#include "mcp/McpTool.h"
-
 #include <string>
 #include <vector>
+
+#include "mcp/McpTool.h"
 #include <nlohmann/json.hpp>
 
 namespace area::mcp {
 
-/// MCP server: JSON-RPC 2.0 over stdio with a tool registry.
-/// Features register their tools, then run() handles the protocol loop.
 class McpServer {
-public:
+ public:
     McpServer();
 
-    /// Register a tool. Call before run().
     void registerTool(McpTool tool);
 
-    /// Run the JSON-RPC protocol loop (blocking, reads stdin).
     int run();
 
-private:
+ private:
     void log(const std::string& msg);
     void send(const nlohmann::json& msg);
 
@@ -30,4 +26,4 @@ private:
     std::vector<McpTool> tools_;
 };
 
-} // namespace area::mcp
+}  // namespace area::mcp

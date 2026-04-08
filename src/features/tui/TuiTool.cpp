@@ -1,16 +1,18 @@
 #include "features/tui/TuiTool.h"
-#include "infra/tools/ToolContext.h"
-#include "infra/agent/Agent.h"
 
 #include <algorithm>
+#include <cctype>
+#include <functional>
+
+#include "infra/tools/ToolContext.h"
+#include "infra/agent/Agent.h"
 
 namespace area {
 
 std::optional<ToolResult> TuiTool::tryExecute(const std::string& action, ToolContext& ctx) {
-    if (action.find("TUI:") != 0 && action.find("TUI ") != 0)
+    if (!action.starts_with("TUI:") && !action.starts_with("TUI "))
         return std::nullopt;
 
-    // Parse: "TUI: show task", "TUI: hide task"
     std::string rest = action.substr(action.find(':') != std::string::npos
                                      ? action.find(':') + 1
                                      : 4);
@@ -21,10 +23,10 @@ std::optional<ToolResult> TuiTool::tryExecute(const std::string& action, ToolCon
     bool show = false;
     std::string panel;
 
-    if (rest.find("show ") == 0) {
+    if (rest.starts_with("show ")) {
         show = true;
         panel = rest.substr(5);
-    } else if (rest.find("hide ") == 0) {
+    } else if (rest.starts_with("hide ")) {
         show = false;
         panel = rest.substr(5);
     } else {
@@ -37,7 +39,6 @@ std::optional<ToolResult> TuiTool::tryExecute(const std::string& action, ToolCon
         return ToolResult{"Error: unknown panel '" + panel + "'. Available panels: task"};
     }
 
-    // Emit TUI_CONTROL message — the server/TUI intercepts this
     std::string payload = R"({"panel":")" + panel + R"(","visible":)" + (show ? "true" : "false") + "}";
     ctx.cb({AgentMessage::TUI_CONTROL, payload});
 
@@ -45,4 +46,4 @@ std::optional<ToolResult> TuiTool::tryExecute(const std::string& action, ToolCon
     return ToolResult{"OBSERVATION: " + obs};
 }
 
-} // namespace area
+}  // namespace area

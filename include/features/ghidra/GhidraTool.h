@@ -1,11 +1,13 @@
 #pragma once
 
+#include <optional>
+#include <string>
+
 #include "infra/tools/Tool.h"
 
 namespace area {
-
 class GhidraTool : public Tool {
-public:
+ public:
     std::string name() const override { return "GHIDRA"; }
     std::string description() const override {
         return "<path> [| <mode> [| <filter>]] — deep binary analysis using Ghidra's "
@@ -21,8 +23,7 @@ public:
     }
     std::optional<ToolResult> tryExecute(const std::string& action, ToolContext& ctx) override;
 
-private:
-    // Returns "" on success, error message on failure.
+ private:
     std::string runGhidra(const std::string& binaryPath,
                           const std::string& mode,
                           const std::string& filter,
@@ -36,5 +37,4 @@ private:
     std::string formatXrefs(const std::string& jsonPath);
     std::string formatAll(const std::string& jsonPath);
 };
-
-} // namespace area
+}  // namespace area

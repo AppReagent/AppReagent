@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cpplint
+        run: pip install cpplint
+
+      - name: Check no comments in source
+        run: ./scripts/lint-no-comments.sh .
+
+      - name: Run cpplint
+        run: cpplint --recursive src/ include/
+
+  build-and-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iwyu cppcheck cmake libpq-dev libcurl4-openssl-dev libssl-dev
+
+      - name: Build
+        run: make all
+
+      - name: Run unit tests
+        run: make test
+
+      - name: Run cppcheck
+        run: cppcheck --enable=warning,performance,portability --error-exitcode=1 --suppress=missingIncludeSystem --inline-suppr -j$(nproc) -I include src/
+
+      - name: Run include-what-you-use
+        run: ./scripts/lint-iwyu.sh

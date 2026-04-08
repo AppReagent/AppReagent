@@ -1,14 +1,18 @@
 #include "infra/ipc/IPC.h"
 
-#include <cerrno>
-#include <cstring>
 #include <fcntl.h>
 #include <poll.h>
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <stdio.h>
+#include <cerrno>
 #include <mutex>
 #include <unordered_map>
+#include <map>
+
+#include "nlohmann/detail/output/serializer.hpp"
+#include "nlohmann/json.hpp"
 
 static void setNonBlocking(int fd) {
     int flags = fcntl(fd, F_GETFL, 0);
@@ -16,7 +20,6 @@ static void setNonBlocking(int fd) {
 }
 
 namespace area::ipc {
-
 static std::mutex g_readBufsMu;
 static std::unordered_map<int, std::string> g_readBufs;
 
@@ -71,7 +74,6 @@ bool sendLine(int fd, const nlohmann::json& j) {
         if (n < 0) {
             if (errno == EINTR) continue;
             if (errno == EAGAIN) {
-                // Wait up to 5s for the socket to become writable
                 struct pollfd pfd = {fd, POLLOUT, 0};
                 if (poll(&pfd, 1, 5000) <= 0) return false;
                 continue;
@@ -88,7 +90,6 @@ std::optional<nlohmann::json> readLine(int fd) {
     std::lock_guard lk(g_readBufsMu);
     auto& buf = g_readBufs[fd];
 
-    // Check if we already have a complete line buffered
     auto nl = buf.find('\n');
     if (nl != std::string::npos) {
         std::string line = buf.substr(0, nl);
@@ -100,7 +101,6 @@ std::optional<nlohmann::json> readLine(int fd) {
         }
     }
 
-    // Try to read more data (non-blocking)
     char tmp[4096];
     ssize_t n = read(fd, tmp, sizeof(tmp));
     if (n > 0) {
@@ -131,5 +131,4 @@ void closeFd(int fd) {
     }
     close(fd);
 }
-
-} // namespace area::ipc
+}  // namespace area::ipc

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <string>
+#include <optional>
+
 #include "infra/tools/Tool.h"
 
 namespace area {
@@ -10,7 +12,7 @@ class Database;
 class EventBus;
 
 class AnalyzeTool : public Tool {
-public:
+ public:
     AnalyzeTool(const Config* config, Database& db, EventBus* events = nullptr)
         : config_(config), db_(db), events_(events) {}
 
@@ -25,10 +27,10 @@ public:
     }
     std::optional<ToolResult> tryExecute(const std::string& action, ToolContext& ctx) override;
 
-private:
+ private:
     const Config* config_;
     Database& db_;
     EventBus* events_;
 };
 
-} // namespace area
+}  // namespace area

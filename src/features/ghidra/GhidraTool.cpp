@@ -1,29 +1,32 @@
 #include "features/ghidra/GhidraTool.h"
-#include "infra/tools/ToolContext.h"
-#include "infra/agent/Agent.h"
-#include "util/file_io.h"
 
-#include <nlohmann/json.hpp>
+#include <unistd.h>
 
 #include <array>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <map>
 #include <sstream>
+#include <system_error>
 
+#include "infra/agent/Agent.h"
+#include "infra/tools/ToolContext.h"
+#include "nlohmann/detail/iterators/iter_impl.hpp"
+#include <nlohmann/json.hpp>
+#include "util/file_io.h"
 namespace fs = std::filesystem;
 using json = nlohmann::json;
 
 namespace area {
-
-// ── helpers ────────────────────────────────────────────────────────
-
 static std::string ghidraHome() {
     if (auto env = std::getenv("GHIDRA_HOME")) return env;
-    // Default install location
+
     std::string home = std::getenv("HOME") ? std::getenv("HOME") : "/home/builder";
-    // Glob for any ghidra version under ~/.local/opt
+
     std::string optDir = home + "/.local/opt";
     if (!fs::is_directory(optDir)) return "";
     for (auto& entry : fs::directory_iterator(optDir)) {
@@ -50,7 +53,6 @@ static std::string javaHome() {
 }
 
 static std::string scriptDir() {
-    // Look for scripts/ghidra relative to executable, or from workspace
     auto exe = util::selfExe();
     if (!exe.empty()) {
         auto dir = fs::path(exe).parent_path() / "scripts" / "ghidra";
@@ -83,10 +85,8 @@ static std::string truncate(const std::string& s, size_t maxLen) {
     return s.substr(0, maxLen) + "\n... (truncated, " + std::to_string(s.size()) + " bytes total)";
 }
 
-// ── tryExecute ─────────────────────────────────────────────────────
-
 std::optional<ToolResult> GhidraTool::tryExecute(const std::string& action, ToolContext& ctx) {
-    if (action.find("GHIDRA:") != 0)
+    if (!action.starts_with("GHIDRA:"))
         return std::nullopt;
 
     std::string args = action.substr(7);
@@ -99,7 +99,6 @@ std::optional<ToolResult> GhidraTool::tryExecute(const std::string& action, Tool
                           "Modes: overview (default), decompile, strings, imports, xrefs, all"};
     }
 
-    // Parse: path | mode | filter
     std::string path, mode = "overview", filter;
     {
         auto p1 = args.find('|');
@@ -125,7 +124,6 @@ std::optional<ToolResult> GhidraTool::tryExecute(const std::string& action, Tool
         while (!filter.empty() && filter[0] == ' ') filter.erase(0, 1);
         while (!filter.empty() && filter.back() == ' ') filter.pop_back();
 
-        // Normalize mode
         for (auto& c : mode) c = std::tolower(static_cast<unsigned char>(c));
     }
 
@@ -133,18 +131,15 @@ std::optional<ToolResult> GhidraTool::tryExecute(const std::string& action, Tool
         return ToolResult{"OBSERVATION: Error — file not found: " + path};
     }
 
-    // Validate mode
     if (mode != "overview" && mode != "decompile" && mode != "strings" &&
         mode != "imports" && mode != "xrefs" && mode != "all") {
         return ToolResult{"OBSERVATION: Error — unknown mode '" + mode + "'.\n"
                           "Valid modes: overview, decompile, strings, imports, xrefs, all"};
     }
 
-    // Check Ghidra availability
     std::string gh = ghidraHome();
     bool useDocker = gh.empty() || !fs::exists(gh + "/support/analyzeHeadless");
     if (useDocker) {
-        // Check if Docker image is available
         int rc;
         runCmd("sudo docker image inspect area-ghidra >/dev/null 2>&1", &rc);
         if (rc != 0) {
@@ -158,7 +153,6 @@ std::optional<ToolResult> GhidraTool::tryExecute(const std::string& action, Tool
     ctx.cb({AgentMessage::THINKING, "Running Ghidra " + mode + " analysis on " +
             fs::path(path).filename().string() + "..."});
 
-    // Create temp output path
     std::string tmpDir = "/tmp/area-ghidra-" + std::to_string(getpid());
     fs::create_directories(tmpDir);
     std::string outputPath = tmpDir + "/output.json";
@@ -166,7 +160,6 @@ std::optional<ToolResult> GhidraTool::tryExecute(const std::string& action, Tool
     std::string ghidraLog;
     std::string err = runGhidra(path, mode, filter, outputPath, ghidraLog);
     if (!err.empty()) {
-        // Clean up
         std::error_code ec;
         fs::remove_all(tmpDir, ec);
         return ToolResult{"OBSERVATION: Ghidra analysis failed: " + err};
@@ -179,7 +172,6 @@ std::optional<ToolResult> GhidraTool::tryExecute(const std::string& action, Tool
                           truncate(ghidraLog, 2000)};
     }
 
-    // Format output based on mode
     std::string formatted;
     if (mode == "overview")        formatted = formatOverview(outputPath);
     else if (mode == "decompile")  formatted = formatDecompile(outputPath);
@@ -188,7 +180,6 @@ std::optional<ToolResult> GhidraTool::tryExecute(const std::string& action, Tool
     else if (mode == "xrefs")      formatted = formatXrefs(outputPath);
     else if (mode == "all")        formatted = formatAll(outputPath);
 
-    // Clean up
     std::error_code ec;
     fs::remove_all(tmpDir, ec);
 
@@ -196,8 +187,6 @@ std::optional<ToolResult> GhidraTool::tryExecute(const std::string& action, Tool
     ctx.cb({AgentMessage::RESULT, formatted});
     return ToolResult{"OBSERVATION: " + formatted};
 }
-
-// ── runGhidra ──────────────────────────────────────────────────────
 
 std::string GhidraTool::runGhidra(const std::string& binaryPath,
                                    const std::string& mode,
@@ -217,13 +206,11 @@ std::string GhidraTool::runGhidra(const std::string& binaryPath,
     std::ostringstream cmd;
 
     if (useDocker) {
-        // Docker mode: mount binary, scripts, output dir into container
         auto absInput = fs::absolute(binaryPath).string();
         auto absOutput = fs::absolute(fs::path(outputPath).parent_path()).string();
         auto outputFile = fs::path(outputPath).filename().string();
 
         if (sd.empty()) {
-            // Find scripts relative to binary
             auto exe = util::selfExe();
             if (!exe.empty()) {
                 auto d = fs::path(exe).parent_path() / "scripts" / "ghidra";
@@ -255,7 +242,6 @@ std::string GhidraTool::runGhidra(const std::string& binaryPath,
             << " -deleteproject"
             << " -analysisTimeoutPerFile 180";
     } else {
-        // Local mode
         std::string jh = javaHome();
         if (!jh.empty()) {
             cmd << "JAVA_HOME=" << jh << " PATH=" << jh << "/bin:$PATH ";
@@ -283,18 +269,14 @@ std::string GhidraTool::runGhidra(const std::string& binaryPath,
     int exitCode;
     ghidraLog = runCmd(cmd.str(), &exitCode);
 
-    // Clean up project dir
     std::error_code ec;
     fs::remove_all(projDir, ec);
 
-    // Check for script errors in log
     if (ghidraLog.find("SCRIPT ERROR") != std::string::npos &&
         ghidraLog.find("AreaAnalyze: wrote") == std::string::npos) {
         return "Ghidra script error:\n" + truncate(ghidraLog, 2000);
     }
 
-    // The analyzeHeadless often returns non-zero even on success (e.g., demangler warnings)
-    // So check for actual success indicators
     if (ghidraLog.find("Import succeeded") == std::string::npos &&
         ghidraLog.find("Processing succeeded") == std::string::npos) {
         if (exitCode != 0) {
@@ -305,8 +287,6 @@ std::string GhidraTool::runGhidra(const std::string& binaryPath,
 
     return "";
 }
-
-// ── formatters ─────────────────────────────────────────────────────
 
 static json loadJson(const std::string& path) {
     std::ifstream f(path);
@@ -332,7 +312,6 @@ std::string GhidraTool::formatOverview(const std::string& jsonPath) {
         << "Functions: " << meta.value("function_count", 0) << "\n"
         << "Memory: " << meta.value("memory_size", 0) << " bytes\n\n";
 
-    // Functions
     if (data.contains("functions") && data["functions"].is_array()) {
         auto& funcs = data["functions"];
         out << "--- Functions (" << funcs.size() << " shown) ---\n";
@@ -347,7 +326,6 @@ std::string GhidraTool::formatOverview(const std::string& jsonPath) {
         out << "\n";
     }
 
-    // Imports
     if (data.contains("imports") && data["imports"].is_array() && !data["imports"].empty()) {
         auto& imps = data["imports"];
         out << "--- Imports (" << imps.size() << ") ---\n";
@@ -365,7 +343,6 @@ std::string GhidraTool::formatOverview(const std::string& jsonPath) {
         out << "\n";
     }
 
-    // Exports
     if (data.contains("exports") && data["exports"].is_array() && !data["exports"].empty()) {
         auto& exps = data["exports"];
         out << "--- Exports (" << exps.size() << ") ---\n";
@@ -523,7 +500,6 @@ std::string GhidraTool::formatAll(const std::string& jsonPath) {
     auto data = loadJson(jsonPath);
     if (data.empty()) return "Error: could not parse Ghidra output";
 
-    // Combine overview + decompile + strings
     std::ostringstream out;
     auto& meta = data["metadata"];
     out << "=== Ghidra Full Analysis: " << meta.value("name", "?") << " ===\n"
@@ -531,7 +507,6 @@ std::string GhidraTool::formatAll(const std::string& jsonPath) {
         << "Architecture: " << meta.value("language", "?") << "\n"
         << "Functions: " << meta.value("function_count", 0) << "\n\n";
 
-    // Decompiled functions (most valuable for malware analysis)
     if (data.contains("functions") && data["functions"].is_array()) {
         out << "--- Decompiled Functions (" << data["functions"].size() << " shown) ---\n\n";
         for (auto& f : data["functions"]) {
@@ -544,7 +519,6 @@ std::string GhidraTool::formatAll(const std::string& jsonPath) {
         }
     }
 
-    // Imports (security-relevant)
     if (data.contains("imports") && data["imports"].is_array() && !data["imports"].empty()) {
         auto& imps = data["imports"];
         out << "--- Imports (" << imps.size() << ") ---\n";
@@ -557,7 +531,6 @@ std::string GhidraTool::formatAll(const std::string& jsonPath) {
         out << "\n";
     }
 
-    // Strings (IOCs)
     if (data.contains("strings") && data["strings"].is_array() && !data["strings"].empty()) {
         auto& strs = data["strings"];
         out << "--- Strings (" << strs.size() << ") ---\n";
@@ -580,5 +553,4 @@ std::string GhidraTool::formatAll(const std::string& jsonPath) {
 
     return out.str();
 }
-
-} // namespace area
+}  // namespace area

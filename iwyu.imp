@@ -1,0 +1,12 @@
+[
+  { include: ["@\"nlohmann/detail/.*\"", private, "<nlohmann/json.hpp>", public] },
+  { include: ["@\"nlohmann/json_fwd\\.hpp\"", private, "<nlohmann/json.hpp>", public] },
+  { include: ["@<bits/.*>", private, "<chrono>", public] },
+  { include: ["<bits/std_abs.h>", private, "<cstdlib>", public] },
+  { include: ["<stddef.h>", private, "<cstddef>", public] },
+  { include: ["<stdint.h>", private, "<cstdint>", public] },
+  { include: ["<stdlib.h>", private, "<cstdlib>", public] },
+  { include: ["<stdio.h>", private, "<cstdio>", public] },
+  { include: ["<signal.h>", private, "<csignal>", public] },
+  { include: ["<curl/system.h>", private, "<curl/curl.h>", public] }
+]

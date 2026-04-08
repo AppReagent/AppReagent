@@ -1,22 +1,26 @@
 #include "features/analyze/AnalyzeCommand.h"
 
-#include <filesystem>
+#include <bits/chrono.h>
+
+#include <cstdlib>
+#include <exception>
 #include <iostream>
-#include <sstream>
+#include <map>
+#include <optional>
+#include <utility>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
-#include "infra/events/EventBus.h"
 #include "domains/graph/engine/graph_runner.h"
+#include "domains/graph/engine/task_context.h"
+#include "domains/graph/engine/task_graph.h"
 #include "domains/graph/graphs/analyze_task_graph.h"
 #include "domains/graph/graphs/tier_pool.h"
-#include "domains/graph/util/json_extract.h"
 #include "features/scan/ScanLog.h"
-
 namespace fs = std::filesystem;
 
 namespace area {
-
 AnalyzeCommand::AnalyzeCommand(const Config& config, Database& db)
     : config_(config), db_(db) {
     if (config.embedding.has_value()) {
@@ -46,13 +50,11 @@ std::string AnalyzeCommand::resolveRunId(const std::string& run_id) {
 }
 
 std::string AnalyzeCommand::loadScanGoal(const std::string& run_id) {
-    // Try to extract goal from llm_calls metadata (the triage prompts contain the goal)
     auto result = db_.executeParams(
         "SELECT prompt FROM llm_calls WHERE run_id = $1 "
         "AND node_name = 'scan_synthesis' LIMIT 1",
         {run_id});
     if (result.ok() && !result.rows.empty() && !result.rows[0].empty()) {
-        // Extract goal from the synthesis prompt — it starts with "Scan goal: ..."
         auto& prompt = result.rows[0][0];
         auto goalPos = prompt.find("Scan goal:");
         if (goalPos != std::string::npos) {
@@ -75,7 +77,6 @@ AnalysisResult AnalyzeCommand::run(const std::string& run_id) {
     }
     result.run_id = resolvedId;
 
-    // Check that scan results exist
     auto check = db_.executeParams(
         "SELECT COUNT(*) FROM scan_results WHERE run_id = $1 AND risk_score > 0",
         {resolvedId});
@@ -84,15 +85,18 @@ AnalysisResult AnalyzeCommand::run(const std::string& run_id) {
         return result;
     }
 
-    // Check for previous analyses — return cached result unless force re-analyze
     auto prev = db_.executeParams(
         "SELECT threat_level, confidence, risk_score, summary, full_json, findings_count, created_at "
         "FROM analyze_results WHERE run_id = $1 ORDER BY created_at DESC LIMIT 1",
         {resolvedId});
     if (prev.ok() && !prev.rows.empty() && prev.rows[0].size() >= 7 && !forceReanalyze_) {
         result.threat_level = prev.rows[0][0];
-        try { result.confidence = std::stoi(prev.rows[0][1]); } catch (...) {}
-        try { result.risk_score = std::stoi(prev.rows[0][2]); } catch (...) {}
+        try {
+            result.confidence = std::stoi(prev.rows[0][1]); } catch (...) {
+        }
+        try {
+            result.risk_score = std::stoi(prev.rows[0][2]); } catch (...) {
+        }
         result.summary = prev.rows[0][3];
         result.full_json = prev.rows[0][4];
         emitLog("Returning cached analysis for run " + resolvedId +
@@ -109,7 +113,6 @@ AnalysisResult AnalyzeCommand::run(const std::string& run_id) {
     std::string scanGoal = loadScanGoal(resolvedId);
     emitLog("Analyzing run " + resolvedId + " (goal: " + scanGoal.substr(0, 80) + "...)");
 
-    // Build tier pool and graph
     graph::TierPool pool(config_.ai_endpoints);
     auto backends = pool.backends();
 
@@ -130,7 +133,7 @@ AnalysisResult AnalyzeCommand::run(const std::string& run_id) {
                 auto mn = ctx.get("method_name").get<std::string>();
                 if (!mn.empty()) label += ": " + mn;
             }
-            // Show progress (e.g., "analyze_finding: sendSms [3/12]")
+
             if (ctx.has("finding_index") && ctx.has("total_findings")) {
                 label += " [" + std::to_string(ctx.get("finding_index").get<int>()) +
                          "/" + std::to_string(ctx.get("total_findings").get<int>()) + "]";
@@ -146,7 +149,7 @@ AnalysisResult AnalyzeCommand::run(const std::string& run_id) {
             auto promptHash = ScanLog::sha256(prompt);
             std::string filePath = ctx.has("file_path") ? ctx.get("file_path").get<std::string>() : "";
             std::string fileHash = ctx.has("file_hash") ? ctx.get("file_hash").get<std::string>() : "";
-            // Log analyze LLM calls to the same llm_calls table
+
             db_.executeParams(
                 "INSERT INTO llm_calls (run_id, file_path, file_hash, node_name, "
                 "tier, prompt, prompt_hash, response, latency_ms) "
@@ -172,7 +175,6 @@ AnalysisResult AnalyzeCommand::run(const std::string& run_id) {
         return result;
     }
 
-    // Extract results
     int findingsCount = graphResult.has("files_analyzed")
         ? graphResult.get("files_analyzed").get<int>() : 0;
 
@@ -187,7 +189,6 @@ AnalysisResult AnalyzeCommand::run(const std::string& run_id) {
                 " (confidence=" + std::to_string(result.confidence) +
                 ", risk=" + std::to_string(result.risk_score) + "/100)");
 
-        // Persist to analyze_results table
         db_.executeParams(
             "INSERT INTO analyze_results (run_id, threat_level, confidence, risk_score, "
             "summary, full_json, findings_count) "
@@ -204,5 +205,4 @@ AnalysisResult AnalyzeCommand::run(const std::string& run_id) {
 
     return result;
 }
-
-} // namespace area
+}  // namespace area

@@ -1,10 +1,15 @@
 #include "features/test/TestFeature.h"
-#include "mcp/McpUtil.h"
-#include "util/file_io.h"
 
 #include <filesystem>
 #include <iostream>
+#include <map>
+#include <vector>
 
+#include "mcp/McpTool.h"
+#include "mcp/McpUtil.h"
+#include "nlohmann/detail/json_ref.hpp"
+#include "nlohmann/json.hpp"
+#include "util/file_io.h"
 namespace fs = std::filesystem;
 using json = nlohmann::json;
 
@@ -70,4 +75,4 @@ void registerTools(mcp::McpServer& server, const std::string& workDir) {
     });
 }
 
-} // namespace area::features::test
+}  // namespace area::features::test

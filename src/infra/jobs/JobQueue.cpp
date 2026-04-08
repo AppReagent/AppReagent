@@ -1,9 +1,9 @@
 #include "infra/jobs/JobQueue.h"
 
 #include <stdexcept>
+#include <utility>
 
 namespace area {
-
 JobQueue::JobQueue(Database& db) : db_(db) {}
 
 void JobQueue::ensureTable() {
@@ -70,8 +70,6 @@ std::vector<Job> JobQueue::dequeue(int tier, int batch_size) {
 }
 
 std::vector<Job> JobQueue::dequeueAtOrBelow(int tier, int batch_size) {
-    // Grab pending jobs at this tier or any lower tier, prioritizing
-    // the server's own tier first, then lower tiers by descending order
     auto result = db_.executeParams(R"(
         UPDATE jobs
         SET status = 'in_progress', updated_at = now()
@@ -133,5 +131,4 @@ void JobQueue::fail(int64_t job_id, const std::string& error) {
                       "updated_at = now() WHERE id = $2",
                       {error, std::to_string(job_id)});
 }
-
-} // namespace area
+}  // namespace area

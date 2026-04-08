@@ -1,4 +1,7 @@
 #include "mcp/McpWiring.h"
+
+#include <filesystem>
+
 #include "mcp/McpServer.h"
 #include "util/file_io.h"
 #include "features/build/BuildFeature.h"
@@ -7,9 +10,6 @@
 #include "features/server/ServerFeature.h"
 #include "features/test/TestFeature.h"
 #include "features/tui/TuiFeature.h"
-
-#include <filesystem>
-#include <signal.h>
 
 namespace fs = std::filesystem;
 
@@ -41,4 +41,4 @@ int runMcpServer(const std::string& dataDir, const std::string& workDir) {
     return server.run();
 }
 
-} // namespace area
+}  // namespace area

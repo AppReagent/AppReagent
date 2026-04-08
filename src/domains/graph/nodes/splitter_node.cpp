@@ -1,19 +1,23 @@
 #include "domains/graph/nodes/splitter_node.h"
 
+#include <map>
+#include <stdexcept>
+
+#include "domains/graph/engine/node.h"
+#include "nlohmann/json.hpp"
 namespace area::graph {
 
 NodeResult SplitterNode::execute(TaskContext ctx) {
-    return NodeResult::fanout(fn_(std::move(ctx)));
+    return NodeResult::fanout(fn_(ctx));
 }
 
 NodeResult CollectorNode::execute(TaskContext) {
     throw std::runtime_error("CollectorNode::execute should not be called directly");
 }
 
-TaskContext CollectorNode::collect(std::vector<TaskContext> items) {
-    if (fn_) return fn_(std::move(items));
+TaskContext CollectorNode::collect(const std::vector<TaskContext>& items) {
+    if (fn_) return fn_(items);
 
-    // Default: merge all items into a json array under "collected"
     TaskContext result;
     nlohmann::json collected = nlohmann::json::array();
     for (auto& item : items) {
@@ -23,4 +27,4 @@ TaskContext CollectorNode::collect(std::vector<TaskContext> items) {
     return result;
 }
 
-} // namespace area::graph
+}  // namespace area::graph

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <string>
+#include <optional>
+
 #include "infra/tools/Tool.h"
 
 namespace area {
@@ -11,7 +13,7 @@ class EventBus;
 class ScanState;
 
 class ScanTool : public Tool {
-public:
+ public:
     ScanTool(const Config* config, Database& db, ScanState* state,
              const std::string& chatId, EventBus* events = nullptr)
         : config_(config), db_(db), state_(state), chatId_(chatId), events_(events) {}
@@ -27,7 +29,7 @@ public:
     }
     std::optional<ToolResult> tryExecute(const std::string& action, ToolContext& ctx) override;
 
-private:
+ private:
     const Config* config_;
     Database& db_;
     ScanState* state_;
@@ -35,4 +37,4 @@ private:
     EventBus* events_;
 };
 
-} // namespace area
+}  // namespace area

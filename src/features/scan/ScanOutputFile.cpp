@@ -1,14 +1,17 @@
 #include "features/scan/ScanOutputFile.h"
 
-#include <chrono>
+#include <bits/chrono.h>
 #include <filesystem>
-#include <iostream>
-#include <sstream>
+#include <map>
+#include <stdexcept>
+
+#include "nlohmann/detail/json_ref.hpp"
+#include "nlohmann/detail/output/serializer.hpp"
+#include "nlohmann/json.hpp"
 
 namespace fs = std::filesystem;
 
 namespace area {
-
 void ScanOutputFile::open(const std::string& run_id) {
     if (file_.is_open()) file_.close();
     fs::create_directories("scan-outputs");
@@ -43,7 +46,6 @@ ScanOutputFile::LoadResult ScanOutputFile::load(const std::string& jsonl_path) {
                 }
             }
         } catch (...) {
-            // Skip malformed lines
         }
     }
     return result;
@@ -107,5 +109,4 @@ void ScanOutputFile::writeLine(const nlohmann::json& j) {
         file_.flush();
     }
 }
-
-} // namespace area
+}  // namespace area

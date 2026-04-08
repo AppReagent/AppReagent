@@ -1,11 +1,11 @@
 #include "infra/db/Database.h"
 
-#include <chrono>
+#include <bits/chrono.h>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
 namespace area {
-
 Database::Database() {}
 
 Database::~Database() {
@@ -15,7 +15,6 @@ Database::~Database() {
 }
 
 void Database::connect(const std::string& url, const std::string& postgres_cert_path) {
-    // Close any existing connection to avoid leaking the old PGconn
     if (conn_) {
         PQfinish(conn_);
         conn_ = nullptr;
@@ -31,7 +30,8 @@ void Database::connect(const std::string& url, const std::string& postgres_cert_
         std::string err = PQerrorMessage(conn_);
         PQfinish(conn_);
         conn_ = nullptr;
-        throw std::runtime_error("postgres connection failed (check your postgres_url and postgres_cert in config.json)");
+        throw std::runtime_error(
+            "postgres connection failed (check your postgres_url and postgres_cert in config.json)");
     }
 }
 
@@ -114,7 +114,6 @@ QueryResult Database::execute(const std::string& sql) {
     }
 
     if (status == PGRES_COMMAND_OK) {
-        // Non-SELECT (INSERT, UPDATE, etc.)
         std::string affected = PQcmdTuples(res);
         result.columns = {"affected_rows"};
         result.rows = {{affected}};
@@ -163,11 +162,11 @@ QueryResult Database::executeParams(const std::string& sql, const std::vector<st
     auto start = std::chrono::high_resolution_clock::now();
     PGresult* res = PQexecParams(conn_, sql.c_str(),
                                   static_cast<int>(params.size()),
-                                  nullptr,      // let PG infer param types
+                                  nullptr,
                                   values.data(),
-                                  nullptr,      // text format, null-terminated
-                                  nullptr,      // all text format
-                                  0);           // text result format
+                                  nullptr,
+                                  nullptr,
+                                  0);
     auto end = std::chrono::high_resolution_clock::now();
 
     result.duration_ms = std::chrono::duration<double, std::milli>(end - start).count();
@@ -209,5 +208,4 @@ QueryResult Database::executeParams(const std::string& sql, const std::vector<st
     PQclear(res);
     return result;
 }
-
-} // namespace area
+}  // namespace area

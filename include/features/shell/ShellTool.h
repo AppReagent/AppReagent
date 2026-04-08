@@ -1,5 +1,8 @@
 #pragma once
 
+#include <optional>
+#include <string>
+
 #include "infra/tools/Tool.h"
 
 namespace area {
@@ -7,7 +10,7 @@ namespace area {
 class Sandbox;
 
 class ShellTool : public Tool {
-public:
+ public:
     explicit ShellTool(Sandbox* sandbox) : sandbox_(sandbox) {}
 
     std::string name() const override { return "SHELL"; }
@@ -18,8 +21,8 @@ public:
     }
     std::optional<ToolResult> tryExecute(const std::string& action, ToolContext& ctx) override;
 
-private:
+ private:
     Sandbox* sandbox_;
 };
 
-} // namespace area
+}  // namespace area

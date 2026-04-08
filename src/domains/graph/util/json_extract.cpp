@@ -1,5 +1,7 @@
 #include "domains/graph/util/json_extract.h"
 
+#include <stddef.h>
+
 namespace area::graph {
 
 std::string extractJson(const std::string& text) {
@@ -25,11 +27,17 @@ std::string extractJson(const std::string& text) {
     if (start != std::string::npos) {
         int depth = 0;
         for (size_t i = start; i < text.size(); i++) {
-            if (text[i] == '{') depth++;
-            else if (text[i] == '}') { depth--; if (depth == 0) return text.substr(start, i - start + 1); }
+            if (text[i] == '{') {
+                depth++;
+            } else if (text[i] == '}') {
+                depth--;
+                if (depth == 0) {
+                    return text.substr(start, i - start + 1);
+                }
+            }
         }
     }
     return text;
 }
 
-} // namespace area::graph
+}  // namespace area::graph

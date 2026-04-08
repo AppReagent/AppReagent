@@ -1,13 +1,13 @@
 #pragma once
 
-#include <nlohmann/json.hpp>
 #include <string>
 #include <unordered_map>
 
+#include <nlohmann/json.hpp>
 namespace area::graph {
 
 class TaskContext {
-public:
+ public:
     void set(const std::string& key, nlohmann::json value) { data_[key] = std::move(value); }
     const nlohmann::json& get(const std::string& key) const { return data_.at(key); }
     bool has(const std::string& key) const { return data_.contains(key); }
@@ -27,8 +27,8 @@ public:
     bool discarded = false;
     std::string discard_reason;
 
-private:
+ private:
     nlohmann::json data_ = nlohmann::json::object();
 };
 
-} // namespace area::graph
+}  // namespace area::graph

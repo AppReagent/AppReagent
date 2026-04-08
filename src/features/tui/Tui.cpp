@@ -1,25 +1,33 @@
 #include "features/tui/Tui.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
-#include <csignal>
-#include <filesystem>
-#include <fstream>
-#include <sstream>
-#include "infra/ipc/IPC.h"
-#include "features/tui/tui_util.h"
-#include "util/convo_io.h"
-#include "util/string_util.h"
-#include <nlohmann/json.hpp>
-#include <unistd.h>
+#include <bits/termios-c_cc.h>
+#include <bits/termios-c_cflag.h>
+#include <bits/termios-c_iflag.h>
+#include <bits/types/sig_atomic_t.h>
 #include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <unistd.h>
 
+#include <algorithm>
+#include <csignal>
+#include <cstdio>
+#include <filesystem>
+#include <map>
+#include <optional>
+#include <utility>
+
+#include <nlohmann/json.hpp>
+
+#include "features/tui/tui_util.h"
+#include "infra/ipc/IPC.h"
+#include "nlohmann/detail/iterators/iter_impl.hpp"
+#include "nlohmann/detail/json_ref.hpp"
+#include "util/string_util.h"
+#include "yoga/YGEnums.h"
+#include "yoga/YGNodeLayout.h"
+#include "yoga/YGNodeStyle.h"
 namespace area {
-
-// ANSI color codes
 static constexpr int COLOR_BLACK   = 30;
 static constexpr int COLOR_RESET   = 0;
 static constexpr int COLOR_RED     = 31;
@@ -45,23 +53,23 @@ using CT = Tui::ColorTheme;
 using RGB = CT::RGB;
 
 static const CT darkTheme = {
-    {62, 50, 76},       // waveBase
-    {70, 18, 84},       // waveAccent
-    {255, 255, 255},    // pulseBase  (white)
-    {-255, -255, -255}, // pulseShift (toward black)
-    {60, 50, 20},       // procBase   (dark amber)
-    {140, 100, 0},      // procAccent (yellow)
+    {62, 50, 76},
+    {70, 18, 84},
+    {255, 255, 255},
+    {-255, -255, -255},
+    {60, 50, 20},
+    {140, 100, 0},
     COLOR_WHITE,
     COLOR_WHITE,
 };
 
 static const CT lightTheme = {
-    {180, 170, 200},  // waveBase
-    {60, 20, 80},     // waveAccent
-    {60, 40, 80},     // pulseBase
-    {80, 30, 90},     // pulseShift
-    {180, 160, 60},   // procBase
-    {80, 60, 0},      // procAccent
+    {180, 170, 200},
+    {60, 20, 80},
+    {60, 40, 80},
+    {80, 30, 90},
+    {180, 160, 60},
+    {80, 60, 0},
     COLOR_BLACK,
     COLOR_BLACK,
 };
@@ -69,7 +77,7 @@ static const CT lightTheme = {
 static RGB pulseColor(const CT& th, int x, int y, int frame, double intensity) {
     double n = noise2d(static_cast<double>(x), static_cast<double>(y), static_cast<double>(frame));
     double t = n * intensity;
-    // Quantize to steps of 8 so adjacent chars share escapes
+
     return {
         std::clamp(((th.pulseBase.r + static_cast<int>(t * th.pulseShift.r)) >> 3) << 3, 0, 255),
         std::clamp(((th.pulseBase.g + static_cast<int>(t * th.pulseShift.g)) >> 3) << 3, 0, 255),
@@ -77,7 +85,6 @@ static RGB pulseColor(const CT& th, int x, int y, int frame, double intensity) {
     };
 }
 
-// Append an RGB foreground escape
 static void appendRGB(std::string& buf, int r, int g, int b, bool bold = false) {
     r = std::clamp(r, 0, 255);
     g = std::clamp(g, 0, 255);
@@ -130,8 +137,8 @@ void Tui::disableRawMode() {
 }
 
 void Tui::enableMouseTracking() {
-    outputBuf_ += "\033[?1000h"; // enable mouse click reporting
-    outputBuf_ += "\033[?1006h"; // SGR mouse mode (for scroll wheel)
+    outputBuf_ += "\033[?1000h";
+    outputBuf_ += "\033[?1006h";
     mouseMode_ = true;
 }
 
@@ -142,16 +149,16 @@ void Tui::disableMouseTracking() {
 }
 
 void Tui::enterAltScreen() {
-    outputBuf_ += "\033[?1049h"; // alt screen
-    outputBuf_ += "\033[?25l";   // hide cursor
-    enableMouseTracking();       // Ctrl+B toggles off for text selection
+    outputBuf_ += "\033[?1049h";
+    outputBuf_ += "\033[?25l";
+    enableMouseTracking();
     flush();
 }
 
 void Tui::exitAltScreen() {
     if (mouseMode_) disableMouseTracking();
-    outputBuf_ += "\033[?25h";   // show cursor
-    outputBuf_ += "\033[?1049l"; // exit alt screen
+    outputBuf_ += "\033[?25h";
+    outputBuf_ += "\033[?1049l";
     flush();
 }
 
@@ -162,8 +169,8 @@ void Tui::buildLayout() {
 
     root_ = YGNodeNew();
     YGNodeStyleSetFlexDirection(root_, YGFlexDirectionColumn);
-    YGNodeStyleSetWidth(root_, (float)ts.cols);
-    YGNodeStyleSetHeight(root_, (float)ts.rows);
+    YGNodeStyleSetWidth(root_, static_cast<float>(ts.cols));
+    YGNodeStyleSetHeight(root_, static_cast<float>(ts.rows));
 
     int idx = 0;
 
@@ -175,10 +182,8 @@ void Tui::buildLayout() {
     YGNodeStyleSetHeight(clusterNode_, 0.0f);
     YGNodeInsertChild(root_, clusterNode_, idx++);
 
-    // Task pane: visible when agent explicitly shows it via TUI tool
     int taskPaneHeight = 0;
     if (showTaskPane_) {
-        // Count thinking lines to size the pane (min 4, max 8 including border)
         int thinkingCount = 0;
         {
             std::unique_lock lk(messagesMu_, std::try_to_lock);
@@ -190,12 +195,12 @@ void Tui::buildLayout() {
             }
         }
         if (thinkingCount > 0)
-            taskPaneHeight = std::clamp(thinkingCount + 2, 4, 8); // +2 for top/bottom border
+            taskPaneHeight = std::clamp(thinkingCount + 2, 4, 8);
         else
             taskPaneHeight = 4;
     }
     taskPaneNode_ = YGNodeNew();
-    YGNodeStyleSetHeight(taskPaneNode_, (float)taskPaneHeight);
+    YGNodeStyleSetHeight(taskPaneNode_, static_cast<float>(taskPaneHeight));
     YGNodeInsertChild(root_, taskPaneNode_, idx++);
 
     contentNode_ = YGNodeNew();
@@ -210,7 +215,7 @@ void Tui::buildLayout() {
     YGNodeStyleSetHeight(inputNode_, 1);
     YGNodeInsertChild(root_, inputNode_, idx++);
 
-    YGNodeCalculateLayout(root_, (float)ts.cols, (float)ts.rows, YGDirectionLTR);
+    YGNodeCalculateLayout(root_, static_cast<float>(ts.cols), static_cast<float>(ts.rows), YGDirectionLTR);
 }
 
 void Tui::freeLayout() {
@@ -266,7 +271,7 @@ void Tui::flush() {
 std::vector<Tui::DisplayLine> Tui::wrapMessage(const AgentMessage& msg, int width) {
     std::vector<DisplayLine> lines;
     std::string text = msg.content;
-    // Split by newlines first
+
     size_t pos = 0;
     while (pos < text.size()) {
         size_t nl = text.find('\n', pos);
@@ -278,12 +283,12 @@ std::vector<Tui::DisplayLine> Tui::wrapMessage(const AgentMessage& msg, int widt
             line = text.substr(pos, nl - pos);
             pos = nl + 1;
         }
-        // Word wrap at width
+
         if (width > 0) {
-            while ((int)line.size() > width) {
-                int bp = std::min(width, (int)line.size() - 1);
+            while (static_cast<int>(line.size()) > width) {
+                int bp = std::min(width, static_cast<int>(line.size()) - 1);
                 while (bp > 0 && line[bp] != ' ') bp--;
-                if (bp == 0) bp = std::min(width, (int)line.size());
+                if (bp == 0) bp = std::min(width, static_cast<int>(line.size()));
                 lines.push_back({msg.type, line.substr(0, bp)});
                 line = line.substr(bp);
                 if (!line.empty() && line[0] == ' ') line.erase(0, 1);
@@ -298,12 +303,11 @@ void Tui::renderHeader(int row, int width) {
     moveCursor(row + 1, 1);
     setColor(COLOR_WHITE);
     setBold();
-    // Inverse video for header bar
+
     outputBuf_ += "\033[7m";
     std::string title = " App Reagent (aREa) ";
     std::string header = title;
 
-    // Format token counts for right-aligned label
     auto fmtTokens = [](int n) -> std::string {
         if (n >= 1000000) {
             return std::to_string(n / 1000000) + "." + std::to_string((n % 1000000) / 100000) + "M";
@@ -323,19 +327,19 @@ void Tui::renderHeader(int row, int width) {
         ctxLabel = "ctx " + std::to_string(pct) + "%";
     }
 
-    int rightPad = width - (int)header.size() - (int)ctxLabel.size() - 1;
+    int rightPad = width - static_cast<int>(header.size()) - static_cast<int>(ctxLabel.size()) - 1;
     outputBuf_ += header;
     if (rightPad > 0) {
         outputBuf_ += std::string(rightPad, ' ');
     }
-    // Color the context label based on usage
+
     if (pct >= 90) {
-        outputBuf_ += "\033[31m"; // red
+        outputBuf_ += "\033[31m";
     } else if (pct >= 70) {
-        outputBuf_ += "\033[33m"; // yellow
+        outputBuf_ += "\033[33m";
     }
     outputBuf_ += ctxLabel + " ";
-    outputBuf_ += "\033[7m"; // restore inverse
+    outputBuf_ += "\033[7m";
     resetStyle();
 }
 
@@ -344,12 +348,11 @@ void Tui::renderContextMenu(int screenRows, int screenCols) {
 
     const int numItems = 2;
     const int menuWidth = 17;
-    const int menuHeight = numItems + 2; // top/bottom borders + items
+    const int menuHeight = numItems + 2;
 
     int row = std::clamp(contextMenuRow_, 1, std::max(1, screenRows - menuHeight + 1));
     int col = std::clamp(contextMenuCol_, 1, std::max(1, screenCols - menuWidth + 1));
 
-    // Top border: ┌─ View ────────┐
     moveCursor(row, col);
     setColor(COLOR_GRAY);
     outputBuf_ += "\xe2\x94\x8c\xe2\x94\x80 View ";
@@ -357,7 +360,6 @@ void Tui::renderContextMenu(int screenRows, int screenCols) {
     outputBuf_ += "\xe2\x94\x90";
     resetStyle();
 
-    // Items
     struct { const char* label; bool checked; } items[] = {
         {"Header", showHeader_},
         {"Task pane", showTaskPane_.load()},
@@ -365,13 +367,17 @@ void Tui::renderContextMenu(int screenRows, int screenCols) {
     for (int i = 0; i < numItems; i++) {
         moveCursor(row + 1 + i, col);
         bool sel = (i == contextMenuSel_);
-        if (sel) outputBuf_ += "\033[7m"; // inverse for selected
+        if (sel) outputBuf_ += "\033[7m";
         setColor(sel ? COLOR_WHITE : COLOR_GRAY);
-        outputBuf_ += "\xe2\x94\x82 "; // │
+        outputBuf_ += "\xe2\x94\x82 ";
         if (items[i].checked) {
             setColor(COLOR_GREEN);
-            outputBuf_ += "\xe2\x9c\x93"; // ✓
-            if (sel) setColor(COLOR_WHITE); else setColor(COLOR_GRAY);
+            outputBuf_ += "\xe2\x9c\x93";
+            if (sel) {
+                setColor(COLOR_WHITE);
+            } else {
+                setColor(COLOR_GRAY);
+            }
         } else {
             outputBuf_ += " ";
         }
@@ -379,24 +385,27 @@ void Tui::renderContextMenu(int screenRows, int screenCols) {
         setColor(sel ? COLOR_WHITE : theme_.headerFg);
         std::string label = items[i].label;
         outputBuf_ += label;
-        int pad = menuWidth - 6 - (int)label.size();
+        int pad = menuWidth - 6 - static_cast<int>(label.size());
         if (pad > 0) outputBuf_ += std::string(pad, ' ');
         outputBuf_ += " ";
-        if (sel) setColor(COLOR_WHITE); else setColor(COLOR_GRAY);
-        outputBuf_ += "\xe2\x94\x82"; // │
+        if (sel) {
+            setColor(COLOR_WHITE);
+        } else {
+            setColor(COLOR_GRAY);
+        }
+        outputBuf_ += "\xe2\x94\x82";
         resetStyle();
     }
 
-    // Bottom border: └───────────────┘
     moveCursor(row + menuHeight - 1, col);
     setColor(COLOR_GRAY);
-    outputBuf_ += "\xe2\x94\x94"; // └
+    outputBuf_ += "\xe2\x94\x94";
     for (int i = 0; i < menuWidth - 2; i++) outputBuf_ += "\xe2\x94\x80";
-    outputBuf_ += "\xe2\x94\x98"; // ┘
+    outputBuf_ += "\xe2\x94\x98";
     resetStyle();
 }
 
-void Tui::renderCluster(int /*startRow*/, int /*height*/, int /*width*/) {
+void Tui::renderCluster(int  , int  , int  ) {
 }
 
 void Tui::renderMessages(int startRow, int height, int width) {
@@ -404,9 +413,8 @@ void Tui::renderMessages(int startRow, int height, int width) {
     if (!lk.owns_lock()) return;
 
     bool filterThinking = showTaskPane_.load();
-    int msgCount = (int)messages_.size();
+    int msgCount = static_cast<int>(messages_.size());
 
-    // Rebuild cached display lines only when content or layout changed
     if (msgCount != cachedDisplayCount_ || width != cachedDisplayWidth_
         || filterThinking != cachedDisplayFilter_) {
         cachedDisplayLines_.clear();
@@ -429,8 +437,9 @@ void Tui::renderMessages(int startRow, int height, int width) {
                         pos = nl + 1;
                     }
                     int wrapAt = std::max(1, width - 4);
-                    while ((int)line.size() > wrapAt) {
-                        cachedDisplayLines_.push_back({AgentMessage::THINKING, line.substr(0, wrapAt), msg.addedAtFrame, true});
+                    while (static_cast<int>(line.size()) > wrapAt) {
+                        cachedDisplayLines_.push_back(
+                            {AgentMessage::THINKING, line.substr(0, wrapAt), msg.addedAtFrame, true});
                         line = line.substr(wrapAt);
                     }
                     cachedDisplayLines_.push_back({AgentMessage::THINKING, line, msg.addedAtFrame, true});
@@ -451,8 +460,7 @@ void Tui::renderMessages(int startRow, int height, int width) {
         cachedDisplayFilter_ = filterThinking;
     }
 
-    // Auto-scroll to bottom (like Claude Code)
-    int totalLines = (int)cachedDisplayLines_.size();
+    int totalLines = static_cast<int>(cachedDisplayLines_.size());
     int maxScroll = std::max(0, totalLines - height);
     scrollOffset_ = std::min(scrollOffset_, maxScroll);
     int visibleStart = std::max(0, maxScroll - scrollOffset_);
@@ -469,27 +477,29 @@ void Tui::renderMessages(int startRow, int height, int width) {
             if (dl.isUser) {
                 setColor(COLOR_CYAN);
                 setBold();
-            } else switch (dl.type) {
-                case AgentMessage::THINKING:
-                    setColor(COLOR_GRAY);
-                    break;
-                case AgentMessage::SQL:
-                    setColor(COLOR_GREEN);
-                    break;
-                case AgentMessage::RESULT:
-                    setColor(COLOR_CYAN);
-                    break;
-                case AgentMessage::ANSWER:
-                    setColor(COLOR_WHITE);
-                    setBold();
-                    break;
-                case AgentMessage::ERROR:
-                    setColor(COLOR_RED);
-                    break;
+            } else {
+                switch (dl.type) {
+                    case AgentMessage::THINKING:
+                        setColor(COLOR_GRAY);
+                        break;
+                    case AgentMessage::SQL:
+                        setColor(COLOR_GREEN);
+                        break;
+                    case AgentMessage::RESULT:
+                        setColor(COLOR_CYAN);
+                        break;
+                    case AgentMessage::ANSWER:
+                        setColor(COLOR_WHITE);
+                        setBold();
+                        break;
+                    case AgentMessage::ERROR:
+                        setColor(COLOR_RED);
+                        break;
+                }
             }
 
             std::string text = dl.text;
-            if (width > 2 && (int)text.size() > width - 2) text = truncateUTF8(text, width - 2);
+            if (width > 2 && static_cast<int>(text.size()) > width - 2) text = truncateUTF8(text, width - 2);
             outputBuf_ += text;
             resetStyle();
         }
@@ -497,7 +507,7 @@ void Tui::renderMessages(int startRow, int height, int width) {
 }
 
 void Tui::renderTaskPane(int startRow, int height, int width) {
-    if (height < 3) return; // need at least top border + 1 line + bottom border
+    if (height < 3) return;
 
     std::unique_lock lk(messagesMu_, std::try_to_lock);
     if (!lk.owns_lock()) return;
@@ -505,9 +515,8 @@ void Tui::renderTaskPane(int startRow, int height, int width) {
     std::vector<std::string> taskLines;
     for (auto& msg : messages_) {
         if (msg.who == Message::AGENT && msg.agentType == AgentMessage::THINKING && !msg.content.empty()) {
-            // Split by newlines and wrap
             size_t pos = 0;
-            int innerWidth = std::max(1, width - 4); // 2 border + 2 padding
+            int innerWidth = std::max(1, width - 4);
             while (pos < msg.content.size()) {
                 size_t nl = msg.content.find('\n', pos);
                 std::string line;
@@ -518,7 +527,7 @@ void Tui::renderTaskPane(int startRow, int height, int width) {
                     line = msg.content.substr(pos, nl - pos);
                     pos = nl + 1;
                 }
-                while ((int)line.size() > innerWidth) {
+                while (static_cast<int>(line.size()) > innerWidth) {
                     taskLines.push_back(line.substr(0, innerWidth));
                     line = line.substr(innerWidth);
                 }
@@ -527,44 +536,42 @@ void Tui::renderTaskPane(int startRow, int height, int width) {
         }
     }
 
-    int innerHeight = height - 2; // rows available for content
-    int totalLines = (int)taskLines.size();
+    int innerHeight = height - 2;
+    int totalLines = static_cast<int>(taskLines.size());
     int maxScroll = std::max(0, totalLines - innerHeight);
     taskScrollOffset_ = std::min(taskScrollOffset_, maxScroll);
-    // Auto-scroll to bottom
+
     int visibleStart = std::max(0, totalLines - innerHeight);
 
     auto setYellow = [&]() {
         appendRGB(outputBuf_, 200, 160, 40);
     };
 
-    // Top border: ╭─── task ───╮
     int row = startRow + 1;
     clearLine(row, width);
     moveCursor(row, 1);
     setYellow();
-    outputBuf_ += " \xe2\x95\xad"; // ╭
+    outputBuf_ += " \xe2\x95\xad";
     std::string title = " task ";
-    int barWidth = width - 4; // 1 space + ╭ + ╮ + 1 space
+    int barWidth = width - 4;
     int leftBar = 2;
-    int rightBar = barWidth - leftBar - (int)title.size();
+    int rightBar = barWidth - leftBar - static_cast<int>(title.size());
     if (rightBar < 0) rightBar = 0;
-    for (int i = 0; i < leftBar; i++) outputBuf_ += "\xe2\x94\x80"; // ─
+    for (int i = 0; i < leftBar; i++) outputBuf_ += "\xe2\x94\x80";
     setBold();
     outputBuf_ += title;
     resetStyle();
     setYellow();
-    for (int i = 0; i < rightBar; i++) outputBuf_ += "\xe2\x94\x80"; // ─
-    outputBuf_ += "\xe2\x95\xae"; // ╮
+    for (int i = 0; i < rightBar; i++) outputBuf_ += "\xe2\x94\x80";
+    outputBuf_ += "\xe2\x95\xae";
     resetStyle();
     row++;
 
-    // Content rows
     for (int i = 0; i < innerHeight; i++) {
         clearLine(row, width);
         moveCursor(row, 1);
         setYellow();
-        outputBuf_ += " \xe2\x94\x82"; // │
+        outputBuf_ += " \xe2\x94\x82";
         resetStyle();
 
         int lineIdx = visibleStart + i;
@@ -572,10 +579,10 @@ void Tui::renderTaskPane(int startRow, int height, int width) {
             outputBuf_ += " ";
             setColor(COLOR_GRAY);
             std::string text = taskLines[lineIdx];
-            int innerW = width - 5; // space + │ + space + ... + │ + space
-            if ((int)text.size() > innerW) text = truncateUTF8(text, innerW);
+            int innerW = width - 5;
+            if (static_cast<int>(text.size()) > innerW) text = truncateUTF8(text, innerW);
             outputBuf_ += text;
-            int pad = innerW - (int)text.size();
+            int pad = innerW - static_cast<int>(text.size());
             if (pad > 0) outputBuf_ += std::string(pad, ' ');
             resetStyle();
         } else {
@@ -584,23 +591,21 @@ void Tui::renderTaskPane(int startRow, int height, int width) {
         }
 
         setYellow();
-        outputBuf_ += "\xe2\x94\x82"; // │
+        outputBuf_ += "\xe2\x94\x82";
         resetStyle();
         row++;
     }
 
-    // Bottom border: ╰───╯
     clearLine(row, width);
     moveCursor(row, 1);
     setYellow();
-    outputBuf_ += " \xe2\x95\xb0"; // ╰
-    for (int i = 0; i < barWidth; i++) outputBuf_ += "\xe2\x94\x80"; // ─
-    outputBuf_ += "\xe2\x95\xaf"; // ╯
+    outputBuf_ += " \xe2\x95\xb0";
+    for (int i = 0; i < barWidth; i++) outputBuf_ += "\xe2\x94\x80";
+    outputBuf_ += "\xe2\x95\xaf";
     resetStyle();
 }
 
 void Tui::tabCompletePath() {
-    // Tab completion for filesystem paths
     namespace fs = std::filesystem;
 
     std::string& path = confirmCustom_;
@@ -638,19 +643,18 @@ void Tui::tabCompletePath() {
     if (matches.size() == 1) {
         path = dir + matches[0];
     } else {
-        // Complete to common prefix
         std::string common = matches[0];
         for (size_t i = 1; i < matches.size(); i++) {
             size_t j = 0;
             while (j < common.size() && j < matches[i].size() &&
                    common[j] == matches[i][j]) j++;
-            common = common.substr(0, j);
+            common.resize(j);
         }
         if (common.size() > prefix.size()) {
             path = dir + common;
         }
     }
-    confirmCursorPos_ = (int)path.size();
+    confirmCursorPos_ = static_cast<int>(path.size());
 }
 
 void Tui::handleCtrlC() {
@@ -659,38 +663,32 @@ void Tui::handleCtrlC() {
         now - lastCtrlC_).count();
 
     if (processing_) {
-        // Second Ctrl-C within 2s while processing: force quit
         if (ctrlCPending_ && elapsed < 2000) {
             running_ = false;
             return;
         }
 
-        // Only send interrupt once (guard against repeated Ctrl-C)
         if (!interruptSuppressing_) {
             sendToServer({{"type", "interrupt"}, {"chat_id", currentChatId_}});
-            // Show (interrupted) immediately without waiting for server
+
             {
                 std::lock_guard lk(messagesMu_);
                 messages_.push_back({Message::AGENT, AgentMessage::ANSWER, "(interrupted)"});
                 messagesDirty_ = true;
             }
             interruptShown_ = true;
-            // Suppress in-flight messages from old query
-            // but clear processing_ immediately so the user can type and
-            // submit a new message without waiting for the server to
-            // confirm the old query finished.
+
             interruptSuppressing_ = true;
             processing_ = false;
         }
         scrollOffset_ = 0;
         render();
     } else {
-        // Not processing: double Ctrl-C to quit
         if (ctrlCPending_ && elapsed < 2000) {
             running_ = false;
             return;
         }
-        // First Ctrl-C clears input (standard terminal behavior)
+
         inputBuffer_.clear();
         cursorPos_ = 0;
     }
@@ -700,7 +698,6 @@ void Tui::handleCtrlC() {
 }
 
 void Tui::approveConfirm() {
-    // Caller must hold confirmMu_
     sendToServer({{"type", "confirm_resp"}, {"chat_id", currentChatId_},
         {"req_id", confirmReqId_}, {"action", "approve"}});
     confirmPending_ = false;
@@ -708,7 +705,6 @@ void Tui::approveConfirm() {
 }
 
 void Tui::denyConfirm() {
-    // Caller must hold confirmMu_
     sendToServer({{"type", "confirm_resp"}, {"chat_id", currentChatId_},
         {"req_id", confirmReqId_}, {"action", "deny"}});
     confirmPending_ = false;
@@ -716,7 +712,6 @@ void Tui::denyConfirm() {
 }
 
 void Tui::submitConfirmCustom() {
-    // Caller must hold confirmMu_
     sendToServer({{"type", "confirm_resp"}, {"chat_id", currentChatId_},
         {"req_id", confirmReqId_}, {"action", "custom"}, {"text", confirmCustom_}});
     confirmPending_ = false;
@@ -731,7 +726,6 @@ void Tui::renderConfirm(int row, int width) {
     outputBuf_ += "\033[2K";
 
     if (confirmIsPath_) {
-        // Path input mode for SCAN
         setColor(COLOR_YELLOW);
         setBold();
         outputBuf_ += " scan path: ";
@@ -740,30 +734,28 @@ void Tui::renderConfirm(int row, int width) {
         int labelLen = 12;
         int available = width - labelLen - 1;
         std::string vis = confirmCustom_;
-        if ((int)vis.size() > available) {
-            int start = (int)vis.size() - available;
+        if (static_cast<int>(vis.size()) > available) {
+            int start = static_cast<int>(vis.size()) - available;
             vis = vis.substr(start);
         }
         outputBuf_ += vis;
         resetStyle();
 
-        // Show cursor in path input
         outputBuf_ += "\033[?25h";
-        int cursorCol = labelLen + 1 + std::min((int)confirmCustom_.size(), available);
+        int cursorCol = labelLen + 1 + std::min(static_cast<int>(confirmCustom_.size()), available);
         moveCursor(row, cursorCol);
     } else {
-        // Standard Yes/No/Custom confirm
         setColor(COLOR_YELLOW);
         setBold();
-        outputBuf_ += " \xe2\x96\xb6 "; // ▶
+        outputBuf_ += " \xe2\x96\xb6 ";
         resetStyle();
         setColor(COLOR_WHITE);
         std::string desc = confirmDescription_;
-        if ((int)desc.size() > width - 20) desc = truncateUTF8(desc, width - 20) + "...";
+        if (static_cast<int>(desc.size()) > width - 20) desc = truncateUTF8(desc, width - 20) + "...";
         outputBuf_ += desc;
         resetStyle();
 
-        int cursorCol = 3 + (int)desc.size() + 2;
+        int cursorCol = 3 + static_cast<int>(desc.size()) + 2;
         moveCursor(row, cursorCol);
 
         auto renderOpt = [&](int idx, const char* label) {
@@ -796,13 +788,11 @@ void Tui::renderConfirm(int row, int width) {
 }
 
 void Tui::renderInput(int row, int width) {
-    // input line
     moveCursor(row, 1);
     outputBuf_ += "\033[2K";
     outputBuf_ += "  ";
     setColor(confirmPending_ ? COLOR_GRAY : COLOR_WHITE);
 
-    // Compute right-side indicator: ^C hint > flash > thinking dots
     bool showCtrlCHint = false;
     std::string rightHint;
     if (ctrlCPending_) {
@@ -826,7 +816,7 @@ void Tui::renderInput(int row, int width) {
     }
 
     int rightWidth = 0;
-    if (!rightHint.empty()) rightWidth = (int)rightHint.size() + 1;
+    if (!rightHint.empty()) rightWidth = static_cast<int>(rightHint.size()) + 1;
     else if (processing_) rightWidth = 8;
 
     int available = width - 3;
@@ -835,13 +825,12 @@ void Tui::renderInput(int row, int width) {
         scrollStart = cursorPos_ - (available - rightWidth);
     }
     std::string visible = inputBuffer_.substr(scrollStart,
-        std::min(available - rightWidth, (int)inputBuffer_.size() - scrollStart));
+        std::min(available - rightWidth, static_cast<int>(inputBuffer_.size()) - scrollStart));
     outputBuf_ += visible;
 
-    // Right-side indicator
     if (!rightHint.empty()) {
         int textEnd = 3 + static_cast<int>(visible.size());
-        int hintStart = width - (int)rightHint.size() - 1;
+        int hintStart = width - static_cast<int>(rightHint.size()) - 1;
         if (hintStart > textEnd) {
             outputBuf_ += std::string(hintStart - textEnd, ' ');
         }
@@ -868,7 +857,6 @@ void Tui::renderInput(int row, int width) {
     renderWaveBar(row + 1, width);
     animFrame_++;
 
-    // Position cursor (skip during confirm — renderConfirm owns cursor)
     if (!confirmPending_) {
         outputBuf_ += "\033[?25h";
         int cursorCol = 3 + (cursorPos_ - scrollStart);
@@ -905,8 +893,8 @@ void Tui::renderWaveBar(int row, int width) {
 }
 
 void Tui::render() {
-    outputBuf_ += "\033[?2026h"; // begin synchronized output
-    outputBuf_ += "\033[?25l";  // hide cursor during render
+    outputBuf_ += "\033[?2026h";
+    outputBuf_ += "\033[?25l";
     auto ts = getTermSize();
     bool showTP = showTaskPane_.load();
     if (!root_ || ts.rows != layoutRows_ || ts.cols != layoutCols_
@@ -919,24 +907,24 @@ void Tui::render() {
         layoutNeedsRebuild_ = false;
     }
 
-    int headerRow = (int)YGNodeLayoutGetTop(headerNode_);
-    int headerWidth = (int)YGNodeLayoutGetWidth(headerNode_);
+    int headerRow = static_cast<int>(YGNodeLayoutGetTop(headerNode_));
+    int headerWidth = static_cast<int>(YGNodeLayoutGetWidth(headerNode_));
 
-    int taskPaneRow = (int)YGNodeLayoutGetTop(taskPaneNode_);
-    int taskPaneHeight = (int)YGNodeLayoutGetHeight(taskPaneNode_);
-    int taskPaneWidth = (int)YGNodeLayoutGetWidth(taskPaneNode_);
+    int taskPaneRow = static_cast<int>(YGNodeLayoutGetTop(taskPaneNode_));
+    int taskPaneHeight = static_cast<int>(YGNodeLayoutGetHeight(taskPaneNode_));
+    int taskPaneWidth = static_cast<int>(YGNodeLayoutGetWidth(taskPaneNode_));
 
-    int contentRow = (int)YGNodeLayoutGetTop(contentNode_);
-    int contentHeight = (int)YGNodeLayoutGetHeight(contentNode_);
-    int contentWidth = (int)YGNodeLayoutGetWidth(contentNode_);
+    int contentRow = static_cast<int>(YGNodeLayoutGetTop(contentNode_));
+    int contentHeight = static_cast<int>(YGNodeLayoutGetHeight(contentNode_));
+    int contentWidth = static_cast<int>(YGNodeLayoutGetWidth(contentNode_));
 
-    int sepRow = (int)YGNodeLayoutGetTop(separatorNode_);
-    int inputRow = (int)YGNodeLayoutGetTop(inputNode_);
-    int inputWidth = (int)YGNodeLayoutGetWidth(inputNode_);
+    int sepRow = static_cast<int>(YGNodeLayoutGetTop(separatorNode_));
+    int inputRow = static_cast<int>(YGNodeLayoutGetTop(inputNode_));
+    int inputWidth = static_cast<int>(YGNodeLayoutGetWidth(inputNode_));
 
-    int clusterRow = (int)YGNodeLayoutGetTop(clusterNode_);
-    int clusterHeight = (int)YGNodeLayoutGetHeight(clusterNode_);
-    int clusterWidth = (int)YGNodeLayoutGetWidth(clusterNode_);
+    int clusterRow = static_cast<int>(YGNodeLayoutGetTop(clusterNode_));
+    int clusterHeight = static_cast<int>(YGNodeLayoutGetHeight(clusterNode_));
+    int clusterWidth = static_cast<int>(YGNodeLayoutGetWidth(clusterNode_));
 
     if (showHeader_) renderHeader(headerRow, headerWidth);
     if (taskPaneHeight > 0) {
@@ -949,7 +937,7 @@ void Tui::render() {
     renderInput(sepRow + 1, inputWidth);
     renderContextMenu(ts.rows, ts.cols);
 
-    outputBuf_ += "\033[?2026l"; // end synchronized output
+    outputBuf_ += "\033[?2026l";
     flush();
 }
 
@@ -957,24 +945,24 @@ void Tui::renderInputOnly() {
     outputBuf_ += "\033[?2026h";
     auto ts = getTermSize();
     if (!root_ || ts.rows != layoutRows_ || ts.cols != layoutCols_) {
-        render(); // size changed, do full render instead
+        render();
         return;
     }
-    int sepRow = (int)YGNodeLayoutGetTop(separatorNode_);
-    int inputWidth = (int)YGNodeLayoutGetWidth(inputNode_);
+    int sepRow = static_cast<int>(YGNodeLayoutGetTop(separatorNode_));
+    int inputWidth = static_cast<int>(YGNodeLayoutGetWidth(inputNode_));
     renderInput(sepRow + 1, inputWidth);
     outputBuf_ += "\033[?2026l";
     flush();
 }
-
-// ── Shared input helpers ──────────────────────────────────────────────
 
 Tui::MouseEvent Tui::readSGRMouse() {
     char buf[32];
     int bi = 0;
     while (bi < 31) {
         if (read(STDIN_FILENO, &buf[bi], 1) <= 0) break;
-        if (buf[bi] == 'M' || buf[bi] == 'm') { bi++; break; }
+        if (buf[bi] == 'M' || buf[bi] == 'm') {
+            bi++; break;
+        }
         bi++;
     }
     buf[bi] = 0;
@@ -985,11 +973,14 @@ Tui::MouseEvent Tui::readSGRMouse() {
 }
 
 void Tui::toggleContextMenuItem(int item) {
-    if (item == 0) { showHeader_ = !showHeader_; layoutNeedsRebuild_ = true; }
-    else if (item == 1) { showTaskPane_.store(!showTaskPane_.load()); layoutNeedsRebuild_ = true; }
+    if (item == 0) {
+        showHeader_ = !showHeader_;
+        layoutNeedsRebuild_ = true;
+    } else if (item == 1) {
+        showTaskPane_.store(!showTaskPane_.load());
+        layoutNeedsRebuild_ = true;
+    }
 }
-
-// ── Context menu input ───────────────────────────────────────────────
 
 bool Tui::handleContextMenuInput(char c) {
     const int numItems = 2;
@@ -998,16 +989,33 @@ bool Tui::handleContextMenuInput(char c) {
         struct pollfd ep = {STDIN_FILENO, POLLIN, 0};
         if (poll(&ep, 1, 30) > 0 && (ep.revents & POLLIN)) {
             char seq0;
-            if (read(STDIN_FILENO, &seq0, 1) <= 0) { contextMenuOpen_ = false; return false; }
+            if (read(STDIN_FILENO, &seq0, 1) <= 0) {
+                contextMenuOpen_ = false;
+                return false;
+            }
             if (seq0 == '[') {
                 char seq1;
-                if (read(STDIN_FILENO, &seq1, 1) <= 0) { contextMenuOpen_ = false; return false; }
-                if (seq1 == 'A') { if (contextMenuSel_ > 0) contextMenuSel_--; return true; }
-                if (seq1 == 'B') { if (contextMenuSel_ < numItems - 1) contextMenuSel_++; return true; }
+                if (read(STDIN_FILENO, &seq1, 1) <= 0) {
+                    contextMenuOpen_ = false;
+                    return false;
+                }
+                if (seq1 == 'A') {
+                    if (contextMenuSel_ > 0) {
+                        contextMenuSel_--;
+                    }
+                    return true;
+                }
+                if (seq1 == 'B') {
+                    if (contextMenuSel_ < numItems - 1) {
+                        contextMenuSel_++;
+                    }
+                    return true;
+                }
                 if (seq1 == '<') {
                     auto mouse = readSGRMouse();
                     if (mouse.button == 2 && mouse.press) {
-                        contextMenuRow_ = mouse.y; contextMenuCol_ = mouse.x;
+                        contextMenuRow_ = mouse.y;
+                        contextMenuCol_ = mouse.x;
                         contextMenuSel_ = 0;
                         return true;
                     }
@@ -1016,17 +1024,24 @@ bool Tui::handleContextMenuInput(char c) {
                         const int menuWidth = 17, menuHeight = numItems + 2;
                         int mr = std::clamp(contextMenuRow_, 1, std::max(1, ts.rows - menuHeight + 1));
                         int mc = std::clamp(contextMenuCol_, 1, std::max(1, ts.cols - menuWidth + 1));
-                        if (mouse.y >= mr + 1 && mouse.y <= mr + numItems && mouse.x >= mc && mouse.x < mc + menuWidth) {
+                        if (mouse.y >= mr + 1 && mouse.y <= mr + numItems
+                            && mouse.x >= mc && mouse.x < mc + menuWidth) {
                             toggleContextMenuItem(mouse.y - mr - 1);
                         }
                         contextMenuOpen_ = false;
                         return true;
                     }
-                    if (mouse.button == 64) { scrollOffset_ += 3; contextMenuOpen_ = false; return true; }
-                    if (mouse.button == 65) { scrollOffset_ = std::max(0, scrollOffset_ - 3); contextMenuOpen_ = false; return true; }
+                    if (mouse.button == 64) {
+                        scrollOffset_ += 3; contextMenuOpen_ = false; return true;
+                    }
+                    if (mouse.button == 65) {
+                        scrollOffset_ = std::max(0, scrollOffset_ - 3); contextMenuOpen_ = false; return true;
+                    }
                     return true;
                 }
-                if (seq1 == '5' || seq1 == '6') { char t; if (read(STDIN_FILENO, &t, 1)) {} }
+                if (seq1 == '5' || seq1 == '6') {
+                    char t; if (read(STDIN_FILENO, &t, 1)) {}
+                }
             }
             contextMenuOpen_ = false;
             return true;
@@ -1045,8 +1060,6 @@ bool Tui::handleContextMenuInput(char c) {
     return true;
 }
 
-// ── Escape sequence handling ─────────────────────────────────────────
-
 bool Tui::handleEscapeSequence() {
     char seq[2];
     if (read(STDIN_FILENO, &seq[0], 1) <= 0) return false;
@@ -1063,36 +1076,48 @@ bool Tui::handleEscapeSequence() {
             contextMenuSel_ = 0;
             return true;
         }
-        if (mouse.button == 64) { scrollOffset_ += 3; return true; }
-        if (mouse.button == 65) { scrollOffset_ = std::max(0, scrollOffset_ - 3); return true; }
+        if (mouse.button == 64) {
+            scrollOffset_ += 3;
+            return true;
+        }
+        if (mouse.button == 65) {
+            scrollOffset_ = std::max(0, scrollOffset_ - 3);
+            return true;
+        }
         return true;
     }
 
     if (seq[1] == '5') {
-        char tilde; if (read(STDIN_FILENO, &tilde, 1) < 0) return true;
+        char tilde;
+        if (read(STDIN_FILENO, &tilde, 1) < 0) {
+            return true;
+        }
         scrollOffset_ += 15;
         return true;
     }
     if (seq[1] == '6') {
-        char tilde; if (read(STDIN_FILENO, &tilde, 1) < 0) return true;
+        char tilde;
+        if (read(STDIN_FILENO, &tilde, 1) < 0) {
+            return true;
+        }
         scrollOffset_ = std::max(0, scrollOffset_ - 15);
         return true;
     }
 
-    if (seq[1] == 'A') { // Up - history previous
+    if (seq[1] == 'A') {
         if (!history_.empty()) {
             if (historyIdx_ == -1) {
                 savedInput_ = inputBuffer_;
-                historyIdx_ = (int)history_.size() - 1;
+                historyIdx_ = static_cast<int>(history_.size()) - 1;
             } else if (historyIdx_ > 0) {
                 historyIdx_--;
             }
             inputBuffer_ = history_[historyIdx_];
-            cursorPos_ = (int)inputBuffer_.size();
+            cursorPos_ = static_cast<int>(inputBuffer_.size());
         }
-    } else if (seq[1] == 'B') { // Down - history next
+    } else if (seq[1] == 'B') {
         if (historyIdx_ != -1) {
-            if (historyIdx_ < (int)history_.size() - 1) {
+            if (historyIdx_ < static_cast<int>(history_.size()) - 1) {
                 historyIdx_++;
                 inputBuffer_ = history_[historyIdx_];
             } else {
@@ -1100,18 +1125,16 @@ bool Tui::handleEscapeSequence() {
                 inputBuffer_ = savedInput_;
                 savedInput_.clear();
             }
-            cursorPos_ = (int)inputBuffer_.size();
+            cursorPos_ = static_cast<int>(inputBuffer_.size());
         }
-    } else if (seq[1] == 'C') { // Right
-        if (cursorPos_ < (int)inputBuffer_.size()) cursorPos_++;
-    } else if (seq[1] == 'D') { // Left
+    } else if (seq[1] == 'C') {
+        if (cursorPos_ < static_cast<int>(inputBuffer_.size())) cursorPos_++;
+    } else if (seq[1] == 'D') {
         if (cursorPos_ > 0) cursorPos_--;
     }
 
     return true;
 }
-
-// ── Main input dispatcher ────────────────────────────────────────────
 
 bool Tui::handleInput() {
     char c;
@@ -1119,7 +1142,9 @@ bool Tui::handleInput() {
 
     if (contextMenuOpen_) return handleContextMenuInput(c);
 
-    if (c == 3) { handleCtrlC(); return true; }
+    if (c == 3) {
+        handleCtrlC(); return true;
+    }
 
     ctrlCPending_ = false;
 
@@ -1128,14 +1153,24 @@ bool Tui::handleInput() {
         return true;
     }
     if (c == 127 || c == 8) {
-        if (cursorPos_ > 0) { inputBuffer_.erase(cursorPos_ - 1, 1); cursorPos_--; }
+        if (cursorPos_ > 0) {
+            inputBuffer_.erase(cursorPos_ - 1, 1); cursorPos_--;
+        }
         return true;
     }
-    if (c == 1)  { cursorPos_ = 0; return true; }                        // Ctrl+A
-    if (c == 5)  { cursorPos_ = (int)inputBuffer_.size(); return true; }  // Ctrl+E
-    if (c == 21) { inputBuffer_.erase(0, cursorPos_); cursorPos_ = 0; return true; }  // Ctrl+U
-    if (c == 11) { inputBuffer_.erase(cursorPos_); return true; }         // Ctrl+K
-    if (c == 23) { // Ctrl+W
+    if (c == 1)  {
+        cursorPos_ = 0; return true;
+    }
+    if (c == 5)  {
+        cursorPos_ = static_cast<int>(inputBuffer_.size()); return true;
+    }
+    if (c == 21) {
+        inputBuffer_.erase(0, cursorPos_); cursorPos_ = 0; return true;
+    }
+    if (c == 11) {
+        inputBuffer_.erase(cursorPos_); return true;
+    }
+    if (c == 23) {
         if (cursorPos_ > 0) {
             int end = cursorPos_;
             while (cursorPos_ > 0 && inputBuffer_[cursorPos_ - 1] == ' ') cursorPos_--;
@@ -1144,8 +1179,10 @@ bool Tui::handleInput() {
         }
         return true;
     }
-    if (c == 12) { outputBuf_ += "\033[2J"; return true; }  // Ctrl+L
-    if (c == 2) { // Ctrl+B - toggle mouse mode
+    if (c == 12) {
+        outputBuf_ += "\033[2J"; return true;
+    }
+    if (c == 2) {
         if (mouseMode_) {
             disableMouseTracking();
             inputFlash_ = "mouse off - select text to copy";
@@ -1165,7 +1202,6 @@ bool Tui::handleInput() {
         return true;
     }
 
-    // UTF-8 multi-byte sequence: lead byte >= 0xC0
     if ((unsigned char)c >= 0xC0) {
         std::string mb(1, c);
         int expect = ((unsigned char)c >= 0xF0) ? 3 : ((unsigned char)c >= 0xE0) ? 2 : 1;
@@ -1175,13 +1211,12 @@ bool Tui::handleInput() {
             mb += cb;
         }
         inputBuffer_.insert(cursorPos_, mb);
-        cursorPos_ += (int)mb.size();
+        cursorPos_ += static_cast<int>(mb.size());
         return true;
     }
 
     return false;
 }
-
 
 void Tui::sendToServer(const nlohmann::json& msg) {
     ipc::sendLine(sockFd_, msg);
@@ -1193,7 +1228,6 @@ void Tui::handleServerMessage(const nlohmann::json& msg) {
     std::string type = msg.value("type", "");
 
     if (type == "agent_msg") {
-        // After local interrupt, suppress all in-flight messages from old query
         if (interruptSuppressing_) return;
         auto m = msg["msg"];
         std::string typeStr = m.value("type", "answer");
@@ -1202,7 +1236,6 @@ void Tui::handleServerMessage(const nlohmann::json& msg) {
         messages_.push_back({Message::AGENT, parseAgentType(typeStr), content, static_cast<int>(animFrame_.load())});
         messagesDirty_ = true;
         scrollOffset_ = 0;
-
     } else if (type == "history") {
         std::lock_guard lk(messagesMu_);
         messages_.clear();
@@ -1214,7 +1247,6 @@ void Tui::handleServerMessage(const nlohmann::json& msg) {
             messages_.push_back(std::move(dm));
         }
         messagesDirty_ = true;
-
     } else if (type == "state") {
         bool proc = msg.value("processing", false);
         if (!proc && interruptSuppressing_) {
@@ -1226,7 +1258,6 @@ void Tui::handleServerMessage(const nlohmann::json& msg) {
         if (msg.contains("context_tokens")) contextTokens_ = msg["context_tokens"].get<int>();
         if (msg.contains("context_window")) contextWindow_ = msg["context_window"].get<int>();
         messagesDirty_ = true;
-
     } else if (type == "confirm_req") {
         confirmReqId_ = msg.value("req_id", 0);
         confirmDescription_ = msg.value("description", "");
@@ -1239,25 +1270,20 @@ void Tui::handleServerMessage(const nlohmann::json& msg) {
             if (pathStart != std::string::npos) {
                 confirmCustom_ = confirmDescription_.substr(pathStart + 1);
                 if (confirmCustom_.find(' ') != std::string::npos)
-                    confirmCustom_ = confirmCustom_.substr(0, confirmCustom_.rfind(' '));
+                    confirmCustom_.erase(confirmCustom_.rfind(' '));
             }
-            confirmCursorPos_ = (int)confirmCustom_.size();
+            confirmCursorPos_ = static_cast<int>(confirmCustom_.size());
         }
         confirmPending_ = true;
         messagesDirty_ = true;
-
     } else if (type == "tui_control") {
-        // Reserved for future tui_control actions
-
     } else if (type == "chat_list") {
-        // TODO: store for /attach tab completion
     }
 }
 
 void Tui::submit() {
     std::string query = inputBuffer_;
 
-    // Handle /clear — wipe context (must work even while processing)
     if (query == "/clear") {
         sendToServer({{"type", "clear_context"}, {"chat_id", currentChatId_}});
         processing_ = false;
@@ -1280,7 +1306,6 @@ void Tui::submit() {
         return;
     }
 
-    // Handle /dangerous toggle
     if (query == "/dangerous") {
         dangerousMode_ = !dangerousMode_.load();
         if (sockFd_ >= 0) {
@@ -1296,8 +1321,6 @@ void Tui::submit() {
         cursorPos_ = 0;
         return;
     }
-
-    // Handle /task toggle (removed — task pane is right-click only now)
 
     history_.push_back(query);
     historyIdx_ = -1;
@@ -1319,8 +1342,6 @@ void Tui::submit() {
     sendToServer({{"type", "user_input"}, {"chat_id", currentChatId_}, {"content", query}});
 }
 
-// ── Event loop helpers ───────────────────────────────────────────────
-
 void Tui::setupSignals() {
     struct sigaction sa;
     sa.sa_flags = 0;
@@ -1337,7 +1358,9 @@ void Tui::handleConfirmInput() {
         std::lock_guard clk(confirmMu_);
         if (!confirmPending_) break;
 
-        if (c == 3) { denyConfirm(); break; }
+        if (c == 3) {
+            denyConfirm(); break;
+        }
 
         if (c == 27) {
             struct pollfd ep = {STDIN_FILENO, POLLIN, 0};
@@ -1351,7 +1374,7 @@ void Tui::handleConfirmInput() {
                         if (seq1 == 'C') confirmSelection_ = std::min(2, confirmSelection_ + 1);
                         else if (seq1 == 'D') confirmSelection_ = std::max(0, confirmSelection_ - 1);
                     }
-                    if (seq1 == '<') readSGRMouse(); // consume
+                    if (seq1 == '<') readSGRMouse();
                     if (seq1 == '5' || seq1 == '6') {
                         char tilde;
                         if (read(STDIN_FILENO, &tilde, 1) < 0) break;
@@ -1365,32 +1388,44 @@ void Tui::handleConfirmInput() {
         }
 
         if (confirmIsPath_) {
-            if (c == 9) { tabCompletePath(); }
-            else if (c == 13 || c == 10) { submitConfirmCustom(); break; }
-            else if (c == 127 || c == 8) {
+            if (c == 9) {
+                tabCompletePath();
+            } else if (c == 13 || c == 10) {
+                submitConfirmCustom();
+                break;
+            } else if (c == 127 || c == 8) {
                 if (!confirmCustom_.empty()) {
                     confirmCustom_.pop_back();
-                    confirmCursorPos_ = (int)confirmCustom_.size();
+                    confirmCursorPos_ = static_cast<int>(confirmCustom_.size());
                 }
-            }
-            else if (c >= 32 && c < 127) {
+            } else if (c >= 32 && c < 127) {
                 confirmCustom_ += c;
-                confirmCursorPos_ = (int)confirmCustom_.size();
+                confirmCursorPos_ = static_cast<int>(confirmCustom_.size());
             }
         } else {
-            if ((c == 'y' || c == 'Y') && confirmSelection_ != 2) { approveConfirm(); break; }
-            else if ((c == 'n' || c == 'N') && confirmSelection_ != 2) { denyConfirm(); break; }
-            else if (c == 9) { confirmSelection_ = 2; }
-            else if (c == 13 || c == 10) {
-                if (confirmSelection_ == 0) { approveConfirm(); break; }
-                else if (confirmSelection_ == 1) { denyConfirm(); break; }
-                else { submitConfirmCustom(); break; }
-            }
-            else if (c == 127 || c == 8) {
+            if ((c == 'y' || c == 'Y') && confirmSelection_ != 2) {
+                approveConfirm();
+                break;
+            } else if ((c == 'n' || c == 'N') && confirmSelection_ != 2) {
+                denyConfirm();
+                break;
+            } else if (c == 9) {
+                confirmSelection_ = 2;
+            } else if (c == 13 || c == 10) {
+                if (confirmSelection_ == 0) {
+                    approveConfirm();
+                    break;
+                } else if (confirmSelection_ == 1) {
+                    denyConfirm();
+                    break;
+                } else {
+                    submitConfirmCustom();
+                    break;
+                }
+            } else if (c == 127 || c == 8) {
                 if (confirmSelection_ == 2 && !confirmCustom_.empty())
                     confirmCustom_.pop_back();
-            }
-            else if (c >= 32 && c < 127 && confirmSelection_ == 2) {
+            } else if (c >= 32 && c < 127 && confirmSelection_ == 2) {
                 confirmCustom_ += c;
             }
         }
@@ -1403,7 +1438,7 @@ bool Tui::readServerMessages() {
     }
     char peek;
     if (recv(sockFd_, &peek, 1, MSG_PEEK | MSG_DONTWAIT) == 0) {
-        return false; // disconnected
+        return false;
     }
     return true;
 }
@@ -1452,8 +1487,6 @@ void Tui::updateDisplay(bool fullRender, bool inputChanged) {
     }
 }
 
-// ── Main event loop ──────────────────────────────────────────────────
-
 void Tui::run() {
     setupSignals();
     enterAltScreen();
@@ -1465,7 +1498,6 @@ void Tui::run() {
 
     bool needsRender = false;
     while (running_) {
-        // Adaptive frame rate: 60fps during fade/confirm, 30fps processing, ~15fps idle
         bool fading = (animFrame_ - fadeStartFrame_) < 35;
         int pollMs = (fading || confirmPending_) ? 16 : processing_ ? 33 : 64;
 
@@ -1474,12 +1506,18 @@ void Tui::run() {
         pfds[1] = {sockFd_, POLLIN, 0};
         poll(pfds, 2, pollMs);
 
-        if (g_interrupted) { g_interrupted = 0; break; }
-        if (g_resized)     { g_resized = 0; needsRender = true; }
+        if (g_interrupted) {
+            g_interrupted = 0; break;
+        }
+        if (g_resized)     {
+            g_resized = 0; needsRender = true;
+        }
 
         bool inputChanged = false;
         if (pfds[0].revents & POLLIN) processStdin(needsRender, inputChanged);
-        if (pfds[1].revents & POLLIN) { if (!readServerMessages()) break; }
+        if (pfds[1].revents & POLLIN) {
+            if (!readServerMessages()) break;
+        }
 
         if (messagesDirty_.exchange(false)) {
             needsRender = true;
@@ -1494,5 +1532,4 @@ void Tui::run() {
     disableRawMode();
     exitAltScreen();
 }
-
-} // namespace area
+}  // namespace area

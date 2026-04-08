@@ -1,16 +1,20 @@
 #include "features/scan/ResumeScanTool.h"
+
+#include <bits/chrono.h>
+#include <sstream>
+#include <functional>
+#include <memory>
+
 #include "infra/tools/ToolContext.h"
 #include "infra/agent/Agent.h"
 #include "features/scan/ScanCommand.h"
 #include "features/scan/ScanOutputFile.h"
 #include "features/scan/ScanState.h"
 
-#include <sstream>
-
 namespace area {
 
 std::optional<ToolResult> ResumeScanTool::tryExecute(const std::string& action, ToolContext& ctx) {
-    if (action.find("RESUME_SCAN:") != 0)
+    if (!action.starts_with("RESUME_SCAN:"))
         return std::nullopt;
 
     std::string runId = action.substr(12);
@@ -41,7 +45,8 @@ std::optional<ToolResult> ResumeScanTool::tryExecute(const std::string& action, 
         ctx.cb({AgentMessage::THINKING, msg});
     });
 
-    auto interruptFlag = state_->start({runId, chatId_, paused.path, paused.goal, 0, 0, std::chrono::steady_clock::now()});
+    auto interruptFlag = state_->start(
+        {runId, chatId_, paused.path, paused.goal, 0, 0, std::chrono::steady_clock::now()});
     scan.setInterruptFlag(interruptFlag);
     scan.setProgressCallback([this, runId](int scanned, int total) {
         state_->update(runId, scanned, total);
@@ -68,4 +73,4 @@ std::optional<ToolResult> ResumeScanTool::tryExecute(const std::string& action, 
         "\nYou can query the database for run_id '" + runId + "'."};
 }
 
-} // namespace area
+}  // namespace area

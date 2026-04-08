@@ -1,19 +1,22 @@
 #include "features/grep/GrepTool.h"
-#include "infra/tools/ToolContext.h"
-#include "infra/agent/Agent.h"
 
-#include <algorithm>
-#include <chrono>
+#include <bits/chrono.h>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <vector>
+#include <cctype>
+#include <functional>
+#include <system_error>
+#include <utility>
+
+#include "infra/tools/ToolContext.h"
+#include "infra/agent/Agent.h"
 
 namespace fs = std::filesystem;
 
 namespace area {
-
 static std::string toLowerStr(const std::string& s) {
     std::string out = s;
     for (auto& c : out) c = std::tolower(static_cast<unsigned char>(c));
@@ -33,7 +36,7 @@ static bool isSearchableFile(const fs::path& p) {
     for (auto& e : exts) {
         if (ext == e) return true;
     }
-    // Also accept extensionless files under 100KB (could be scripts/configs)
+
     if (ext.empty()) {
         std::error_code ec;
         auto sz = fs::file_size(p, ec);
@@ -55,7 +58,7 @@ struct GrepMatch {
 };
 
 std::optional<ToolResult> GrepTool::tryExecute(const std::string& action, ToolContext& ctx) {
-    if (action.find("GREP:") != 0)
+    if (!action.starts_with("GREP:"))
         return std::nullopt;
 
     std::string args = action.substr(5);
@@ -66,8 +69,6 @@ std::optional<ToolResult> GrepTool::tryExecute(const std::string& action, ToolCo
         return ToolResult{"OBSERVATION: Error — provide a search pattern after GREP:"};
     }
 
-    // Parse: pattern | path
-    // Use the LAST pipe where the text after it looks like a filesystem path
     std::string pattern, root;
     for (size_t i = args.size(); i-- > 0;) {
         if (args[i] == '|') {
@@ -85,14 +86,12 @@ std::optional<ToolResult> GrepTool::tryExecute(const std::string& action, ToolCo
     while (!pattern.empty() && pattern.back() == ' ') pattern.pop_back();
     while (!pattern.empty() && pattern[0] == ' ') pattern.erase(0, 1);
 
-    // Expand ~
     if (!root.empty() && root[0] == '~') {
         if (auto home = std::getenv("HOME")) {
             root = std::string(home) + root.substr(1);
         }
     }
 
-    // Determine search roots
     std::vector<std::string> roots;
     if (!root.empty()) {
         roots.push_back(root);
@@ -117,14 +116,12 @@ std::optional<ToolResult> GrepTool::tryExecute(const std::string& action, ToolCo
 
     ctx.cb({AgentMessage::THINKING, "Searching for \"" + pattern + "\"..."});
 
-    // Prepare search terms — split on | for OR matching
     std::string patternLower = toLowerStr(pattern);
     std::vector<std::string> terms;
     {
         std::istringstream ss(patternLower);
         std::string tok;
-        // Only split on | if it's not part of a regex-like pattern
-        // Simple heuristic: if pattern has no backslashes or parens, treat | as OR
+
         bool hasRegex = pattern.find('\\') != std::string::npos ||
                         pattern.find('(') != std::string::npos;
         if (!hasRegex && patternLower.find('|') != std::string::npos) {
@@ -158,7 +155,7 @@ std::optional<ToolResult> GrepTool::tryExecute(const std::string& action, ToolCo
     bool truncated = false;
 
     for (auto& searchRoot : roots) {
-        if (truncated || (int)matches.size() >= MAX_MATCHES) break;
+        if (truncated || static_cast<int>(matches.size()) >= MAX_MATCHES) break;
         if (!fs::exists(searchRoot)) continue;
 
         std::error_code ec;
@@ -166,13 +163,21 @@ std::optional<ToolResult> GrepTool::tryExecute(const std::string& action, ToolCo
             searchRoot, fs::directory_options::skip_permission_denied, ec);
 
         for (; it != fs::recursive_directory_iterator(); it.increment(ec)) {
-            if (ec) { ec.clear(); continue; }
-            if ((int)matches.size() >= MAX_MATCHES) { truncated = true; break; }
-            if (filesSearched > MAX_FILES) { truncated = true; break; }
+            if (ec) {
+                ec.clear(); continue;
+            }
+            if (static_cast<int>(matches.size()) >= MAX_MATCHES) {
+                truncated = true; break;
+            }
+            if (filesSearched > MAX_FILES) {
+                truncated = true; break;
+            }
 
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - startTime).count();
-            if (elapsed > MAX_MS) { truncated = true; break; }
+            if (elapsed > MAX_MS) {
+                truncated = true; break;
+            }
 
             auto& entry = *it;
             std::string fname = entry.path().filename().string();
@@ -181,14 +186,17 @@ std::optional<ToolResult> GrepTool::tryExecute(const std::string& action, ToolCo
                 it.disable_recursion_pending();
                 continue;
             }
-            if (ec) { ec.clear(); continue; }
+            if (ec) {
+                ec.clear(); continue;
+            }
 
-            if (!entry.is_regular_file(ec) || ec) { ec.clear(); continue; }
+            if (!entry.is_regular_file(ec) || ec) {
+                ec.clear(); continue;
+            }
             if (!isSearchableFile(entry.path())) continue;
 
-            // Check file size — skip very large files
             auto fsize = fs::file_size(entry.path(), ec);
-            if (ec || fsize > 2 * 1024 * 1024) continue; // skip > 2MB
+            if (ec || fsize > 2 * 1024 * 1024) continue;
 
             filesSearched++;
 
@@ -210,13 +218,13 @@ std::optional<ToolResult> GrepTool::tryExecute(const std::string& action, ToolCo
                 }
 
                 if (matched) {
-                    // Truncate very long lines
                     std::string display = line;
                     if (display.size() > 200) {
-                        display = display.substr(0, 200) + "...";
+                        display.resize(200);
+                        display += "...";
                     }
                     matches.push_back({entry.path().string(), lineNum, display});
-                    if ((int)matches.size() >= MAX_MATCHES) break;
+                    if (static_cast<int>(matches.size()) >= MAX_MATCHES) break;
                 }
             }
         }
@@ -231,10 +239,9 @@ std::optional<ToolResult> GrepTool::tryExecute(const std::string& action, ToolCo
         return ToolResult{obs};
     }
 
-    // Group matches by file
     struct FileGroup {
         std::string path;
-        std::vector<std::pair<int, std::string>> lines; // line_num, content
+        std::vector<std::pair<int, std::string>> lines;
     };
     std::vector<FileGroup> groups;
     std::string lastFile;
@@ -269,5 +276,4 @@ std::optional<ToolResult> GrepTool::tryExecute(const std::string& action, ToolCo
         "OBSERVATION: " + result +
         "Use READ: to view full file contents, or XREFS: to trace cross-references."};
 }
-
-} // namespace area
+}  // namespace area

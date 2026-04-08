@@ -1,12 +1,16 @@
 #pragma once
 
+#include <optional>
+#include <string>
+#include <vector>
+
 #include "infra/tools/Tool.h"
 #include "infra/db/Database.h"
 
 namespace area {
 
 class FindBehaviorTool : public Tool {
-public:
+ public:
     explicit FindBehaviorTool(Database& db) : db_(db) {}
 
     std::string name() const override { return "FIND"; }
@@ -21,9 +25,9 @@ public:
     }
     std::optional<ToolResult> tryExecute(const std::string& action, ToolContext& ctx) override;
 
-private:
+ private:
     static std::vector<std::string> extractKeywords(const std::string& query);
     Database& db_;
 };
 
-} // namespace area
+}  // namespace area

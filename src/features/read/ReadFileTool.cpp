@@ -1,24 +1,27 @@
 #include "features/read/ReadFileTool.h"
-#include "infra/tools/ToolContext.h"
-#include "infra/agent/Agent.h"
 
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <vector>
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
+#include <functional>
+#include <system_error>
+
+#include "infra/tools/ToolContext.h"
+#include "infra/agent/Agent.h"
 
 namespace fs = std::filesystem;
 
 namespace area {
-
 static std::string toLowerRF(const std::string& s) {
     std::string out = s;
     for (auto& c : out) c = std::tolower(static_cast<unsigned char>(c));
     return out;
 }
 
-// Extract a named method from smali (between .method and .end method)
 static std::string extractSmaliMethod(const std::vector<std::string>& lines,
                                        const std::string& methodName) {
     std::string nameLower = toLowerRF(methodName);
@@ -26,7 +29,7 @@ static std::string extractSmaliMethod(const std::vector<std::string>& lines,
     bool inMethod = false;
     int methodStart = 0;
 
-    for (int i = 0; i < (int)lines.size(); i++) {
+    for (int i = 0; i < static_cast<int>(lines.size()); i++) {
         std::string lineLower = toLowerRF(lines[i]);
 
         if (!inMethod && lineLower.find(".method") != std::string::npos) {
@@ -45,17 +48,15 @@ static std::string extractSmaliMethod(const std::vector<std::string>& lines,
     }
 
     if (inMethod) {
-        return out.str(); // method without .end method (shouldn't happen)
+        return out.str();
     }
 
-    // Method not found — list available methods
     std::ostringstream avail;
     avail << "Method \"" << methodName << "\" not found. Available methods:\n";
-    for (int i = 0; i < (int)lines.size(); i++) {
-        if (lines[i].find(".method") == 0 ||
+    for (int i = 0; i < static_cast<int>(lines.size()); i++) {
+        if (lines[i].starts_with(".method") ||
             (lines[i].size() > 1 && lines[i].find(".method") != std::string::npos &&
              lines[i].find(".end method") == std::string::npos)) {
-            // Extract method name from .method line
             avail << "  line " << (i + 1) << ": " << lines[i] << "\n";
         }
     }
@@ -63,7 +64,7 @@ static std::string extractSmaliMethod(const std::vector<std::string>& lines,
 }
 
 std::optional<ToolResult> ReadFileTool::tryExecute(const std::string& action, ToolContext& ctx) {
-    if (action.find("READ:") != 0)
+    if (!action.starts_with("READ:"))
         return std::nullopt;
 
     std::string args = action.substr(5);
@@ -74,7 +75,6 @@ std::optional<ToolResult> ReadFileTool::tryExecute(const std::string& action, To
         return ToolResult{"OBSERVATION: Error — provide a file path after READ:"};
     }
 
-    // Parse: path | range_or_method
     std::string filePath, modifier;
     auto pipePos = args.find('|');
     if (pipePos != std::string::npos) {
@@ -87,7 +87,6 @@ std::optional<ToolResult> ReadFileTool::tryExecute(const std::string& action, To
         filePath = args;
     }
 
-    // Expand ~
     if (!filePath.empty() && filePath[0] == '~') {
         if (auto home = std::getenv("HOME")) {
             filePath = std::string(home) + filePath.substr(1);
@@ -105,7 +104,9 @@ std::optional<ToolResult> ReadFileTool::tryExecute(const std::string& action, To
         std::error_code ec;
         for (auto dit = fs::directory_iterator(filePath, fs::directory_options::skip_permission_denied, ec);
              dit != fs::directory_iterator(); dit.increment(ec)) {
-            if (ec) { ec.clear(); continue; }
+            if (ec) {
+                ec.clear(); continue;
+            }
             std::string name = dit->path().filename().string();
             if (dit->is_directory(ec) && !ec) name += "/";
             if (ec) ec.clear();
@@ -143,7 +144,6 @@ std::optional<ToolResult> ReadFileTool::tryExecute(const std::string& action, To
     }
     file.close();
 
-    // Handle "method <name>" modifier for smali files
     if (!modifier.empty() && toLowerRF(modifier).starts_with("method")) {
         std::string methodName = modifier.substr(6);
         while (!methodName.empty() && methodName[0] == ' ') methodName.erase(0, 1);
@@ -151,8 +151,8 @@ std::optional<ToolResult> ReadFileTool::tryExecute(const std::string& action, To
         if (methodName.empty()) {
             std::ostringstream out;
             out << "Methods in " << filePath << ":\n\n";
-            for (int i = 0; i < (int)lines.size(); i++) {
-                if (lines[i].find(".method") == 0) {
+            for (int i = 0; i < static_cast<int>(lines.size()); i++) {
+                if (lines[i].starts_with(".method")) {
                     out << "  line " << (i + 1) << ": " << lines[i] << "\n";
                 }
             }
@@ -166,9 +166,8 @@ std::optional<ToolResult> ReadFileTool::tryExecute(const std::string& action, To
         return ToolResult{"OBSERVATION: " + result};
     }
 
-    // Handle line range modifier: "start-end" or just "start"
     int startLine = 1;
-    int endLine = (int)lines.size();
+    int endLine = static_cast<int>(lines.size());
 
     if (!modifier.empty()) {
         auto dashPos = modifier.find('-');
@@ -183,7 +182,7 @@ std::optional<ToolResult> ReadFileTool::tryExecute(const std::string& action, To
         } else {
             try {
                 startLine = std::stoi(modifier);
-                endLine = std::min(startLine + 99, (int)lines.size());
+                endLine = std::min(startLine + 99, static_cast<int>(lines.size()));
             } catch (...) {
                 return ToolResult{"OBSERVATION: Invalid modifier: " + modifier +
                                   ". Use line range (10-50) or 'method <name>'"};
@@ -191,30 +190,28 @@ std::optional<ToolResult> ReadFileTool::tryExecute(const std::string& action, To
         }
     }
 
-    // Clamp
     startLine = std::max(1, startLine);
-    endLine = std::min(endLine, (int)lines.size());
+    endLine = std::min(endLine, static_cast<int>(lines.size()));
 
-    // Cap output to 200 lines
     if (endLine - startLine + 1 > 200) {
         endLine = startLine + 199;
-        if (endLine > (int)lines.size()) endLine = (int)lines.size();
+        if (endLine > static_cast<int>(lines.size())) endLine = static_cast<int>(lines.size());
     }
 
     std::ostringstream out;
     out << filePath << " (" << lines.size() << " lines";
-    if (startLine != 1 || endLine != (int)lines.size()) {
+    if (startLine != 1 || endLine != static_cast<int>(lines.size())) {
         out << ", showing " << startLine << "-" << endLine;
     }
     out << "):\n\n";
 
-    for (int i = startLine - 1; i < endLine && i < (int)lines.size(); i++) {
+    for (int i = startLine - 1; i < endLine && i < static_cast<int>(lines.size()); i++) {
         out << (i + 1) << "\t" << lines[i] << "\n";
     }
 
-    if (endLine < (int)lines.size() && endLine - startLine + 1 >= 200) {
+    if (endLine < static_cast<int>(lines.size()) && endLine - startLine + 1 >= 200) {
         out << "\n... truncated. Use READ: " << filePath << " | "
-            << (endLine + 1) << "-" << std::min(endLine + 200, (int)lines.size())
+            << (endLine + 1) << "-" << std::min(endLine + 200, static_cast<int>(lines.size()))
             << " to continue.\n";
     }
 
@@ -222,5 +219,4 @@ std::optional<ToolResult> ReadFileTool::tryExecute(const std::string& action, To
     ctx.cb({AgentMessage::RESULT, result});
     return ToolResult{"OBSERVATION: " + result};
 }
-
-} // namespace area
+}  // namespace area

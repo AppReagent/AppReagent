@@ -1,6 +1,7 @@
 #include "infra/sandbox/Sandbox.h"
-#include "util/string_util.h"
 
+#include <bits/types/struct_FILE.h>
+#include <stdlib.h>
 #include <array>
 #include <cstdio>
 #include <filesystem>
@@ -8,10 +9,11 @@
 #include <memory>
 #include <sstream>
 
+#include "util/string_util.h"
+
 namespace fs = std::filesystem;
 
 namespace area {
-
 static std::string runCmd(const std::string& cmd, int* exitCode = nullptr) {
     std::string result;
     std::string wrapped = cmd + " 2>&1";
@@ -20,7 +22,7 @@ static std::string runCmd(const std::string& cmd, int* exitCode = nullptr) {
         if (exitCode) *exitCode = -1;
         return "failed to execute command";
     }
-    // RAII guard to ensure pclose is called even on exception
+
     auto pcloseDeleter = [](FILE* f) { return pclose(f); };
     std::unique_ptr<FILE, decltype(pcloseDeleter)> pipeGuard(pipe, pcloseDeleter);
     std::array<char, 4096> buf;
@@ -29,14 +31,13 @@ static std::string runCmd(const std::string& cmd, int* exitCode = nullptr) {
     }
     int status = pclose(pipeGuard.release());
     if (exitCode) *exitCode = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-    // trim trailing newline
+
     while (!result.empty() && result.back() == '\n') result.pop_back();
     return result;
 }
 
 Sandbox::Sandbox(const std::string& dataDir, const std::string& samplesDir)
-    : dataDir_(dataDir), samplesDir_(samplesDir) {
-    workDir_ = dataDir + "/sandbox-workspace";
+    : dataDir_(dataDir), samplesDir_(samplesDir), workDir_(dataDir + "/sandbox-workspace") {
     fs::create_directories(workDir_);
 }
 
@@ -65,7 +66,6 @@ void Sandbox::ensureRunning() {
     int exitCode;
     std::string id = runCmd(cmd.str(), &exitCode);
     if (exitCode != 0) {
-        // Try pulling/building the image
         std::cerr << "[sandbox] container start failed: " << id << std::endl;
         std::cerr << "[sandbox] trying to build image..." << std::endl;
         int buildExit;
@@ -74,7 +74,7 @@ void Sandbox::ensureRunning() {
             std::cerr << "[sandbox] image build failed: " << buildOut << std::endl;
             return;
         }
-        // Retry
+
         id = runCmd(cmd.str(), &exitCode);
         if (exitCode != 0) {
             std::cerr << "[sandbox] container start failed after build: " << id << std::endl;
@@ -102,7 +102,6 @@ ExecResult Sandbox::exec(const std::string& command, int timeout_sec) {
         return {"Sandbox not available. Docker may not be installed or the area-sandbox image could not be built.", 1};
     }
 
-    // Escape single quotes in command for shell
     std::string escaped;
     for (char c : command) {
         if (c == '\'') escaped += "'\\''";
@@ -117,13 +116,12 @@ ExecResult Sandbox::exec(const std::string& command, int timeout_sec) {
     int exitCode;
     std::string output = runCmd(cmd.str(), &exitCode);
 
-    // Truncate very long output
     const size_t maxOutput = 8192;
     if (output.size() > maxOutput) {
-        output = output.substr(0, maxOutput) + "\n... (output truncated at " + std::to_string(maxOutput) + " bytes)";
+        output.resize(maxOutput);
+        output += "\n... (output truncated at " + std::to_string(maxOutput) + " bytes)";
     }
 
     return {output, exitCode};
 }
-
-} // namespace area
+}  // namespace area

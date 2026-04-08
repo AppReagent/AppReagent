@@ -1,10 +1,10 @@
 #pragma once
 
+#include <libpq-fe.h>
+
 #include <mutex>
 #include <string>
 #include <vector>
-#include <libpq-fe.h>
-
 namespace area {
 
 struct QueryResult {
@@ -16,7 +16,7 @@ struct QueryResult {
 };
 
 class Database {
-public:
+ public:
     Database();
     ~Database();
 
@@ -29,9 +29,9 @@ public:
     QueryResult execute(const std::string& sql);
     QueryResult executeParams(const std::string& sql, const std::vector<std::string>& params);
 
-private:
+ private:
     PGconn* conn_ = nullptr;
     mutable std::mutex mu_;
 };
 
-} // namespace area
+}  // namespace area

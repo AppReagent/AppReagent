@@ -1,7 +1,8 @@
 #include "infra/events/EventBus.h"
 
-namespace area {
+#include <algorithm>
 
+namespace area {
 void EventBus::subscribe(EventType type, Callback cb) {
     std::lock_guard lk(mu_);
     typed_.emplace_back(type, std::move(cb));
@@ -13,8 +14,6 @@ void EventBus::subscribe(Callback cb) {
 }
 
 void EventBus::emit(Event event) {
-    // Copy callbacks under lock, then invoke outside it to prevent deadlock
-    // if a callback calls subscribe() or emit() on the same EventBus.
     std::vector<Callback> toCall;
     {
         std::lock_guard lk(mu_);
@@ -29,5 +28,4 @@ void EventBus::emit(Event event) {
         cb(event);
     }
 }
-
-} // namespace area
+}  // namespace area

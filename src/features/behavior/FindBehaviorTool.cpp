@@ -1,13 +1,15 @@
 #include "features/behavior/FindBehaviorTool.h"
+
+#include <stddef.h>
+#include <sstream>
+#include <unordered_set>
+#include <cctype>
+#include <functional>
+
 #include "infra/tools/ToolContext.h"
 #include "infra/agent/Agent.h"
 
-#include <algorithm>
-#include <sstream>
-#include <unordered_set>
-
 namespace area {
-
 static const std::unordered_set<std::string> STOP_WORDS = {
     "the", "a", "an", "and", "or", "of", "in", "to", "from", "my", "code",
     "where", "it", "that", "this", "is", "are", "was", "were", "do", "does",
@@ -26,7 +28,6 @@ std::vector<std::string> FindBehaviorTool::extractKeywords(const std::string& qu
     std::istringstream ss(query);
     std::string word;
     while (ss >> word) {
-        // Lowercase
         std::string lower;
         for (char c : word) {
             if (std::isalnum(c) || c == '_' || c == '.' || c == '/') {
@@ -41,7 +42,7 @@ std::vector<std::string> FindBehaviorTool::extractKeywords(const std::string& qu
 }
 
 std::optional<ToolResult> FindBehaviorTool::tryExecute(const std::string& action, ToolContext& ctx) {
-    if (action.find("FIND:") != 0)
+    if (!action.starts_with("FIND:"))
         return std::nullopt;
 
     std::string args = action.substr(5);
@@ -52,7 +53,6 @@ std::optional<ToolResult> FindBehaviorTool::tryExecute(const std::string& action
         return ToolResult{"OBSERVATION: Error — provide a behavior description after FIND:"};
     }
 
-    // Parse optional run_id after pipe
     std::string query, runId;
     auto pipePos = args.find('|');
     if (pipePos != std::string::npos) {
@@ -65,13 +65,11 @@ std::optional<ToolResult> FindBehaviorTool::tryExecute(const std::string& action
         query = args;
     }
 
-    // If no run_id, find the most recent one
     if (runId.empty() || runId == "latest") {
         auto qr = db_.execute(
             "SELECT DISTINCT run_id FROM method_findings "
             "ORDER BY run_id DESC LIMIT 1");
         if (!qr.ok() || qr.rows.empty()) {
-            // Fall back to scan_results
             qr = db_.execute(
                 "SELECT DISTINCT run_id FROM scan_results "
                 "ORDER BY run_id DESC LIMIT 1");
@@ -89,13 +87,11 @@ std::optional<ToolResult> FindBehaviorTool::tryExecute(const std::string& action
 
     auto keywords = extractKeywords(query);
     if (keywords.empty()) {
-        // Fall back to using the whole query as a single search term
         keywords.push_back(query);
     }
 
-    // Build WHERE clause with parameterized LIKE patterns
     std::vector<std::string> params;
-    params.push_back(runId);  // $1
+    params.push_back(runId);
 
     std::ostringstream whereClauses;
     std::ostringstream rankExpr;
@@ -103,7 +99,7 @@ std::optional<ToolResult> FindBehaviorTool::tryExecute(const std::string& action
 
     for (size_t i = 0; i < keywords.size(); i++) {
         if (i > 0) whereClauses << " OR ";
-        // Escape LIKE metacharacters in keyword
+
         std::string likeKw;
         for (char c : keywords[i]) {
             if (c == '%') likeKw += "%%";
@@ -134,7 +130,6 @@ std::optional<ToolResult> FindBehaviorTool::tryExecute(const std::string& action
     auto qr = db_.executeParams(sql, params);
 
     if (!qr.ok()) {
-        // Table might not exist yet if no scans have been run since the update
         if (qr.error.find("method_findings") != std::string::npos) {
             return ToolResult{
                 "OBSERVATION: The method_findings table doesn't exist yet. "
@@ -145,9 +140,8 @@ std::optional<ToolResult> FindBehaviorTool::tryExecute(const std::string& action
     }
 
     if (qr.rows.empty()) {
-        // Try a broader search on scan_results risk_profile
         std::vector<std::string> profileParams;
-        profileParams.push_back(runId);  // $1
+        profileParams.push_back(runId);
 
         std::ostringstream profileWhere;
         for (size_t i = 0; i < keywords.size(); i++) {
@@ -196,7 +190,6 @@ std::optional<ToolResult> FindBehaviorTool::tryExecute(const std::string& action
             "or SQL: to query scan_results directly."};
     }
 
-    // Format results
     std::ostringstream out;
     out << qr.rows.size() << " methods found matching '" << query << "' (run " << runId << "):\n\n";
 
@@ -238,5 +231,4 @@ std::optional<ToolResult> FindBehaviorTool::tryExecute(const std::string& action
         "Use CALLGRAPH: to trace call chains for these methods, "
         "or SQL: to query scan_results for file-level details."};
 }
-
-} // namespace area
+}  // namespace area

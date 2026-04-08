@@ -1,17 +1,21 @@
 #pragma once
 
+#include <stddef.h>
 #include <atomic>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <vector>
+#include <string>
+#include <utility>
 
 #include "infra/llm/LLMBackend.h"
+#include "infra/config/Config.h"
 
 namespace area {
 
 class BackendPool : public LLMBackend {
-public:
+ public:
     explicit BackendPool(const std::vector<AiEndpoint>& endpoints);
     BackendPool(const std::vector<AiEndpoint>& endpoints, int tier);
 
@@ -25,7 +29,7 @@ public:
     size_t size() const { return backends_.size(); }
     int totalConcurrency() const;
 
-private:
+ private:
     struct Slot {
         std::unique_ptr<LLMBackend> backend;
         int maxConcurrent;
@@ -46,4 +50,4 @@ private:
     std::atomic<size_t> roundRobin_{0};
 };
 
-} // namespace area
+}  // namespace area

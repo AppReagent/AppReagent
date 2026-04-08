@@ -1,14 +1,16 @@
 #include "features/scan/ScanLog.h"
 
+#include <openssl/sha.h>
 #include <fstream>
 #include <iostream>
-#include <openssl/sha.h>
 #include <random>
 #include <sstream>
 #include <iomanip>
+#include <initializer_list>
+#include <stdexcept>
+#include <vector>
 
 namespace area {
-
 ScanLog::ScanLog(Database& db) : db_(db) {}
 
 std::string ScanLog::sha256(const std::string& data) {
@@ -16,7 +18,7 @@ std::string ScanLog::sha256(const std::string& data) {
     SHA256(reinterpret_cast<const unsigned char*>(data.c_str()), data.size(), hash);
     std::ostringstream ss;
     for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
-        ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
+        ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(hash[i]);
     }
     return ss.str();
 }
@@ -52,7 +54,7 @@ void ScanLog::dropTables() {
 
 void ScanLog::ensureTables() {
     std::string ddl = loadDDL();
-    // Split on semicolons and execute each statement
+
     std::istringstream ss(ddl);
     std::string stmt;
     while (std::getline(ss, stmt, ';')) {
@@ -68,7 +70,6 @@ void ScanLog::ensureTables() {
 }
 
 std::string ScanLog::loadDDL() {
-    // Try ddl.sql relative to executable, then current directory
     for (auto& path : {"ddl.sql"}) {
         std::ifstream f(path);
         if (f.is_open()) {
@@ -81,7 +82,6 @@ std::string ScanLog::loadDDL() {
 }
 
 std::optional<ScanLog::ExistingScan> ScanLog::findRecentScan(const std::string& path) {
-    // Find the most recent run that scanned files under this path
     auto result = db_.executeParams(
         "SELECT run_id, count(*) as cnt, "
         "count(CASE WHEN risk_score > 0 THEN 1 END) as flagged, "
@@ -95,9 +95,15 @@ std::optional<ScanLog::ExistingScan> ScanLog::findRecentScan(const std::string& 
     if (row.size() < 5) return std::nullopt;
     ExistingScan scan;
     scan.run_id = row[0];
-    try { scan.file_count = std::stoi(row[1]); } catch (...) {}
-    try { scan.flagged_count = std::stoi(row[2]); } catch (...) {}
-    try { scan.max_risk = std::stoi(row[3]); } catch (...) {}
+    try {
+        scan.file_count = std::stoi(row[1]); } catch (...) {
+    }
+    try {
+        scan.flagged_count = std::stoi(row[2]); } catch (...) {
+    }
+    try {
+        scan.max_risk = std::stoi(row[3]); } catch (...) {
+    }
     scan.latest = row[4];
     return scan;
 }
@@ -203,5 +209,4 @@ void ScanLog::deleteRun(const std::string& run_id) {
     db_.executeParams("DELETE FROM method_findings WHERE run_id = $1", {run_id});
     db_.executeParams("DELETE FROM scan_files WHERE run_id = $1", {run_id});
 }
-
-} // namespace area
+}  // namespace area

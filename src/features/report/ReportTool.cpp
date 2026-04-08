@@ -1,17 +1,19 @@
 #include "features/report/ReportTool.h"
-#include "infra/tools/ToolContext.h"
-#include "infra/agent/Agent.h"
 
-#include <chrono>
+#include <bits/chrono.h>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <functional>
+#include <vector>
+
+#include "infra/tools/ToolContext.h"
+#include "infra/agent/Agent.h"
 
 namespace fs = std::filesystem;
 
 namespace area {
-
 static std::string resolveRunId(Database& db, const std::string& input) {
     if (input.empty() || input == "latest") {
         auto qr = db.execute(
@@ -33,7 +35,7 @@ static std::string timestamp() {
 }
 
 std::optional<ToolResult> ReportTool::tryExecute(const std::string& action, ToolContext& ctx) {
-    if (action.find("REPORT:") != 0)
+    if (!action.starts_with("REPORT:"))
         return std::nullopt;
 
     std::string args = action.substr(7);
@@ -42,7 +44,6 @@ std::optional<ToolResult> ReportTool::tryExecute(const std::string& action, Tool
 
     if (args.empty()) args = "latest";
 
-    // Parse: run_id | output_path
     std::string runIdRaw, outputPath;
     auto pipePos = args.find('|');
     if (pipePos != std::string::npos) {
@@ -64,7 +65,6 @@ std::optional<ToolResult> ReportTool::tryExecute(const std::string& action, Tool
 
     std::ostringstream report;
 
-    // Header
     report << "# Malware Analysis Report\n\n"
            << "| Field | Value |\n"
            << "|-------|-------|\n"
@@ -72,7 +72,6 @@ std::optional<ToolResult> ReportTool::tryExecute(const std::string& action, Tool
            << "| Generated | " << timestamp() << " |\n"
            << "| Tool | AppReagent |\n\n";
 
-    // Executive Summary — scan_results
     {
         auto qr = db_.executeParams(
             "SELECT file_path, risk_score, "
@@ -84,13 +83,14 @@ std::optional<ToolResult> ReportTool::tryExecute(const std::string& action, Tool
             {runId});
 
         if (qr.ok() && !qr.rows.empty()) {
-            // Compute aggregate stats
-            int maxScore = 0, totalFiles = (int)qr.rows.size();
+            int maxScore = 0, totalFiles = static_cast<int>(qr.rows.size());
             int relevant = 0, partial = 0, irrelevant = 0;
             for (auto& row : qr.rows) {
                 if (row.size() < 5) continue;
                 int score = 0;
-                try { score = std::stoi(row[1]); } catch (...) {}
+                try {
+                    score = std::stoi(row[1]); } catch (...) {
+                }
                 if (score > maxScore) maxScore = score;
                 if (row[2] == "relevant") relevant++;
                 else if (row[2] == "partially_relevant") partial++;
@@ -110,7 +110,6 @@ std::optional<ToolResult> ReportTool::tryExecute(const std::string& action, Tool
                    << "| Partially relevant | " << partial << " |\n"
                    << "| Not relevant (benign) | " << irrelevant << " |\n\n";
 
-            // Per-file details
             report << "## File Analysis\n\n";
             for (auto& row : qr.rows) {
                 if (row.size() < 5) continue;
@@ -137,7 +136,6 @@ std::optional<ToolResult> ReportTool::tryExecute(const std::string& action, Tool
         }
     }
 
-    // Method-level findings
     {
         auto qr = db_.executeParams(
             "SELECT class_name, method_name, file_path, api_calls, findings, reasoning, "
@@ -160,7 +158,6 @@ std::optional<ToolResult> ReportTool::tryExecute(const std::string& action, Tool
             }
             report << "\n";
 
-            // Detailed findings for top methods
             report << "### Detailed Findings\n\n";
             int shown = 0;
             for (auto& row : qr.rows) {
@@ -176,7 +173,6 @@ std::optional<ToolResult> ReportTool::tryExecute(const std::string& action, Tool
         }
     }
 
-    // Call graph edges for relevant methods
     {
         auto qr = db_.executeParams(
             "SELECT DISTINCT mc.caller_class, mc.caller_method, "
@@ -202,7 +198,6 @@ std::optional<ToolResult> ReportTool::tryExecute(const std::string& action, Tool
         }
     }
 
-    // LLM call stats
     {
         auto qr = db_.executeParams(
             "SELECT node_name, tier, COUNT(*), "
@@ -230,7 +225,6 @@ std::optional<ToolResult> ReportTool::tryExecute(const std::string& action, Tool
 
     std::string reportStr = report.str();
 
-    // Write to file if path given
     if (!outputPath.empty()) {
         fs::create_directories(fs::path(outputPath).parent_path());
         std::ofstream f(outputPath);
@@ -245,7 +239,6 @@ std::optional<ToolResult> ReportTool::tryExecute(const std::string& action, Tool
         return ToolResult{"OBSERVATION: Error — could not write to " + outputPath};
     }
 
-    // Return inline (truncated if very long)
     if (reportStr.size() > 6000) {
         std::string truncated = reportStr.substr(0, 6000) +
             "\n\n... (truncated — use REPORT: " + runId +
@@ -257,5 +250,4 @@ std::optional<ToolResult> ReportTool::tryExecute(const std::string& action, Tool
     ctx.cb({AgentMessage::RESULT, reportStr});
     return ToolResult{"OBSERVATION: " + reportStr};
 }
-
-} // namespace area
+}  // namespace area

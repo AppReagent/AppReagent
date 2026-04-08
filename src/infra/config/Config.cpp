@@ -1,9 +1,13 @@
 #include "infra/config/Config.h"
 
+#include <algorithm>
 #include <fstream>
+#include <map>
 #include <stdexcept>
-#include <nlohmann/json.hpp>
+#include <utility>
 
+#include "nlohmann/detail/iterators/iter_impl.hpp"
+#include <nlohmann/json.hpp>
 namespace area {
 
 Config Config::load(const std::string& path) {
@@ -56,4 +60,4 @@ Config Config::load(const std::string& path) {
     return c;
 }
 
-} // namespace area
+}  // namespace area

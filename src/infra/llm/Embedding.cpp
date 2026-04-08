@@ -1,11 +1,20 @@
 #include "infra/llm/Embedding.h"
 
 #include <curl/curl.h>
+#include <stddef.h>
+
+#include <algorithm>
+#include <exception>
 #include <iostream>
-#include <nlohmann/json.hpp>
+#include <map>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
+#include <nlohmann/json.hpp>
+
+#include "nlohmann/detail/iterators/iter_impl.hpp"
+#include "nlohmann/detail/json_ref.hpp"
 namespace area {
 
 struct EmbCurlHandle {
@@ -82,7 +91,6 @@ std::vector<float> OllamaEmbeddingBackend::embed(const std::string& text) {
         throw std::runtime_error("ollama embedding error: " + j["error"].dump());
     }
 
-    // Ollama /api/embed returns {"embeddings": [[...]]}
     if (!j.contains("embeddings") || !j["embeddings"].is_array() || j["embeddings"].empty()) {
         throw std::runtime_error("ollama embedding error: response missing 'embeddings' array");
     }
@@ -113,7 +121,6 @@ std::vector<float> OpenAIEmbeddingBackend::embed(const std::string& text) {
         throw std::runtime_error("openai embedding error: " + j["error"].dump());
     }
 
-    // OpenAI format: {"data": [{"embedding": [...]}]}
     if (!j.contains("data") || !j["data"].is_array() || j["data"].empty() ||
         !j["data"][0].contains("embedding")) {
         throw std::runtime_error("openai embedding error: response missing 'data[0].embedding'");
@@ -164,7 +171,7 @@ EmbeddingStore::search(const std::vector<float>& query_embedding,
                        int top_k,
                        const std::string& exclude_run_id) {
     std::vector<std::string> params;
-    params.push_back(vectorToParam(query_embedding));  // $1
+    params.push_back(vectorToParam(query_embedding));
 
     std::string sql =
         "SELECT run_id, file_path, class_name, method_name, content, "
@@ -195,7 +202,9 @@ EmbeddingStore::search(const std::vector<float>& query_embedding,
         sr.class_name = row[2];
         sr.method_name = row[3];
         sr.content = row[4];
-        try { sr.similarity = std::stod(row[5]); } catch (...) { sr.similarity = 0; }
+        try {
+            sr.similarity = std::stod(row[5]); } catch (...) { sr.similarity = 0;
+        }
         results.push_back(std::move(sr));
     }
     return results;
@@ -230,4 +239,4 @@ void EmbeddingStore::deleteRun(const std::string& run_id) {
     db_.executeParams("DELETE FROM method_embeddings WHERE run_id = $1", {run_id});
 }
 
-} // namespace area
+}  // namespace area

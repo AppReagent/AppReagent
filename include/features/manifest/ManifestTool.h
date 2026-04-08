@@ -1,11 +1,14 @@
 #pragma once
 
+#include <optional>
+#include <string>
+
 #include "infra/tools/Tool.h"
 
 namespace area {
 
 class ManifestTool : public Tool {
-public:
+ public:
     std::string name() const override { return "MANIFEST"; }
     std::string description() const override {
         return "<path> — parse AndroidManifest.xml and display app metadata: "
@@ -17,4 +20,4 @@ public:
     std::optional<ToolResult> tryExecute(const std::string& action, ToolContext& ctx) override;
 };
 
-} // namespace area
+}  // namespace area

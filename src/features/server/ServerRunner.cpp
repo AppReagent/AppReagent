@@ -1,8 +1,12 @@
 #include "features/server/ServerRunner.h"
 
+#include <algorithm>
+#include <exception>
 #include <iostream>
-#include <nlohmann/json.hpp>
+#include <map>
+#include <utility>
 
+#include <nlohmann/json.hpp>
 namespace area {
 
 ServerRunner::ServerRunner(std::unique_ptr<LLMBackend> backend, int tier, int maxConcurrent,
@@ -11,7 +15,8 @@ ServerRunner::ServerRunner(std::unique_ptr<LLMBackend> backend, int tier, int ma
     , tier_(tier)
     , maxConcurrent_(maxConcurrent)
     , onComplete_(std::move(onComplete))
-    , onFail_(std::move(onFail)) {}
+    , onFail_(std::move(onFail)) {
+}
 
 ServerRunner::~ServerRunner() {
     stop();
@@ -62,7 +67,6 @@ void ServerRunner::workerLoop() {
             inbox_.pop();
         }
 
-        // Check if we're in backoff
         if (!healthy()) {
             auto now = std::chrono::steady_clock::now().time_since_epoch().count();
             auto until = backoffUntil_.load();
@@ -90,7 +94,7 @@ void ServerRunner::workerLoop() {
             std::cerr << "[server:" << backend_->endpoint().id << "] job "
                       << job.id << " failed: " << e.what() << std::endl;
             applyBackoff();
-            // Requeue so another agent can pick it up
+
             onFail_(job.id, e.what(), true);
         }
     }
@@ -115,4 +119,4 @@ void ServerRunner::resetBackoff() {
     backoffUntil_.store(0);
 }
 
-} // namespace area
+}  // namespace area

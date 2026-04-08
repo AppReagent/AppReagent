@@ -1,15 +1,19 @@
 #include "features/find/FindFilesTool.h"
-#include "infra/tools/ToolContext.h"
-#include "infra/agent/Agent.h"
 
+#include <bits/chrono.h>
 #include <algorithm>
 #include <cctype>
-#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <map>
 #include <sstream>
 #include <vector>
+#include <functional>
+#include <system_error>
+#include <utility>
+
+#include "infra/tools/ToolContext.h"
+#include "infra/agent/Agent.h"
 
 namespace fs = std::filesystem;
 
@@ -21,14 +25,12 @@ static std::string toLower(const std::string& s) {
     return out;
 }
 
-// Simple glob matching: supports * as wildcard. Case-insensitive.
 static bool globMatch(const std::string& text, const std::string& pattern) {
     std::string tl = toLower(text);
     std::string pl = toLower(pattern);
 
-    // DP glob match
-    int n = (int)tl.size(), m = (int)pl.size();
-    // Quick substring check when pattern is just *X* or plain text
+    int n = static_cast<int>(tl.size()), m = static_cast<int>(pl.size());
+
     if (pl.find('*') == std::string::npos) {
         return tl.find(pl) != std::string::npos;
     }
@@ -54,7 +56,7 @@ static bool matchesQuery(const std::string& filename, const std::string& query) 
     if (query.find('*') != std::string::npos || query.find('?') != std::string::npos) {
         return globMatch(filename, query);
     }
-    // Plain substring (case-insensitive)
+
     return toLower(filename).find(toLower(query)) != std::string::npos;
 }
 
@@ -73,13 +75,12 @@ struct DirInfo {
 };
 
 std::optional<ToolResult> FindFilesTool::tryExecute(const std::string& action, ToolContext& ctx) {
-    if (action.find("FIND_FILES:") != 0)
+    if (!action.starts_with("FIND_FILES:"))
         return std::nullopt;
 
     std::string args = action.substr(11);
     while (!args.empty() && args[0] == ' ') args.erase(0, 1);
 
-    // Parse: query | root
     std::string query, root;
     auto pipePos = args.find('|');
     if (pipePos != std::string::npos) {
@@ -98,7 +99,6 @@ std::optional<ToolResult> FindFilesTool::tryExecute(const std::string& action, T
                           "Usage: FIND_FILES: <name-or-pattern> [| <root-directory>]"};
     }
 
-    // Determine search roots
     std::vector<std::string> roots;
     auto addRoot = [&](const std::string& p) {
         if (p.empty() || !fs::exists(p)) return;
@@ -113,7 +113,7 @@ std::optional<ToolResult> FindFilesTool::tryExecute(const std::string& action, T
         if (auto home = std::getenv("HOME")) addRoot(home);
         if (fs::exists("/opt/area")) addRoot("/opt/area");
         addRoot("/tmp");
-        // Add binary's directory so we can find test assets and project files
+
         {
             std::error_code ec;
             auto exePath = fs::read_symlink("/proc/self/exe", ec);
@@ -140,25 +140,31 @@ std::optional<ToolResult> FindFilesTool::tryExecute(const std::string& action, T
             searchRoot, fs::directory_options::skip_permission_denied, ec);
 
         for (; it != fs::recursive_directory_iterator(); it.increment(ec)) {
-            if (ec) { ec.clear(); continue; }
+            if (ec) {
+                ec.clear(); continue;
+            }
 
             filesVisited++;
-            if (filesVisited > MAX_FILES) { truncated = true; break; }
+            if (filesVisited > MAX_FILES) {
+                truncated = true; break;
+            }
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - startTime).count();
-            if (elapsed > MAX_MS) { truncated = true; break; }
+            if (elapsed > MAX_MS) {
+                truncated = true; break;
+            }
 
             auto& entry = *it;
             std::string fname = entry.path().filename().string();
 
-            // Skip noisy directories
             if (entry.is_directory(ec) && !ec && shouldSkipDir(fname)) {
                 it.disable_recursion_pending();
                 continue;
             }
-            if (ec) { ec.clear(); continue; }
+            if (ec) {
+                ec.clear(); continue;
+            }
 
-            // Match against filename or full path
             if (matchesQuery(fname, query) ||
                 matchesQuery(entry.path().string(), query)) {
                 std::string dir;
@@ -173,13 +179,14 @@ std::optional<ToolResult> FindFilesTool::tryExecute(const std::string& action, T
         }
     }
 
-    // Count scannable files in each matched directory (non-recursive, quick)
     for (auto& [dirPath, info] : dirs) {
         std::error_code ec;
         if (!fs::is_directory(dirPath, ec)) continue;
         for (auto dit = fs::directory_iterator(dirPath, fs::directory_options::skip_permission_denied, ec);
              dit != fs::directory_iterator(); dit.increment(ec)) {
-            if (ec) { ec.clear(); continue; }
+            if (ec) {
+                ec.clear(); continue;
+            }
             if (dit->is_regular_file(ec) && !ec && isScannable(dit->path())) {
                 info.scannableCount++;
             }
@@ -195,7 +202,6 @@ std::optional<ToolResult> FindFilesTool::tryExecute(const std::string& action, T
         return ToolResult{obs};
     }
 
-    // Sort by match count, then scannable count
     std::vector<std::pair<std::string, DirInfo>> sorted(dirs.begin(), dirs.end());
     std::sort(sorted.begin(), sorted.end(), [](auto& a, auto& b) {
         if (a.second.matchedFiles.size() != b.second.matchedFiles.size())
@@ -205,7 +211,7 @@ std::optional<ToolResult> FindFilesTool::tryExecute(const std::string& action, T
 
     std::ostringstream out;
     int totalMatches = 0;
-    for (auto& [_, info] : sorted) totalMatches += (int)info.matchedFiles.size();
+    for (auto& [_, info] : sorted) totalMatches += static_cast<int>(info.matchedFiles.size());
     out << "Found " << totalMatches << " match(es) across " << dirs.size() << " directory(ies):\n\n";
 
     int shown = 0;
@@ -243,4 +249,4 @@ std::optional<ToolResult> FindFilesTool::tryExecute(const std::string& action, T
     return ToolResult{"OBSERVATION: " + result};
 }
 
-} // namespace area
+}  // namespace area

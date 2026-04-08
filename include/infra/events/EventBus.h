@@ -1,10 +1,11 @@
 #pragma once
 
-#include <chrono>
+#include <bits/chrono.h>
 #include <functional>
 #include <mutex>
 #include <string>
 #include <vector>
+#include <utility>
 
 namespace area {
 
@@ -29,21 +30,19 @@ struct Event {
 };
 
 class EventBus {
-public:
+ public:
     using Callback = std::function<void(const Event&)>;
 
-    // Subscribe to a specific event type
     void subscribe(EventType type, Callback cb);
 
-    // Subscribe to all events
     void subscribe(Callback cb);
 
     void emit(Event event);
 
-private:
+ private:
     std::mutex mu_;
     std::vector<std::pair<EventType, Callback>> typed_;
     std::vector<Callback> global_;
 };
 
-} // namespace area
+}  // namespace area

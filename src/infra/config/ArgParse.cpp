@@ -22,7 +22,7 @@ std::optional<Error> ArgParse::parse() {
                 return Error::ExpectedNamedArgValue;
             }
             namedArgs_[arg.substr(2)] = std::string(argv_[i+1]);
-            i++; // skip the value
+            i++;
         }
     }
     parsed_ = true;
@@ -43,4 +43,4 @@ std::optional<std::string> ArgParse::getNamedArg(const std::string& key) const {
     return std::nullopt;
 }
 
-} // namespace area
+}  // namespace area

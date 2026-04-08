@@ -28,7 +28,7 @@ struct NodeResult {
 };
 
 class Node {
-public:
+ public:
     explicit Node(std::string name) : name_(std::move(name)) {}
     virtual ~Node() = default;
 
@@ -36,10 +36,10 @@ public:
 
     virtual NodeResult execute(TaskContext ctx) = 0;
 
-private:
+ private:
     std::string name_;
 };
 
 using NodePtr = std::shared_ptr<Node>;
 
-} // namespace area::graph
+}  // namespace area::graph

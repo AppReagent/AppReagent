@@ -1,11 +1,14 @@
 #pragma once
 
+#include <optional>
+#include <string>
+
 #include "infra/tools/Tool.h"
 
 namespace area {
 
 class GrepTool : public Tool {
-public:
+ public:
     std::string name() const override { return "GREP"; }
     std::string description() const override {
         return "<pattern> [| <path>] — search code files for a text pattern. "
@@ -19,4 +22,4 @@ public:
     std::optional<ToolResult> tryExecute(const std::string& action, ToolContext& ctx) override;
 };
 
-} // namespace area
+}  // namespace area

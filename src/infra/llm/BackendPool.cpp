@@ -1,12 +1,13 @@
 #include "infra/llm/BackendPool.h"
 
-#include <chrono>
+#include <bits/chrono.h>
 #include <iostream>
 #include <stdexcept>
 #include <thread>
+#include <algorithm>
+#include <exception>
 
 namespace area {
-
 static AiEndpoint poolEndpoint(const std::vector<AiEndpoint>& endpoints) {
     if (endpoints.empty()) {
         return AiEndpoint{"pool", "pool", "", "auto", "", 0, 1, 8192};
@@ -65,7 +66,6 @@ BackendPool::BackendPool(const std::vector<AiEndpoint>& endpoints, int tier)
             backends_.push_back(std::move(slot));
         }
     } else {
-        // Update pool metadata to reflect actual backends, not all endpoints
         endpoint_ = poolEndpoint(filtered);
     }
 }
@@ -161,5 +161,4 @@ ChatResult BackendPool::chatWithUsage(const std::string& system,
         }
     });
 }
-
-} // namespace area
+}  // namespace area

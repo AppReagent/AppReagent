@@ -1,8 +1,9 @@
 #include "mcp/McpUtil.h"
 
-#include <cctype>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <stdlib.h>
+#include <cctype>
 
 namespace area::mcp {
 
@@ -58,4 +59,4 @@ bool isValidName(const std::string& s) {
     return !s.empty();
 }
 
-} // namespace area::mcp
+}  // namespace area::mcp

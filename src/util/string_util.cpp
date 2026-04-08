@@ -1,5 +1,7 @@
 #include "util/string_util.h"
 
+#include <stddef.h>
+
 namespace area::util {
 
 std::string trim(const std::string& s) {
@@ -48,4 +50,4 @@ std::string truncateUTF8(const std::string& s, int maxBytes) {
     return s.substr(0, end);
 }
 
-} // namespace area::util
+}  // namespace area::util

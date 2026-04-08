@@ -1,20 +1,33 @@
 #include "domains/graph/graphs/scan_task_graph.h"
-#include "domains/graph/graphs/elf_analysis.h"
-#include "domains/graph/util/json_extract.h"
-#include "util/file_io.h"
-#include "infra/llm/Embedding.h"
 
+#include <bits/std_abs.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#include <algorithm>
+#include <cctype>
 #include <cinttypes>
 #include <filesystem>
-#include <fstream>
+#include <initializer_list>
 #include <iomanip>
 #include <set>
 #include <sstream>
+#include <stdexcept>
+#include <utility>
+#include <vector>
+
+#include "domains/elf/disassembler.h"
+#include "domains/graph/engine/task_context.h"
+#include "domains/graph/graphs/elf_analysis.h"
+#include "domains/graph/util/json_extract.h"
+#include "infra/llm/Embedding.h"
+#include "nlohmann/detail/iterators/iter_impl.hpp"
+#include "nlohmann/detail/json_ref.hpp"
+#include "nlohmann/json.hpp"
+#include "util/file_io.h"
 
 using area::graph::extractJson;
 namespace fs = std::filesystem;
-
-#include "domains/elf/disassembler.h"
 #include "domains/graph/nodes/code_node.h"
 #include "domains/graph/nodes/llm_call_node.h"
 #include "domains/graph/nodes/splitter_node.h"
@@ -22,16 +35,17 @@ namespace fs = std::filesystem;
 #include "domains/smali/parser.h"
 
 namespace area::graph {
-
 area::LLMBackend* TierBackends::at(int tier) const {
     auto it = backends.find(tier);
     if (it != backends.end()) return it->second;
-    // fall back to nearest available tier
+
     area::LLMBackend* best = nullptr;
     int bestDist = 999;
     for (auto& [t, b] : backends) {
         int dist = std::abs(t - tier);
-        if (dist < bestDist) { bestDist = dist; best = b; }
+        if (dist < bestDist) {
+            bestDist = dist; best = b;
+        }
     }
     if (!best) throw std::runtime_error("no backends configured");
     return best;
@@ -54,13 +68,11 @@ static bool validateJsonKeys(const std::string& response, const TaskContext&,
     }
 }
 
-// ── Static analysis helpers ──────────────────────────────────────────
-
 struct ThreatPattern {
     std::string name;
-    std::vector<std::string> required_apis; // ALL must be present
+    std::vector<std::string> required_apis;
     std::string category;
-    int risk_boost; // added to static risk score
+    int risk_boost;
 };
 
 static const std::vector<ThreatPattern> kThreatPatterns = {
@@ -105,7 +117,6 @@ static const std::vector<ThreatPattern> kThreatPatterns = {
      "credential_theft", 40},
 };
 
-// Suspicious API calls to flag individually
 struct SuspiciousApi {
     std::string pattern;
     std::string category;
@@ -144,14 +155,13 @@ static const std::vector<SuspiciousApi> kSuspiciousApis = {
     {"DataOutputStream;->write", "c2", 10},
     {"Base64;->decode", "evasion", 8},
     {"Base64;->encode", "evasion", 5},
-    // Security-relevant but potentially legitimate APIs
+
     {"DownloadManager;->enqueue", "dropper", 15},
     {"NotificationManager;->notify", "surveillance", 10},
     {"NotificationCompat", "surveillance", 8},
     {"FirebaseMessagingService", "surveillance", 10},
 };
 
-// Check for obfuscation indicators in raw code
 struct ObfuscationIndicator {
     std::string pattern;
     std::string description;
@@ -160,7 +170,7 @@ struct ObfuscationIndicator {
 
 static const std::vector<ObfuscationIndicator> kObfuscationIndicators = {
     {"xor-int", "XOR byte manipulation (string/data obfuscation)", 15},
-    {"const-string v", "String constant (check for encoded data)", 0}, // scored separately
+    {"const-string v", "String constant (check for encoded data)", 0},
     {"Ljava/lang/reflect/Method;", "Reflection API usage", 10},
     {"Ljava/lang/reflect/Field;", "Reflection field access", 8},
     {"Ldalvik/system/DexClassLoader;", "Dynamic DEX loading", 20},
@@ -169,11 +179,7 @@ static const std::vector<ObfuscationIndicator> kObfuscationIndicators = {
     {"Landroid/util/Base64;", "Base64 encoding/decoding", 8},
 };
 
-// ── ELF-specific static analysis ────────────────────────────────────
-
-// Suspicious imported functions in ELF binaries
 static const std::vector<SuspiciousApi> kElfSuspiciousImports = {
-    // Network
     {"socket", "c2", 15},
     {"connect", "c2", 15},
     {"bind", "c2", 10},
@@ -186,7 +192,7 @@ static const std::vector<SuspiciousApi> kElfSuspiciousImports = {
     {"getaddrinfo", "c2", 10},
     {"gethostbyname", "c2", 12},
     {"inet_addr", "c2", 8},
-    // Process execution
+
     {"execve", "evasion", 20},
     {"execvp", "evasion", 20},
     {"execl", "evasion", 18},
@@ -195,22 +201,22 @@ static const std::vector<SuspiciousApi> kElfSuspiciousImports = {
     {"popen", "evasion", 15},
     {"fork", "evasion", 10},
     {"clone", "evasion", 10},
-    // Anti-debug / anti-analysis
+
     {"ptrace", "evasion", 25},
     {"prctl", "evasion", 8},
-    // Dynamic loading
+
     {"dlopen", "dropper", 20},
     {"dlsym", "dropper", 15},
-    // Memory manipulation
+
     {"mmap", "evasion", 5},
     {"mprotect", "evasion", 15},
     {"memfd_create", "dropper", 20},
-    // File operations
+
     {"unlink", "evasion", 8},
     {"rename", "evasion", 5},
     {"opendir", "data_theft", 5},
     {"readdir", "data_theft", 5},
-    // Privilege
+
     {"setuid", "rootkit", 20},
     {"setgid", "rootkit", 15},
     {"seteuid", "rootkit", 18},
@@ -219,7 +225,7 @@ static const std::vector<SuspiciousApi> kElfSuspiciousImports = {
     {"chown", "persistence", 8},
     {"chroot", "evasion", 12},
     {"mount", "rootkit", 15},
-    // Crypto
+
     {"EVP_EncryptInit", "ransomware", 15},
     {"EVP_EncryptInit_ex", "ransomware", 15},
     {"EVP_DecryptInit", "evasion", 10},
@@ -227,18 +233,17 @@ static const std::vector<SuspiciousApi> kElfSuspiciousImports = {
     {"AES_set_encrypt_key", "ransomware", 12},
     {"SHA256_Init", "crypto_mining", 8},
     {"SHA256_Update", "crypto_mining", 8},
-    // Process/signal manipulation
+
     {"kill", "evasion", 8},
     {"signal", "evasion", 5},
     {"sigaction", "evasion", 5},
-    // Keylogging / input
+
     {"ioctl", "surveillance", 8},
-    // IPC
+
     {"shmget", "c2", 8},
     {"msgget", "c2", 8},
 };
 
-// Compound threat patterns for ELF imports
 static const std::vector<ThreatPattern> kElfThreatPatterns = {
     {"Network C2 channel",
      {"socket", "connect"},
@@ -296,7 +301,6 @@ static const std::vector<ThreatPattern> kElfThreatPatterns = {
      "c2", 25},
 };
 
-// Assembly-level indicators found in Capstone disassembly output
 struct AsmIndicator {
     std::string pattern;
     std::string description;
@@ -314,7 +318,6 @@ static const std::vector<AsmIndicator> kElfAsmIndicators = {
     {"cpuid", "CPU identification (VM detection)", 10, "evasion"},
 };
 
-// Compute file-level signals for ELF binaries from import/export analysis
 nlohmann::json computeElfFileSignals(const std::vector<std::string>& imports,
                                       const std::vector<std::string>& exports) {
     nlohmann::json signals;
@@ -324,8 +327,6 @@ nlohmann::json computeElfFileSignals(const std::vector<std::string>& imports,
     signals["file_risk_score"] = 0;
     int totalRisk = 0;
 
-    // Build a searchable set of imports, stripping version suffixes
-    // (e.g., "socket@GLIBC_2.2.5" → "socket") so stripped binaries match too
     std::set<std::string> importSet;
     for (auto& imp : imports) {
         importSet.insert(imp);
@@ -335,7 +336,6 @@ nlohmann::json computeElfFileSignals(const std::vector<std::string>& imports,
         }
     }
 
-    // Check compound threat patterns
     std::set<std::string> categories;
     for (auto& tp : kElfThreatPatterns) {
         bool allFound = true;
@@ -356,7 +356,6 @@ nlohmann::json computeElfFileSignals(const std::vector<std::string>& imports,
         }
     }
 
-    // Check individual suspicious imports
     for (auto& sa : kElfSuspiciousImports) {
         if (importSet.find(sa.pattern) != importSet.end()) {
             nlohmann::json entry;
@@ -376,7 +375,6 @@ nlohmann::json computeElfFileSignals(const std::vector<std::string>& imports,
     return signals;
 }
 
-// Compute method-level static analysis for ELF functions
 nlohmann::json computeElfMethodStaticAnalysis(const std::string& disasm,
                                                const std::string& importsSummary) {
     nlohmann::json analysis;
@@ -384,18 +382,14 @@ nlohmann::json computeElfMethodStaticAnalysis(const std::string& disasm,
     analysis["risk_indicators"] = nlohmann::json::array();
     int methodRisk = 0;
 
-    // Extract called functions from assembly.
-    // Capstone output format: "  0xADDR:  mnemonic\toperands"
-    // Parse each line to extract the mnemonic and operands.
     std::istringstream stream(disasm);
     std::string line;
     std::set<std::string> calledFunctions;
     while (std::getline(stream, line)) {
-        // Find the ":  " separator between address and mnemonic
         auto colonPos = line.find(":  ");
         if (colonPos == std::string::npos) continue;
         auto mnemonicStart = colonPos + 3;
-        // Mnemonic ends at the tab separator (or end of line for zero-operand instructions)
+
         auto tabPos = line.find('\t', mnemonicStart);
         std::string mnemonic = (tabPos != std::string::npos)
             ? line.substr(mnemonicStart, tabPos - mnemonicStart)
@@ -415,7 +409,6 @@ nlohmann::json computeElfMethodStaticAnalysis(const std::string& disasm,
         }
     }
 
-    // Check for suspicious call targets against imports
     for (auto& sa : kElfSuspiciousImports) {
         bool found = false;
         for (auto& cf : calledFunctions) {
@@ -424,9 +417,8 @@ nlohmann::json computeElfMethodStaticAnalysis(const std::string& disasm,
                 break;
             }
         }
-        // Also check imports summary (in case PLT calls aren't resolved in disasm)
+
         if (!found && importsSummary.find(sa.pattern) != std::string::npos) {
-            // Only flag if import is relevant to this function's context
             continue;
         }
         if (found) {
@@ -439,7 +431,6 @@ nlohmann::json computeElfMethodStaticAnalysis(const std::string& disasm,
         }
     }
 
-    // Check assembly-level indicators
     for (auto& ind : kElfAsmIndicators) {
         if (disasm.find(ind.pattern) != std::string::npos) {
             nlohmann::json ri;
@@ -452,8 +443,6 @@ nlohmann::json computeElfMethodStaticAnalysis(const std::string& disasm,
         }
     }
 
-    // Detect XOR loops in assembly (potential obfuscation/cipher).
-    // Parse each line to extract mnemonic for accurate matching.
     bool hasXor = false;
     bool hasLoop = false;
     bool hasSelfXor = false;
@@ -504,22 +493,20 @@ nlohmann::json computeElfMethodStaticAnalysis(const std::string& disasm,
     return analysis;
 }
 
-// Scan file contents for all invoke-* targets, return set of API strings
 static std::set<std::string> extractAllApiCalls(const std::string& contents) {
     std::set<std::string> apis;
     std::istringstream stream(contents);
     std::string line;
     while (std::getline(stream, line)) {
-        // Match invoke-* instructions
         auto pos = line.find("invoke-");
         if (pos == std::string::npos) continue;
-        // Extract the target: everything after }, which is the class->method
+
         auto bracePos = line.find('}', pos);
         if (bracePos == std::string::npos) continue;
         auto comma = line.find(',', bracePos);
         if (comma == std::string::npos) continue;
         std::string target = line.substr(comma + 1);
-        // Trim whitespace
+
         while (!target.empty() && (target.front() == ' ' || target.front() == '\t'))
             target.erase(0, 1);
         while (!target.empty() && (target.back() == ' ' || target.back() == '\n' || target.back() == '\r'))
@@ -529,7 +516,6 @@ static std::set<std::string> extractAllApiCalls(const std::string& contents) {
     return apis;
 }
 
-// Check for suspicious const-string values (IPs, base64, encoded data)
 static std::vector<std::string> extractSuspiciousStrings(const std::string& contents) {
     std::vector<std::string> suspicious;
     std::istringstream stream(contents);
@@ -542,18 +528,29 @@ static std::vector<std::string> extractSuspiciousStrings(const std::string& cont
         if (q1 == std::string::npos) continue;
         std::string val;
         for (size_t i = q1 + 1; i < line.size(); i++) {
-            if (line[i] == '\\' && i + 1 < line.size()) { val += line[i]; val += line[i+1]; i++; }
-            else if (line[i] == '"') break;
-            else val += line[i];
+            if (line[i] == '\\' && i + 1 < line.size()) {
+                val += line[i]; val += line[i+1]; i++;
+            } else if (line[i] == '"') {
+                break;
+            } else {
+                val += line[i];
+            }
         }
         if (val.empty()) continue;
 
-        // Check for IP addresses
         int dots = 0, digits = 0;
-        for (char c : val) { if (c == '.') dots++; if (std::isdigit(c)) digits++; }
-        if (dots == 3 && digits >= 4 && val.size() <= 15) { suspicious.push_back("IP: " + val); continue; }
+        for (char c : val) {
+            if (c == '.') {
+                dots++;
+            }
+            if (std::isdigit(c)) {
+                digits++;
+            }
+        }
+        if (dots == 3 && digits >= 4 && val.size() <= 15) {
+            suspicious.push_back("IP: " + val); continue;
+        }
 
-        // Check for phone numbers
         if (val.size() >= 7) {
             int dcount = 0;
             for (char c : val) if (std::isdigit(c)) dcount++;
@@ -562,7 +559,6 @@ static std::vector<std::string> extractSuspiciousStrings(const std::string& cont
             }
         }
 
-        // Check for URLs
         std::string lower = val;
         for (auto& c : lower) c = std::tolower(static_cast<unsigned char>(c));
         if (lower.starts_with("http://") || lower.starts_with("https://") ||
@@ -570,16 +566,18 @@ static std::vector<std::string> extractSuspiciousStrings(const std::string& cont
             suspicious.push_back("URL: " + val); continue;
         }
 
-        // Check for base64-like long strings
         if (val.size() > 30) {
             bool allB64 = true;
             for (char c : val) {
-                if (!std::isalnum(c) && c != '+' && c != '/' && c != '=') { allB64 = false; break; }
+                if (!std::isalnum(c) && c != '+' && c != '/' && c != '=') {
+                    allB64 = false; break;
+                }
             }
-            if (allB64) { suspicious.push_back("Base64: " + val.substr(0, 60) + "..."); continue; }
+            if (allB64) {
+                suspicious.push_back("Base64: " + val.substr(0, 60) + "..."); continue;
+            }
         }
 
-        // Shell commands
         if (lower == "su" || lower.find("/bin/") != std::string::npos ||
             lower.find("chmod") != std::string::npos || lower.starts_with("pm ") ||
             lower.starts_with("am ")) {
@@ -589,7 +587,6 @@ static std::vector<std::string> extractSuspiciousStrings(const std::string& cont
     return suspicious;
 }
 
-// Build file-level threat signals from all API calls found in the file
 static nlohmann::json computeFileThreatSignals(const std::set<std::string>& allApis,
                                                 const std::string& contents) {
     nlohmann::json signals;
@@ -599,11 +596,9 @@ static nlohmann::json computeFileThreatSignals(const std::set<std::string>& allA
     signals["file_risk_score"] = 0;
     int totalRisk = 0;
 
-    // Flatten APIs to a single searchable string
     std::string apiBlob;
     for (auto& a : allApis) apiBlob += a + "\n";
 
-    // Check compound threat patterns
     std::set<std::string> categories;
     for (auto& tp : kThreatPatterns) {
         bool allFound = true;
@@ -625,7 +620,6 @@ static nlohmann::json computeFileThreatSignals(const std::set<std::string>& allA
         }
     }
 
-    // Check individual suspicious APIs
     for (auto& sa : kSuspiciousApis) {
         if (apiBlob.find(sa.pattern) != std::string::npos ||
             contents.find(sa.pattern) != std::string::npos) {
@@ -639,7 +633,6 @@ static nlohmann::json computeFileThreatSignals(const std::set<std::string>& allA
         }
     }
 
-    // Check obfuscation indicators
     for (auto& oi : kObfuscationIndicators) {
         if (contents.find(oi.pattern) != std::string::npos && oi.risk > 0) {
             nlohmann::json entry;
@@ -651,7 +644,6 @@ static nlohmann::json computeFileThreatSignals(const std::set<std::string>& allA
         }
     }
 
-    // Suspicious strings
     auto susStrings = extractSuspiciousStrings(contents);
     if (!susStrings.empty()) {
         signals["suspicious_strings"] = susStrings;
@@ -661,20 +653,17 @@ static nlohmann::json computeFileThreatSignals(const std::set<std::string>& allA
     signals["threat_categories"] = nlohmann::json::array();
     for (auto& c : categories) signals["threat_categories"].push_back(c);
 
-    // Cap at 100
     signals["file_risk_score"] = std::min(totalRisk, 100);
 
     return signals;
 }
 
-// Compute method-level static analysis
 static nlohmann::json computeMethodStaticAnalysis(const std::string& methodBody) {
     nlohmann::json analysis;
     analysis["api_calls"] = nlohmann::json::array();
     analysis["risk_indicators"] = nlohmann::json::array();
     int methodRisk = 0;
 
-    // Extract API calls from this method
     auto apis = extractAllApiCalls(methodBody);
     for (auto& api : apis) {
         analysis["api_calls"].push_back(api);
@@ -683,7 +672,6 @@ static nlohmann::json computeMethodStaticAnalysis(const std::string& methodBody)
     std::string apiBlob;
     for (auto& a : apis) apiBlob += a + "\n";
 
-    // Check against suspicious API list
     for (auto& sa : kSuspiciousApis) {
         if (apiBlob.find(sa.pattern) != std::string::npos ||
             methodBody.find(sa.pattern) != std::string::npos) {
@@ -696,7 +684,6 @@ static nlohmann::json computeMethodStaticAnalysis(const std::string& methodBody)
         }
     }
 
-    // Check for obfuscation in this method
     bool hasXor = methodBody.find("xor-int") != std::string::npos;
     bool hasArrayLoop = methodBody.find("aget-byte") != std::string::npos &&
                         methodBody.find("aput-byte") != std::string::npos;
@@ -716,7 +703,6 @@ static nlohmann::json computeMethodStaticAnalysis(const std::string& methodBody)
         methodRisk += 8;
     }
 
-    // Reflection chain in a single method
     if (methodBody.find("Class;->forName") != std::string::npos &&
         methodBody.find("Method;->invoke") != std::string::npos) {
         nlohmann::json ri;
@@ -727,7 +713,6 @@ static nlohmann::json computeMethodStaticAnalysis(const std::string& methodBody)
         methodRisk += 25;
     }
 
-    // Native method declaration
     if (methodBody.find(".method public native") != std::string::npos ||
         methodBody.find(".method private native") != std::string::npos) {
         nlohmann::json ri;
@@ -747,7 +732,6 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
                              area::EmbeddingStore* embeddingStore) {
     TaskGraph g("ScanTask");
 
-    // 1. Read file (binary-safe for ELF support)
     auto read_file = g.add<CodeNode>("read_file", [](TaskContext ctx) {
         std::string path = ctx.get("file_path").get<std::string>();
         std::string contents = area::util::readFile(path);
@@ -758,7 +742,6 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
         }
         ctx.set("file_contents", contents);
 
-        // Detect format by magic bytes and extension
         if (area::elf::isElf(contents)) {
             ctx.set("file_format", "elf");
         } else if (path.ends_with(".smali")) {
@@ -769,7 +752,6 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
         return ctx;
     });
 
-    // 2. Format routing
     auto detect_format = g.add<DecisionCodeNode>("detect_format", [](const TaskContext& ctx) -> std::string {
         if (ctx.has("file_format")) {
             return ctx.get("file_format").get<std::string>();
@@ -781,7 +763,6 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
         ctx.discard_reason = "unsupported_format";
     });
 
-    // 2b. File-level threat signal extraction (before split, so all methods inherit)
     auto file_signals = g.add<CodeNode>("file_signals", [](TaskContext ctx) {
         if (!ctx.has("file_contents")) return ctx;
         auto contents = ctx.get("file_contents").get<std::string>();
@@ -792,7 +773,6 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
             auto signals = computeFileThreatSignals(allApis, contents);
             ctx.set("file_threat_signals", signals);
 
-            // Build a human-readable summary for the LLM
             std::ostringstream summary;
             int score = signals.value("file_risk_score", 0);
             if (score > 0) {
@@ -830,8 +810,7 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
         return ctx;
     });
 
-    // 3. Code splitter — handles both smali methods and ELF functions
-    auto split_methods = g.add<SplitterNode>("split_methods", [prompts_dir](TaskContext ctx) {
+    auto split_methods = g.add<SplitterNode>("split_methods", [prompts_dir](const TaskContext& ctx) {
         auto contents = ctx.get("file_contents").get<std::string>();
         auto format = ctx.has("file_format") ? ctx.get("file_format").get<std::string>() : "smali";
         std::string scanGoal = ctx.has("scan_goal") ? ctx.get("scan_goal").get<std::string>() : "";
@@ -844,7 +823,6 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
 
             std::string className = info.filename;
 
-            // Build imports summary (analogous to fields_summary)
             std::ostringstream importsSummary;
             importsSummary << "Architecture: " << info.arch << "\n";
             importsSummary << "Type: " << info.type << "\n";
@@ -867,11 +845,9 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
             archCtx.set("arch", info.arch);
             std::string formatCtx = resolveTemplate(elfFmtTmpl, archCtx);
 
-            // Compute file-level threat signals from imports/exports
             auto fileSignals = computeElfFileSignals(info.imports, info.exports);
             int fileRiskScore = fileSignals.value("file_risk_score", 0);
 
-            // Build file-level signals summary for LLM context
             std::ostringstream fileSigSummary;
             if (fileRiskScore > 0) {
                 fileSigSummary << "FILE-LEVEL THREAT SIGNALS (risk=" << fileRiskScore << "):\n";
@@ -916,7 +892,7 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
                 item.set("method_body", func.disassembly);
                 item.set("fields_summary", imports);
                 item.set("format_context", formatCtx);
-                // Propagate file-level threat signals
+
                 item.set("file_threat_signals", fileSignals);
                 item.set("file_signals_summary", fileSigStr);
                 items.push_back(std::move(item));
@@ -929,7 +905,6 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
                 items.push_back(std::move(empty));
             }
         } else {
-            // Smali path
             auto parsed = area::smali::parse(contents);
 
             std::string className = parsed.class_name;
@@ -943,7 +918,6 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
 
             std::string formatCtx = loadPrompt(prompts_dir + "/smali_format_context.prompt");
 
-            // Propagate file-level threat signals to each method item
             bool hasFileSignals = ctx.has("file_threat_signals");
             nlohmann::json fileSignals;
             std::string fileSignalsSummary;
@@ -967,13 +941,11 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
                 item.set("fields_summary", fields);
                 item.set("format_context", formatCtx);
 
-                // Inherit file-level signals
                 if (hasFileSignals) {
                     item.set("file_threat_signals", fileSignals);
                     item.set("file_signals_summary", fileSignalsSummary);
                 }
 
-                // Extract call graph edges from this method
                 auto calls = area::smali::extractCalls(m.body);
                 if (!calls.empty()) {
                     nlohmann::json callsJson = nlohmann::json::array();
@@ -994,12 +966,10 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
         return items;
     });
 
-    // 3b. Per-method static analysis enrichment (runs on each split item before LLM)
     auto static_enrich = g.add<CodeNode>("static_enrich", [](TaskContext ctx) {
         if (!ctx.has("method_body")) return ctx;
         auto methodBody = ctx.get("method_body").get<std::string>();
 
-        // Use format-specific analysis
         std::string format = ctx.has("file_format") ? ctx.get("file_format").get<std::string>() : "smali";
         nlohmann::json analysis;
         if (format == "elf") {
@@ -1011,7 +981,6 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
         }
         ctx.set("static_analysis", analysis);
 
-        // Build human-readable summary for the LLM prompt
         std::ostringstream summary;
         int score = analysis.value("static_risk_score", 0);
         if (score > 0) {
@@ -1022,7 +991,7 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
                 for (auto& api : analysis["api_calls"]) {
                     if (count > 0) summary << ", ";
                     std::string a = api.get<std::string>();
-                    // Shorten for readability
+
                     auto arrow = a.find("->");
                     if (arrow != std::string::npos) {
                         auto semi = a.rfind(';', arrow);
@@ -1033,7 +1002,9 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
                         }
                     }
                     summary << a;
-                    if (++count >= 10) { summary << " (+" << (analysis["api_calls"].size() - 10) << " more)"; break; }
+                    if (++count >= 10) {
+                        summary << " (+" << (analysis["api_calls"].size() - 10) << " more)"; break;
+                    }
                 }
                 summary << "\n";
             }
@@ -1049,7 +1020,7 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
                 }
             }
         }
-        // Also include file-level signals if present
+
         if (ctx.has("file_signals_summary")) {
             auto fileSummary = ctx.get("file_signals_summary").get<std::string>();
             if (!fileSummary.empty()) {
@@ -1077,10 +1048,8 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
         nullptr);
 
     auto filter = g.add<PredicateCodeNode>("filter_irrelevant", [](const TaskContext& ctx) -> bool {
-        // Always pass if no LLM response (let downstream handle it)
         if (!ctx.has("llm_response")) return true;
 
-        // Check static analysis — high static risk overrides LLM dismissal
         int staticRisk = 0;
         if (ctx.has("static_analysis")) {
             try {
@@ -1090,7 +1059,6 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
             } catch (...) {}
         }
 
-        // Check file-level risk
         int fileRisk = 0;
         if (ctx.has("file_threat_signals")) {
             try {
@@ -1100,7 +1068,6 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
             } catch (...) {}
         }
 
-        // If static analysis found significant risk, always pass through
         if (staticRisk >= 15 || fileRisk >= 30) return true;
 
         try {
@@ -1108,20 +1075,15 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
             bool relevant = j.value("relevant", false);
             auto confidence = j.value("confidence", 0.0);
 
-            // Always pass through if marked relevant
             if (relevant) return true;
 
-            // Pass through if triage found a non-trivial threat category
             std::string category = j.value("threat_category", "none");
             if (category != "none" && !category.empty()) return true;
 
-            // Pass through if triage found API calls worth investigating
-            // Methods with API calls need HIGHER confidence to discard (they're more likely relevant)
             if (j.contains("api_calls") && j["api_calls"].is_array() && !j["api_calls"].empty()) {
                 return confidence < 0.95;
             }
 
-            // No API calls: moderate confidence is enough to discard
             return confidence < 0.85;
         } catch (...) {
             return true;
@@ -1132,9 +1094,7 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
         ctx.discard_reason = "not_relevant";
     });
 
-    // RAG enrichment: query embedding DB for similar methods from past scans
     auto rag_enrich = g.add<CodeNode>("rag_enrich", [embeddingStore](TaskContext ctx) {
-        // Build call graph context from extracted method_calls
         if (ctx.has("method_calls")) {
             try {
                 auto calls = ctx.get("method_calls");
@@ -1164,7 +1124,6 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
         std::string methodName = ctx.has("method_name") ? ctx.get("method_name").get<std::string>() : "";
         if (methodBody.empty()) return ctx;
 
-        // Build query from method body (truncated) + triage findings
         std::string query = methodBody.substr(0, 1000);
         if (ctx.has("llm_response")) {
             try {
@@ -1193,7 +1152,6 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
                 ctx.set("rag_context", rag.str());
             }
         } catch (...) {
-            // Embedding search failure is non-fatal
         }
         return ctx;
     });
@@ -1214,7 +1172,7 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
         backends.at(1),
         nullptr);
 
-    auto collector = g.add<CollectorNode>("collect_results", [](std::vector<TaskContext> items) {
+    auto collector = g.add<CollectorNode>("collect_results", [](const std::vector<TaskContext>& items) {
         TaskContext result;
         nlohmann::json collected = nlohmann::json::array();
         for (auto& item : items) {
@@ -1235,8 +1193,10 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
             if (items[0].has("source_file")) result.set("source_file", items[0].get("source_file"));
             if (items[0].has("scan_goal")) result.set("scan_goal", items[0].get("scan_goal"));
             if (items[0].has("format_context")) result.set("format_context", items[0].get("format_context"));
-            if (items[0].has("file_signals_summary")) result.set("file_signals_summary", items[0].get("file_signals_summary"));
-            if (items[0].has("file_threat_signals")) result.set("file_threat_signals", items[0].get("file_threat_signals"));
+            if (items[0].has("file_signals_summary"))
+                result.set("file_signals_summary", items[0].get("file_signals_summary"));
+            if (items[0].has("file_threat_signals"))
+                result.set("file_threat_signals", items[0].get("file_threat_signals"));
         }
         return result;
     });
@@ -1271,7 +1231,7 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
 
     g.edge(read_file, detect_format);
     g.branch(detect_format, "smali", file_signals);
-    g.branch(detect_format, "elf", split_methods);  // ELF skips file_signals (smali-specific)
+    g.branch(detect_format, "elf", split_methods);
     g.branch(detect_format, "unsupported", unsupported);
 
     g.edge(file_signals, split_methods);
@@ -1291,5 +1251,4 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
 
     return g;
 }
-
-} // namespace area::graph
+}  // namespace area::graph

@@ -1,16 +1,14 @@
 #pragma once
 
-#include "features/tui/VtScreen.h"
-
-#include <string>
 #include <sys/types.h>
 
+#include <string>
+
+#include "features/tui/VtScreen.h"
 namespace area {
 
-/// Runs a real TUI instance inside a pseudo-terminal and exposes its screen
-/// buffer for MCP tools. Acts like a headless browser for the terminal UI.
 class HeadlessTui {
-public:
+ public:
     HeadlessTui(std::string binary, std::string socketPath);
     ~HeadlessTui();
 
@@ -21,10 +19,8 @@ public:
     void stop();
     bool isRunning();
 
-    /// Read all pending PTY output and update the screen buffer.
     void drain();
 
-    /// Drain, then wait up to ms for more output, drain again.
     void drainAndSettle(int ms = 200);
 
     std::string screenText() const { return screen_.text(); }
@@ -39,7 +35,7 @@ public:
     void sendMouseRelease(int row, int col, int button = 0);
     void resize(int rows, int cols);
 
-private:
+ private:
     void writePty(const std::string& data);
     std::string mouseSeq(int button, int col, int row, bool press);
 
@@ -51,4 +47,4 @@ private:
     VtScreen screen_;
 };
 
-} // namespace area
+}  // namespace area

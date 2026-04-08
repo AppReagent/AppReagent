@@ -1,12 +1,15 @@
 #pragma once
 
+#include <optional>
+#include <string>
+
 #include "infra/tools/Tool.h"
 #include "infra/db/Database.h"
 
 namespace area {
 
 class ReportTool : public Tool {
-public:
+ public:
     explicit ReportTool(Database& db) : db_(db) {}
 
     std::string name() const override { return "REPORT"; }
@@ -19,8 +22,8 @@ public:
     }
     std::optional<ToolResult> tryExecute(const std::string& action, ToolContext& ctx) override;
 
-private:
+ private:
     Database& db_;
 };
 
-} // namespace area
+}  // namespace area

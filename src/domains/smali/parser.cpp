@@ -1,10 +1,9 @@
 #include "domains/smali/parser.h"
 
 #include <sstream>
+#include <utility>
 
 namespace area::smali {
-
-// Trim whitespace from both ends
 static std::string trim(const std::string& s) {
     auto start = s.find_first_not_of(" \t\r\n");
     if (start == std::string::npos) return "";
@@ -12,20 +11,16 @@ static std::string trim(const std::string& s) {
     return s.substr(start, end - start + 1);
 }
 
-// Split "access name type" from a .field directive
 static SmaliField parseFieldLine(const std::string& line) {
     SmaliField f;
     f.raw = line;
 
-    // .field <access> <name>:<type> [= value]
-    std::string rest = line.substr(7); // skip ".field "
+    std::string rest = line.substr(7);
     rest = trim(rest);
 
-    // Find the name:type part (last token before optional = value)
     auto eqPos = rest.find(" = ");
     std::string beforeEq = (eqPos != std::string::npos) ? rest.substr(0, eqPos) : rest;
 
-    // The name:type is the last space-separated token
     auto lastSpace = beforeEq.rfind(' ');
     std::string nameType;
     if (lastSpace != std::string::npos) {
@@ -46,14 +41,10 @@ static SmaliField parseFieldLine(const std::string& line) {
     return f;
 }
 
-// Parse .method line: ".method <access> <name>(<params>)<return>"
 static void parseMethodDirective(const std::string& line, SmaliMethod& m) {
-    // .method <access modifiers> <name>(signature)
-    std::string rest = line.substr(8); // skip ".method "
+    std::string rest = line.substr(8);
     rest = trim(rest);
 
-    // everything before the last token is access,
-    // the last token contains name(sig)
     auto parenPos = rest.find('(');
     if (parenPos == std::string::npos) {
         m.name = rest;
@@ -88,7 +79,6 @@ SmaliFile parse(const std::string& contents) {
         lineNum++;
         std::string trimmed = trim(line);
 
-        // Class directives
         if (trimmed.starts_with(".class ")) {
             auto lastSpace = trimmed.rfind(' ');
             if (lastSpace != std::string::npos) {
@@ -104,7 +94,7 @@ SmaliFile parse(const std::string& contents) {
 
         if (trimmed.starts_with(".source ")) {
             result.source_file = trimmed.substr(8);
-            // Remove quotes if present
+
             if (!result.source_file.empty() && result.source_file[0] == '"') {
                 result.source_file = result.source_file.substr(1);
                 if (!result.source_file.empty() && result.source_file.back() == '"') {
@@ -119,13 +109,11 @@ SmaliFile parse(const std::string& contents) {
             continue;
         }
 
-        // Fields
         if (trimmed.starts_with(".field ")) {
             result.fields.push_back(parseFieldLine(trimmed));
             continue;
         }
 
-        // Methods
         if (trimmed.starts_with(".method ")) {
             inMethod = true;
             currentMethod = SmaliMethod{};
@@ -162,8 +150,6 @@ std::vector<SmaliCall> extractCalls(const std::string& method_body) {
     while (std::getline(stream, line)) {
         std::string trimmed = trim(line);
 
-        // Match invoke-virtual, invoke-direct, invoke-static, invoke-super, invoke-interface
-        // and their /range variants
         std::string invokeType;
         if (trimmed.starts_with("invoke-virtual")) invokeType = "virtual";
         else if (trimmed.starts_with("invoke-direct")) invokeType = "direct";
@@ -172,8 +158,6 @@ std::vector<SmaliCall> extractCalls(const std::string& method_body) {
         else if (trimmed.starts_with("invoke-interface")) invokeType = "interface";
         else continue;
 
-        // Format: invoke-type {regs}, Lclass;->method(sig)ret
-        // Find the method reference after "}, "
         auto braceClose = trimmed.find('}');
         if (braceClose == std::string::npos) continue;
         auto refStart = trimmed.find_first_not_of(" ,", braceClose + 1);
@@ -181,14 +165,12 @@ std::vector<SmaliCall> extractCalls(const std::string& method_body) {
 
         std::string ref = trimmed.substr(refStart);
 
-        // Split on "->" to get class and method+sig
         auto arrowPos = ref.find("->");
         if (arrowPos == std::string::npos) continue;
 
         std::string targetClass = ref.substr(0, arrowPos);
         std::string methodAndSig = ref.substr(arrowPos + 2);
 
-        // Split method name from signature at '('
         auto parenPos = methodAndSig.find('(');
         std::string targetMethod;
         std::string targetSig;
@@ -204,5 +186,4 @@ std::vector<SmaliCall> extractCalls(const std::string& method_body) {
 
     return calls;
 }
-
-} // namespace area::smali
+}  // namespace area::smali

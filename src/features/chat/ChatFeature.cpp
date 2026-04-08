@@ -1,7 +1,13 @@
 #include "features/chat/ChatFeature.h"
 
 #include <iostream>
+#include <map>
+#include <memory>
 
+#include "features/chat/ChatService.h"
+#include "mcp/McpTool.h"
+#include "nlohmann/detail/json_ref.hpp"
+#include "nlohmann/json.hpp"
 using json = nlohmann::json;
 
 namespace area::features::chat {
@@ -54,4 +60,4 @@ void registerTools(mcp::McpServer& server, const std::string& sockPath) {
     });
 }
 
-} // namespace area::features::chat
+}  // namespace area::features::chat

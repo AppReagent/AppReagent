@@ -1,14 +1,19 @@
 #include "features/scan/ScanCommand.h"
 
 #include <algorithm>
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <mutex>
 #include <sstream>
+#include <cstdlib>
+#include <exception>
+#include <map>
+#include <optional>
+#include <system_error>
+#include <unordered_map>
+#include <utility>
 
-#include "domains/elf/disassembler.h"
 #include "infra/events/EventBus.h"
 #include "util/file_io.h"
 #include "util/string_util.h"
@@ -17,11 +22,15 @@
 #include "domains/graph/graphs/tier_pool.h"
 #include "domains/graph/nodes/llm_call_node.h"
 #include "domains/graph/util/json_extract.h"
+#include "domains/graph/engine/task_context.h"
+#include "domains/graph/engine/task_graph.h"
+#include "infra/llm/LLMBackend.h"
+#include "nlohmann/detail/iterators/iter_impl.hpp"
+#include "nlohmann/json.hpp"
 
 namespace fs = std::filesystem;
 
 namespace area {
-
 ScanCommand::ScanCommand(const Config& config, Database& db)
     : config_(config), db_(db), log_(db) {
     if (config.embedding.has_value()) {
@@ -63,8 +72,12 @@ std::vector<std::string> ScanCommand::findScanFiles(const std::string& dir) {
     if (ec) return files;
 
     for (; it != fs::recursive_directory_iterator(); it.increment(ec)) {
-        if (ec) { ec.clear(); continue; }
-        if (!it->is_regular_file(ec) || ec) { ec.clear(); continue; }
+        if (ec) {
+            ec.clear(); continue;
+        }
+        if (!it->is_regular_file(ec) || ec) {
+            ec.clear(); continue;
+        }
         if (it->path().extension() == ".smali") {
             files.push_back(it->path().string());
         } else if (fileHasElfMagic(it->path().string())) {
@@ -118,19 +131,20 @@ void ScanCommand::processFile(const std::string& filePath, const std::string& ru
     std::string contents = readFile(filePath);
     std::string fileHash = ScanLog::sha256(contents);
 
-    // Upload file to database so other agents can access it
     log_.storeFile(runId, filePath, fileHash, contents);
 
     if (completedHashes_.count(fileHash) || log_.fileCompleted(runId, fileHash)) {
         summary.files_skipped++;
-        // Still record a scan_result so every input file appears in results
+
         log_.logScanResult(runId, filePath, fileHash, "{}", "duplicate of already-scanned file", -1);
         return;
     }
 
     std::string fileName = fs::path(filePath).filename().string();
     if (events_) events_->emit({EventType::SCAN_FILE_START, fileName, filePath});
-    emitLog("Analyzing " + fileName + " (" + std::to_string(summary.files_scanned + 1) + "/" + std::to_string(summary.files_total) + ")");
+    emitLog("Analyzing " + fileName + " (" +
+            std::to_string(summary.files_scanned + 1) + "/" +
+            std::to_string(summary.files_total) + ")");
 
     graph::TaskContext initial;
     initial.set("file_path", filePath);
@@ -218,10 +232,10 @@ void ScanCommand::synthesizeResults(const std::string& runId, const std::string&
 
     std::ostringstream summariesStream;
     int maxFull = 30;
-    for (int i = 0; i < (int)fileProfiles.size() && i < maxFull; i++) {
+    for (int i = 0; i < static_cast<int>(fileProfiles.size()) && i < maxFull; i++) {
         summariesStream << fileProfiles[i].dump(2) << "\n---\n";
     }
-    if ((int)fileProfiles.size() > maxFull) {
+    if (static_cast<int>(fileProfiles.size()) > maxFull) {
         summariesStream << "(+" << (fileProfiles.size() - maxFull)
                         << " additional files with lower scores omitted)\n";
     }
@@ -269,7 +283,7 @@ ScanSummary ScanCommand::run(const std::string& target_path, const std::string& 
 
     std::string runId = resumeId.empty() ? ScanLog::generateRunId() : resumeId;
     summary.run_id = runId;
-    summary.files_total = (int)files.size();
+    summary.files_total = static_cast<int>(files.size());
 
     std::string scanGoal = goal.empty()
         ? "Identify malware indicators including C2 communication, data exfiltration, "
@@ -309,14 +323,15 @@ ScanSummary ScanCommand::run(const std::string& target_path, const std::string& 
         }
     });
 
-    // Track which methods have had their call edges logged (to avoid duplicates across nodes)
-    std::unordered_set<std::string> callEdgesLogged;
-    std::mutex callEdgesMu;
+    struct CallEdgeState {
+        std::unordered_set<std::string> logged;
+        std::mutex mu;
+    };
+    auto callEdges = std::make_shared<CallEdgeState>();
 
-    runner.onNodeEnd([&](const std::string& nodeName, const graph::TaskContext& ctx) {
+    runner.onNodeEnd([this, runId, callEdges](const std::string& nodeName, const graph::TaskContext& ctx) {
         if (events_) events_->emit({EventType::NODE_END, nodeName, ""});
 
-        // Store per-method behavioral findings from triage for queryable search
         if (nodeName == "triage" && ctx.has("llm_response") && ctx.has("method_name")) {
             try {
                 auto j = nlohmann::json::parse(graph::extractJson(ctx.get("llm_response").get<std::string>()));
@@ -325,7 +340,6 @@ ScanSummary ScanCommand::run(const std::string& target_path, const std::string& 
                 std::string fp = ctx.has("file_path") ? ctx.get("file_path").get<std::string>() : "";
                 std::string fh = ctx.has("file_hash") ? ctx.get("file_hash").get<std::string>() : "";
 
-                // Concatenate api_calls array into comma-separated string
                 std::string apiCalls;
                 if (j.contains("api_calls") && j["api_calls"].is_array()) {
                     for (auto& a : j["api_calls"]) {
@@ -334,7 +348,6 @@ ScanSummary ScanCommand::run(const std::string& target_path, const std::string& 
                     }
                 }
 
-                // Concatenate findings array into newline-separated string
                 std::string findings;
                 if (j.contains("findings") && j["findings"].is_array()) {
                     for (auto& f : j["findings"]) {
@@ -352,11 +365,9 @@ ScanSummary ScanCommand::run(const std::string& target_path, const std::string& 
                                       apiCalls, findings, reasoning, relevant, confidence,
                                       threatCategory);
             } catch (...) {
-                // Non-fatal: findings extraction failure doesn't block the scan
             }
         }
 
-        // Log call graph edges once per method (on first node that sees them)
         if (ctx.has("method_calls") && ctx.has("class_name") && ctx.has("method_name")) {
             std::string callerClass = ctx.get("class_name").get<std::string>();
             std::string callerMethod = ctx.get("method_name").get<std::string>();
@@ -365,8 +376,8 @@ ScanSummary ScanCommand::run(const std::string& target_path, const std::string& 
             std::string fh = ctx.has("file_hash") ? ctx.get("file_hash").get<std::string>() : "";
 
             {
-                std::lock_guard lk(callEdgesMu);
-                if (callEdgesLogged.insert(edgeKey).second) {
+                std::lock_guard lk(callEdges->mu);
+                if (callEdges->logged.insert(edgeKey).second) {
                     auto calls = ctx.get("method_calls");
                     for (auto& c : calls) {
                         log_.logMethodCall(runId, fp, fh,
@@ -391,12 +402,11 @@ ScanSummary ScanCommand::run(const std::string& target_path, const std::string& 
                 prompt, promptHash, response, 0);
             output_.writeLLMCall(filePath, fileHash, nodeName, prompt, response, 0);
 
-            // Store embeddings for methods that completed deep analysis
             if (nodeName == "deep_analysis" && embeddingStore_ && embeddingStore_->hasBackend()) {
                 std::string className = ctx.has("class_name") ? ctx.get("class_name").get<std::string>() : "";
                 std::string methodName = ctx.has("method_name") ? ctx.get("method_name").get<std::string>() : "";
                 std::string methodBody = ctx.has("method_body") ? ctx.get("method_body").get<std::string>() : "";
-                // Combine method body + analysis for richer embeddings
+
                 std::string content = methodBody + "\n\n--- Analysis ---\n" + response;
                 embeddingStore_->embedAndStore(runId, filePath, fileHash,
                                               className, methodName, content);
@@ -408,7 +418,8 @@ ScanSummary ScanCommand::run(const std::string& target_path, const std::string& 
 
     for (auto& filePath : files) {
         if (interrupt_ && interrupt_->load()) {
-            emitLog("Scan paused at " + std::to_string(summary.files_scanned) + "/" + std::to_string(summary.files_total) + " files");
+            emitLog("Scan paused at " + std::to_string(summary.files_scanned) +
+                    "/" + std::to_string(summary.files_total) + " files");
             summary.paused = true;
             break;
         }
@@ -443,5 +454,4 @@ ScanSummary ScanCommand::runFromFile(const std::string& jsonl_path) {
     emitLog("Resuming from " + jsonl_path + " (" + std::to_string(completedHashes_.size()) + " files already done)");
     return run(loaded.target_path, loaded.run_id);
 }
-
-} // namespace area
+}  // namespace area

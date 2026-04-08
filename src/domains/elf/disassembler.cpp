@@ -1,15 +1,15 @@
 #include "domains/elf/disassembler.h"
 
+#include <elf.h>
+#include <capstone/capstone.h>
+#include <stdio.h>
 #include <algorithm>
 #include <cinttypes>
 #include <cstring>
-#include <elf.h>
 #include <sstream>
-
-#include <capstone/capstone.h>
+#include <utility>
 
 namespace area::elf {
-
 bool isElf(const std::string& data) {
     return data.size() >= 4 &&
            data[0] == '\x7f' && data[1] == 'E' && data[2] == 'L' && data[3] == 'F';
@@ -60,7 +60,6 @@ static std::string disassembleBytes(const uint8_t* code, size_t codeSize,
         return "; disassembly failed: could not initialize capstone\n";
     }
 
-    // RAII guard to ensure cs_close is always called
     struct CsGuard {
         csh& h;
         ~CsGuard() { cs_close(&h); }
@@ -92,7 +91,6 @@ static ElfInfo disassembleImpl(const uint8_t* data, size_t dataSize,
         return info;
     }
 
-    // Use memcpy to avoid undefined behavior from unaligned reinterpret_cast
     Ehdr ehdrBuf;
     std::memcpy(&ehdrBuf, data, sizeof(Ehdr));
     const auto* ehdr = &ehdrBuf;
@@ -105,12 +103,10 @@ static ElfInfo disassembleImpl(const uint8_t* data, size_t dataSize,
         return info;
     }
 
-    // Copy section headers via memcpy to avoid unaligned access UB
     uint16_t shnum = ehdr->e_shnum;
     std::vector<Shdr> sections(shnum);
     std::memcpy(sections.data(), data + ehdr->e_shoff, shnum * sizeof(Shdr));
 
-    // Section name string table
     const char* shstrtab = nullptr;
     size_t shstrtabSize = 0;
     if (ehdr->e_shstrndx < shnum) {
@@ -121,7 +117,6 @@ static ElfInfo disassembleImpl(const uint8_t* data, size_t dataSize,
         }
     }
 
-    // Find symbol tables and executable sections
     size_t symtabIdx = SIZE_MAX;
     size_t symstrtabIdx = SIZE_MAX;
     size_t dynsymIdx = SIZE_MAX;
@@ -152,7 +147,6 @@ static ElfInfo disassembleImpl(const uint8_t* data, size_t dataSize,
     info.raw_info = "ELF " + info.arch + " " + info.type +
                     ", " + std::to_string(shnum) + " sections";
 
-    // Capstone setup
     cs_arch csArch;
     cs_mode csMode;
     if (!mapCapstoneArch(ehdr->e_machine, csArch, csMode)) {
@@ -160,7 +154,6 @@ static ElfInfo disassembleImpl(const uint8_t* data, size_t dataSize,
         return info;
     }
 
-    // Extract functions from a symbol table
     auto extractFunctions = [&](size_t symSectIdx, size_t strSectIdx,
                                 bool isDynamic) {
         if (symSectIdx >= shnum || strSectIdx >= shnum) return;
@@ -173,11 +166,10 @@ static ElfInfo disassembleImpl(const uint8_t* data, size_t dataSize,
         size_t numSyms = symSect.sh_size / sizeof(Sym);
 
         for (size_t i = 0; i < numSyms; i++) {
-            // Copy symbol via memcpy to avoid unaligned access UB
             Sym sym;
             std::memcpy(&sym, data + symSect.sh_offset + i * sizeof(Sym), sizeof(Sym));
 
-            int stype = ELF64_ST_TYPE(sym.st_info); // same macro for 32/64
+            int stype = ELF64_ST_TYPE(sym.st_info);
 
             if (stype != STT_FUNC) continue;
 
@@ -195,7 +187,6 @@ static ElfInfo disassembleImpl(const uint8_t* data, size_t dataSize,
 
             if (sym.st_size == 0) continue;
 
-            // Find section and disassemble
             std::string sectName = ".text";
             if (sym.st_shndx < shnum && shstrtab &&
                 sections[sym.st_shndx].sh_name < shstrtabSize) {
@@ -237,7 +228,6 @@ static ElfInfo disassembleImpl(const uint8_t* data, size_t dataSize,
     extractFunctions(symtabIdx, symstrtabIdx, false);
     extractFunctions(dynsymIdx, dynstrIdx, true);
 
-    // Deduplicate by address
     std::sort(info.functions.begin(), info.functions.end(),
               [](const ElfFunction& a, const ElfFunction& b) {
                   return a.address < b.address;
@@ -249,7 +239,6 @@ static ElfInfo disassembleImpl(const uint8_t* data, size_t dataSize,
                     }),
         info.functions.end());
 
-    // Stripped binary fallback: disassemble entire executable sections
     if (info.functions.empty()) {
         for (size_t idx : execSectionIdxs) {
             const auto& sect = sections[idx];
@@ -277,7 +266,6 @@ static ElfInfo disassembleImpl(const uint8_t* data, size_t dataSize,
         }
     }
 
-    // Deduplicate imports
     std::sort(info.imports.begin(), info.imports.end());
     info.imports.erase(std::unique(info.imports.begin(), info.imports.end()),
                        info.imports.end());
@@ -306,5 +294,4 @@ ElfInfo disassemble(const std::string& data, const std::string& filename) {
 
     return ElfInfo{.filename = filename, .raw_info = "unknown ELF class"};
 }
-
-} // namespace area::elf
+}  // namespace area::elf

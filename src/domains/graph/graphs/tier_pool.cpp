@@ -1,5 +1,7 @@
 #include "domains/graph/graphs/tier_pool.h"
 
+#include <utility>
+
 namespace area::graph {
 
 TierPool::TierPool(const std::vector<area::AiEndpoint>& endpoints) {
@@ -35,4 +37,4 @@ int TierPool::totalConcurrency() const {
     return total;
 }
 
-} // namespace area::graph
+}  // namespace area::graph

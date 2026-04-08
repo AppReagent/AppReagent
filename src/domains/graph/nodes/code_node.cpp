@@ -1,5 +1,7 @@
 #include "domains/graph/nodes/code_node.h"
 
+#include "domains/graph/engine/node.h"
+
 namespace area::graph {
 
 NodeResult CodeNode::execute(TaskContext ctx) {
@@ -22,4 +24,4 @@ NodeResult ExitNode::execute(TaskContext ctx) {
     return NodeResult::exited();
 }
 
-} // namespace area::graph
+}  // namespace area::graph

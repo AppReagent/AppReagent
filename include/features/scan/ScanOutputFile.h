@@ -4,12 +4,13 @@
 #include <mutex>
 #include <string>
 #include <unordered_set>
+
 #include <nlohmann/json.hpp>
 
 namespace area {
 
 class ScanOutputFile {
-public:
+ public:
     struct LoadResult {
         std::string run_id;
         std::string target_path;
@@ -17,10 +18,8 @@ public:
         std::unordered_set<std::string> completed_hashes;
     };
 
-    // Open for writing (creates scan-outputs/ dir if needed, appends if exists)
     void open(const std::string& run_id);
 
-    // Load completed state from an existing JSONL file
     static LoadResult load(const std::string& jsonl_path);
 
     void writeMetadata(const std::string& target_path, const std::string& run_id,
@@ -37,11 +36,11 @@ public:
 
     std::string path() const { return path_; }
 
-private:
+ private:
     void writeLine(const nlohmann::json& j);
     std::string path_;
     std::ofstream file_;
     std::mutex mu_;
 };
 
-} // namespace area
+}  // namespace area

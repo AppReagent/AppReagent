@@ -1,18 +1,21 @@
 #include "features/disasm/DisasmTool.h"
+
+#include <stddef.h>
+#include <filesystem>
+#include <sstream>
+#include <cctype>
+#include <functional>
+#include <vector>
+
 #include "infra/tools/ToolContext.h"
 #include "infra/agent/Agent.h"
 #include "domains/smali/parser.h"
 #include "domains/elf/disassembler.h"
 #include "util/file_io.h"
 
-#include <algorithm>
-#include <filesystem>
-#include <sstream>
-
 namespace fs = std::filesystem;
 
 namespace area {
-
 static std::string toLower(const std::string& s) {
     std::string out = s;
     for (auto& c : out) c = std::tolower(static_cast<unsigned char>(c));
@@ -20,7 +23,7 @@ static std::string toLower(const std::string& s) {
 }
 
 std::optional<ToolResult> DisasmTool::tryExecute(const std::string& action, ToolContext& ctx) {
-    if (action.find("DISASM:") != 0)
+    if (!action.starts_with("DISASM:"))
         return std::nullopt;
 
     std::string args = action.substr(7);
@@ -32,7 +35,6 @@ std::optional<ToolResult> DisasmTool::tryExecute(const std::string& action, Tool
                           "Usage: DISASM: <path> [| <class>::<method>]"};
     }
 
-    // Parse: path | method_filter
     std::string path, filter;
     auto pipePos = args.find('|');
     if (pipePos != std::string::npos) {
@@ -54,11 +56,9 @@ std::optional<ToolResult> DisasmTool::tryExecute(const std::string& action, Tool
         return ToolResult{"OBSERVATION: Error — could not read " + path};
     }
 
-    // Handle smali files
     if (path.ends_with(".smali")) {
         auto parsed = smali::parse(contents);
 
-        // Extract method name from filter (handle Class::method or just method)
         std::string filterMethod, filterClass;
         if (!filter.empty()) {
             auto sepPos = filter.find("::");
@@ -90,7 +90,6 @@ std::optional<ToolResult> DisasmTool::tryExecute(const std::string& action, Tool
         out << "Methods: " << parsed.methods.size() << "\n\n";
 
         if (filter.empty()) {
-            // List all methods with signatures
             out << "--- Method Index ---\n";
             for (size_t i = 0; i < parsed.methods.size(); i++) {
                 auto& m = parsed.methods[i];
@@ -101,7 +100,6 @@ std::optional<ToolResult> DisasmTool::tryExecute(const std::string& action, Tool
             }
             out << "\nUse DISASM: " << path << " | <method-name> to see full code.\n";
         } else {
-            // Show matching methods
             std::string filterLower = toLower(filterMethod);
             bool found = false;
 
@@ -120,7 +118,6 @@ std::optional<ToolResult> DisasmTool::tryExecute(const std::string& action, Tool
                     << " (lines " << m.line_start << "-" << m.line_end << ") ---\n";
                 out << m.body << "\n";
 
-                // Show call targets
                 auto calls = smali::extractCalls(m.body);
                 if (!calls.empty()) {
                     out << "  Call targets:\n";
@@ -143,16 +140,16 @@ std::optional<ToolResult> DisasmTool::tryExecute(const std::string& action, Tool
         }
 
         std::string formatted = out.str();
-        // Truncate if very long
+
         if (formatted.size() > 8000) {
-            formatted = formatted.substr(0, 8000) + "\n... (truncated, " +
-                std::to_string(formatted.size()) + " bytes total)";
+            auto totalSize = formatted.size();
+            formatted.resize(8000);
+            formatted += "\n... (truncated, " + std::to_string(totalSize) + " bytes total)";
         }
         ctx.cb({AgentMessage::RESULT, formatted});
         return ToolResult{"OBSERVATION: " + formatted};
     }
 
-    // Handle ELF files
     if (elf::isElf(contents)) {
         ctx.cb({AgentMessage::THINKING, "Disassembling ELF: " + path});
         auto info = elf::disassemble(contents, path);
@@ -216,7 +213,8 @@ std::optional<ToolResult> DisasmTool::tryExecute(const std::string& action, Tool
 
         std::string formatted = out.str();
         if (formatted.size() > 8000) {
-            formatted = formatted.substr(0, 8000) + "\n... (truncated)";
+            formatted.resize(8000);
+            formatted += "\n... (truncated)";
         }
         ctx.cb({AgentMessage::RESULT, formatted});
         return ToolResult{"OBSERVATION: " + formatted};
@@ -225,5 +223,4 @@ std::optional<ToolResult> DisasmTool::tryExecute(const std::string& action, Tool
     return ToolResult{
         "OBSERVATION: Error — " + path + " is not a recognized format (expected .smali or ELF)."};
 }
-
-} // namespace area
+}  // namespace area

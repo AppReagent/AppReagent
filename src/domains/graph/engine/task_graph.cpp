@@ -1,5 +1,9 @@
 #include "domains/graph/engine/task_graph.h"
 
+#include <stdexcept>
+
+#include "domains/graph/engine/node.h"
+
 namespace area::graph {
 
 TaskGraph::TaskGraph(std::string name) : name_(std::move(name)) {}
@@ -68,4 +72,4 @@ std::vector<const Edge*> TaskGraph::allEdgesFrom(const std::string& node) const 
     return result;
 }
 
-} // namespace area::graph
+}  // namespace area::graph

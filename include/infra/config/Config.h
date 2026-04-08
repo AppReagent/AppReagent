@@ -8,17 +8,17 @@ namespace area {
 
 struct AiEndpoint {
     std::string id;
-    std::string provider; // "ollama", "openai", or "mock"
+    std::string provider;
     std::string url;
     std::string model = "auto";
-    std::string api_key; // for authenticated APIs (Vultr, OpenAI, etc)
-    int tier = 0; // 0 = low, 1 = medium, 2 = high
+    std::string api_key;
+    int tier = 0;
     int max_concurrent = 1;
-    int context_window = 8192; // max tokens for this endpoint
+    int context_window = 8192;
 };
 
 struct EmbeddingEndpoint {
-    std::string provider; // "ollama" or "openai"
+    std::string provider;
     std::string url;
     std::string model;
     std::string api_key;
@@ -31,10 +31,10 @@ struct Config {
     std::vector<AiEndpoint> ai_endpoints;
     std::optional<EmbeddingEndpoint> embedding;
     int job_batch_size = 10;
-    int flush_timeout_sec = 15; // fire batch after this many seconds of inactivity
+    int flush_timeout_sec = 15;
     std::string theme = "dark";
 
     static Config load(const std::string& path = "config.json");
 };
 
-} // namespace area
+}  // namespace area

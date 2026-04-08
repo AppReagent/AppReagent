@@ -5,7 +5,7 @@
 
 #include "../engine/node.h"
 #include "infra/llm/LLMBackend.h"
-#include "llm_call_node.h"
+#include "domains/graph/engine/task_context.h"
 
 namespace area::graph {
 
@@ -23,7 +23,7 @@ struct SupervisedLLMCallConfig {
 using ValidationFn = std::function<bool(const std::string& response, const TaskContext& ctx)>;
 
 class SupervisedLLMCallNode : public Node {
-public:
+ public:
     SupervisedLLMCallNode(const std::string& name,
                           SupervisedLLMCallConfig config,
                           area::LLMBackend* worker_backend,
@@ -32,11 +32,11 @@ public:
 
     NodeResult execute(TaskContext ctx) override;
 
-private:
+ private:
     SupervisedLLMCallConfig config_;
     area::LLMBackend* workerBackend_;
     area::LLMBackend* supervisorBackend_;
     ValidationFn validation_;
 };
 
-} // namespace area::graph
+}  // namespace area::graph

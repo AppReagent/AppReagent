@@ -1,14 +1,19 @@
 #include "features/chat/ChatService.h"
-#include "infra/ipc/IPC.h"
 
-#include <filesystem>
 #include <poll.h>
+#include <unistd.h>
+#include <filesystem>
+#include <optional>
+
+#include "infra/ipc/IPC.h"
+#include "nlohmann/detail/json_ref.hpp"
+#include "nlohmann/json.hpp"
 
 namespace fs = std::filesystem;
 
 namespace area::features::chat {
 
-static constexpr int kChatPollTimeoutMs = 300000; // 5 min for scans
+static constexpr int kChatPollTimeoutMs = 300000;
 
 ChatService::ChatService(const std::string& sockPath)
     : sockPath_(sockPath) {}
@@ -23,12 +28,10 @@ ChatService::Response ChatService::send(const std::string& message,
     int fd = ipc::connectTo(sockPath_);
     if (fd < 0) return {"Could not connect to server.", {}, true};
 
-    // Attach + dangerous mode
     ipc::sendLine(fd, {{"type", "attach"},        {"chat_id", chatId}});
     ipc::sendLine(fd, {{"type", "set_dangerous"}, {"chat_id", chatId},
                        {"enabled", true}});
 
-    // Drain history / initial state
     for (int i = 0; i < 50; i++) {
         struct pollfd p = {fd, POLLIN, 0};
         if (poll(&p, 1, 200) > 0) {
@@ -90,4 +93,4 @@ ChatService::Response ChatService::clear(const std::string& chatId) {
     return {"Chat \"" + chatId + "\" cleared.", {}, false};
 }
 
-} // namespace area::features::chat
+}  // namespace area::features::chat

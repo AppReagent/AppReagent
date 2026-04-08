@@ -1,10 +1,16 @@
 #include "features/sql/SqlTool.h"
+
+#include <stddef.h>
+#include <iomanip>
+#include <sstream>
+#include <algorithm>
+#include <cctype>
+#include <functional>
+#include <vector>
+
 #include "infra/tools/ToolContext.h"
 #include "infra/agent/Agent.h"
 #include "infra/agent/Harness.h"
-
-#include <iomanip>
-#include <sstream>
 
 namespace area {
 
@@ -14,12 +20,12 @@ std::string SqlTool::stripMarkdownSql(std::string sql) {
         sql = sql.substr(6);
         if (!sql.empty() && sql[0] == '\n') sql.erase(0, 1);
         auto end = sql.find("```");
-        if (end != std::string::npos) sql = sql.substr(0, end);
+        if (end != std::string::npos) sql.resize(end);
     } else if (sql.starts_with("```")) {
         sql = sql.substr(3);
         if (!sql.empty() && sql[0] == '\n') sql.erase(0, 1);
         auto end = sql.find("```");
-        if (end != std::string::npos) sql = sql.substr(0, end);
+        if (end != std::string::npos) sql.resize(end);
     }
     return sql;
 }
@@ -57,7 +63,7 @@ std::string SqlTool::extractSql(const std::string& response) {
     std::string trimmed = response;
     while (!trimmed.empty() && (trimmed[0] == ' ' || trimmed[0] == '\n')) trimmed.erase(0, 1);
     std::string upper;
-    for (size_t i = 0; i < std::min(trimmed.size(), (size_t)10); i++) {
+    for (size_t i = 0; i < std::min(trimmed.size(), static_cast<size_t>(10)); i++) {
         upper += std::toupper(trimmed[i]);
     }
     if (upper.starts_with("SELECT") || upper.starts_with("INSERT") ||
@@ -82,7 +88,6 @@ std::string SqlTool::formatResults(const QueryResult& qr) {
         }
     }
 
-    // Cap display width but don't truncate actual values — use ellipsis for long values
     constexpr size_t MAX_COL_WIDTH = 200;
     for (auto& w : widths) w = std::min(w, MAX_COL_WIDTH);
 
@@ -101,13 +106,14 @@ std::string SqlTool::formatResults(const QueryResult& qr) {
     }
     out << "\n";
 
-    size_t maxRows = std::min(qr.rows.size(), (size_t)50);
+    size_t maxRows = std::min(qr.rows.size(), static_cast<size_t>(50));
     for (size_t r = 0; r < maxRows; r++) {
         for (size_t i = 0; i < qr.rows[r].size() && i < widths.size(); i++) {
             if (i > 0) out << " | ";
             std::string val = qr.rows[r][i];
             if (val.size() > MAX_COL_WIDTH) {
-                val = val.substr(0, MAX_COL_WIDTH - 3) + "...";
+                val.resize(MAX_COL_WIDTH - 3);
+                val += "...";
             }
             out << val;
             if (val.size() < widths[i])
@@ -126,11 +132,9 @@ std::optional<ToolResult> SqlTool::tryExecute(const std::string& action, ToolCon
     std::string sql = extractSql(action);
     if (sql.empty()) return std::nullopt;
 
-    // Trim
     while (!sql.empty() && (sql[0] == ' ' || sql[0] == '\n')) sql.erase(0, 1);
     while (!sql.empty() && (sql.back() == ' ' || sql.back() == '\n')) sql.pop_back();
 
-    // Pre-execution sensor (block destructive queries)
     std::string preSqlFeedback = ctx.harness.runSensors("sql", sql, "");
     if (!preSqlFeedback.empty() && preSqlFeedback.find("BLOCKED") != std::string::npos) {
         ctx.cb({AgentMessage::ERROR, preSqlFeedback});
@@ -147,7 +151,6 @@ std::optional<ToolResult> SqlTool::tryExecute(const std::string& action, ToolCon
             return ToolResult{r.customText};
     }
 
-    // Execute
     QueryResult qr = db_.execute(sql);
 
     if (!qr.ok()) {
@@ -179,4 +182,4 @@ std::optional<ToolResult> SqlTool::tryExecute(const std::string& action, ToolCon
     return ToolResult{feedback.str()};
 }
 
-} // namespace area
+}  // namespace area

@@ -1,17 +1,17 @@
 #pragma once
 
+#include <functional>
+#include <optional>
+#include <string>
+
 #include "infra/tools/Tool.h"
 #include "infra/config/Config.h"
 #include "infra/db/Database.h"
-
 #include <nlohmann/json.hpp>
 
 namespace area {
-
-// IMPROVE tool: launches Claude Code to modify this codebase, then evaluates
-// the changes against the autoresearch corpus. Streams Claude's output to the TUI.
 class ImproveTool : public Tool {
-public:
+ public:
     ImproveTool(Config* config, Database& db, const std::string& repoDir);
 
     std::string name() const override { return "IMPROVE"; }
@@ -23,19 +23,15 @@ public:
     }
     std::optional<ToolResult> tryExecute(const std::string& action, ToolContext& ctx) override;
 
-private:
-    // Run a shell command, return {output, exitCode}
+ private:
     struct CmdResult { std::string output; int exitCode; };
     static CmdResult exec(const std::string& cmd);
 
-    // Launch a coding agent locally via fork+pipe (headless). Returns exit code.
     int runAgentLocal(const std::string& prompt, std::function<void(const std::string&)> onLine);
 
-    // Launch a coding agent in Docker. headful=true allocates a TTY. Returns exit code.
     int runAgentDocker(const std::string& prompt, bool headful,
                        std::function<void(const std::string&)> onLine);
 
-    // Evaluate current prompts against the corpus. Returns score 0-100 or negative on failure.
     struct EvalResult {
         double score = -1;
         std::string breakdown;
@@ -44,7 +40,6 @@ private:
     };
     EvalResult evaluate();
 
-    // Score one file's result against its label
     struct FileScore {
         double classification = 0;
         double calibration = 0;
@@ -56,17 +51,13 @@ private:
                         const std::string& relevance, int riskScore,
                         const std::string& profileJson);
 
-    // Check if a coding agent CLI is available on PATH
     bool agentAvailable();
 
-    // Run the coding agent (dispatches to runAgentLocal or runAgentDocker based on mode)
     int runClaude(const std::string& prompt, std::function<void(const std::string&)> onLine);
 
-    // Resolve which agent to use and which mode (local/docker/docker-headful)
     std::string agentName() const;
     std::string improveMode() const;
 
-    // Git helpers
     void gitCommit(const std::string& msg);
     void gitRevert();
 
@@ -76,5 +67,4 @@ private:
     std::string corpusDir_;
     std::string labelsPath_;
 };
-
-} // namespace area
+}  // namespace area

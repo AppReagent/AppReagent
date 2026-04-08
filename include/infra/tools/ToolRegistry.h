@@ -9,23 +9,18 @@
 
 namespace area {
 
-class ToolContext;
-
 class ToolRegistry {
-public:
+ public:
     void add(std::unique_ptr<Tool> tool);
 
-    // Try all tools in registration order. Returns nullopt if none match.
     std::optional<ToolResult> dispatch(const std::string& action, ToolContext& ctx);
 
-    // Generate "Tools:\n- NAME: description\n..." for the system prompt
     std::string describeAll() const;
 
-    // Return all tool prefixes (e.g. "SQL:", "SCAN:") for thought extraction
     std::vector<std::string> prefixes() const;
 
-private:
+ private:
     std::vector<std::unique_ptr<Tool>> tools_;
 };
 
-} // namespace area
+}  // namespace area

@@ -1,20 +1,23 @@
 #include "features/xrefs/XrefsTool.h"
-#include "infra/tools/ToolContext.h"
-#include "infra/agent/Agent.h"
 
-#include <algorithm>
-#include <chrono>
+#include <bits/chrono.h>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <vector>
 #include <map>
+#include <cctype>
+#include <functional>
+#include <system_error>
+#include <utility>
+
+#include "infra/tools/ToolContext.h"
+#include "infra/agent/Agent.h"
 
 namespace fs = std::filesystem;
 
 namespace area {
-
 static std::string toLowerXR(const std::string& s) {
     std::string out = s;
     for (auto& c : out) c = std::tolower(static_cast<unsigned char>(c));
@@ -31,7 +34,7 @@ struct XrefEntry {
     std::string file;
     int line;
     std::string content;
-    std::string type; // "invoke", "field-read", "field-write", "new-instance", "const-class", "const-string", "type-ref"
+    std::string type;
 };
 
 static std::string classifyXref(const std::string& lineLower) {
@@ -52,17 +55,18 @@ static std::string classifyXref(const std::string& lineLower) {
     return "reference";
 }
 
-// Find which method a line belongs to in a smali file
 static std::string enclosingMethod(const std::vector<std::string>& lines, int lineIdx) {
     for (int i = lineIdx; i >= 0; i--) {
-        if (lines[i].find(".method") == 0 ||
+        if (lines[i].starts_with(".method") ||
             (lines[i].find(".method") != std::string::npos &&
              lines[i].find(".end method") == std::string::npos &&
              lines[i].find('#') > lines[i].find(".method"))) {
-            // Extract method signature
             auto pos = lines[i].find(".method");
             std::string sig = lines[i].substr(pos);
-            if (sig.size() > 80) sig = sig.substr(0, 80) + "...";
+            if (sig.size() > 80) {
+              sig.resize(80);
+              sig += "...";
+            }
             return sig;
         }
     }
@@ -70,7 +74,7 @@ static std::string enclosingMethod(const std::vector<std::string>& lines, int li
 }
 
 std::optional<ToolResult> XrefsTool::tryExecute(const std::string& action, ToolContext& ctx) {
-    if (action.find("XREFS:") != 0)
+    if (!action.starts_with("XREFS:"))
         return std::nullopt;
 
     std::string args = action.substr(6);
@@ -81,7 +85,6 @@ std::optional<ToolResult> XrefsTool::tryExecute(const std::string& action, ToolC
         return ToolResult{"OBSERVATION: Error — provide an identifier after XREFS:"};
     }
 
-    // Parse: identifier | path
     std::string identifier, root;
     auto pipePos = args.rfind('|');
     if (pipePos != std::string::npos) {
@@ -105,7 +108,6 @@ std::optional<ToolResult> XrefsTool::tryExecute(const std::string& action, ToolC
         }
     }
 
-    // Determine search roots
     std::vector<std::string> roots;
     if (!root.empty()) {
         roots.push_back(root);
@@ -140,7 +142,7 @@ std::optional<ToolResult> XrefsTool::tryExecute(const std::string& action, ToolC
     bool truncated = false;
 
     for (auto& searchRoot : roots) {
-        if (truncated || (int)xrefs.size() >= MAX_XREFS) break;
+        if (truncated || static_cast<int>(xrefs.size()) >= MAX_XREFS) break;
         if (!fs::exists(searchRoot)) continue;
 
         std::error_code ec;
@@ -148,21 +150,29 @@ std::optional<ToolResult> XrefsTool::tryExecute(const std::string& action, ToolC
             searchRoot, fs::directory_options::skip_permission_denied, ec);
 
         for (; it != fs::recursive_directory_iterator(); it.increment(ec)) {
-            if (ec) { ec.clear(); continue; }
-            if ((int)xrefs.size() >= MAX_XREFS || filesSearched > MAX_FILES) {
+            if (ec) {
+                ec.clear(); continue;
+            }
+            if (static_cast<int>(xrefs.size()) >= MAX_XREFS || filesSearched > MAX_FILES) {
                 truncated = true; break;
             }
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - startTime).count();
-            if (elapsed > MAX_MS) { truncated = true; break; }
+            if (elapsed > MAX_MS) {
+                truncated = true; break;
+            }
 
             auto& entry = *it;
             if (entry.is_directory(ec) && !ec && shouldSkipDirXR(entry.path().filename().string())) {
                 it.disable_recursion_pending();
                 continue;
             }
-            if (ec) { ec.clear(); continue; }
-            if (!entry.is_regular_file(ec) || ec) { ec.clear(); continue; }
+            if (ec) {
+                ec.clear(); continue;
+            }
+            if (!entry.is_regular_file(ec) || ec) {
+                ec.clear(); continue;
+            }
 
             std::string ext = entry.path().extension().string();
             for (auto& c : ext) c = std::tolower(static_cast<unsigned char>(c));
@@ -173,7 +183,6 @@ std::optional<ToolResult> XrefsTool::tryExecute(const std::string& action, ToolC
 
             filesSearched++;
 
-            // Read file and search
             std::ifstream file(entry.path());
             if (!file.is_open()) continue;
 
@@ -183,13 +192,11 @@ std::optional<ToolResult> XrefsTool::tryExecute(const std::string& action, ToolC
                 lines.push_back(line);
             }
 
-            for (int i = 0; i < (int)lines.size(); i++) {
+            for (int i = 0; i < static_cast<int>(lines.size()); i++) {
                 std::string lineLower = toLowerXR(lines[i]);
                 if (lineLower.find(identLower) != std::string::npos) {
-                    // Skip the definition itself (.class line defining this class)
                     if (lineLower.find(".class") != std::string::npos &&
                         lineLower.find(identLower) != std::string::npos) {
-                        // This is the class definition — include it but mark it
                         xrefs.push_back({
                             entry.path().string(), i + 1,
                             lines[i].size() > 200 ? lines[i].substr(0, 200) + "..." : lines[i],
@@ -202,7 +209,7 @@ std::optional<ToolResult> XrefsTool::tryExecute(const std::string& action, ToolC
                             classifyXref(lineLower)
                         });
                     }
-                    if ((int)xrefs.size() >= MAX_XREFS) break;
+                    if (static_cast<int>(xrefs.size()) >= MAX_XREFS) break;
                 }
             }
         }
@@ -215,7 +222,6 @@ std::optional<ToolResult> XrefsTool::tryExecute(const std::string& action, ToolC
         return ToolResult{obs};
     }
 
-    // Group by type
     std::map<std::string, std::vector<XrefEntry*>> byType;
     for (auto& x : xrefs) {
         byType[x.type].push_back(&x);
@@ -225,7 +231,6 @@ std::optional<ToolResult> XrefsTool::tryExecute(const std::string& action, ToolC
     out << xrefs.size() << " cross-reference(s) to \"" << identifier
         << "\" across " << filesSearched << " files:\n\n";
 
-    // Print in a logical order
     std::vector<std::string> typeOrder = {
         "definition", "inheritance", "new-instance", "invoke",
         "field-read", "field-write", "field-decl", "method-decl",
@@ -254,5 +259,4 @@ std::optional<ToolResult> XrefsTool::tryExecute(const std::string& action, ToolC
         "OBSERVATION: " + result +
         "Use READ: to view full context, or CALLGRAPH: to trace call chains."};
 }
-
-} // namespace area
+}  // namespace area

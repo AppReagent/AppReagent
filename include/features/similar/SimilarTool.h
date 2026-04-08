@@ -1,5 +1,9 @@
 #pragma once
 
+#include <memory>
+#include <optional>
+#include <string>
+
 #include "infra/tools/Tool.h"
 #include "infra/config/Config.h"
 #include "infra/db/Database.h"
@@ -8,7 +12,7 @@
 namespace area {
 
 class SimilarTool : public Tool {
-public:
+ public:
     SimilarTool(const Config* config, Database& db);
 
     std::string name() const override { return "SIMILAR"; }
@@ -23,9 +27,9 @@ public:
 
     bool available() const { return store_ && store_->hasBackend(); }
 
-private:
+ private:
     std::unique_ptr<EmbeddingBackend> backend_;
     std::unique_ptr<EmbeddingStore> store_;
 };
 
-} // namespace area
+}  // namespace area

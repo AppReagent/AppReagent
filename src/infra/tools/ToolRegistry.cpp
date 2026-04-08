@@ -1,4 +1,7 @@
 #include "infra/tools/ToolRegistry.h"
+
+#include <utility>
+
 #include "infra/tools/ToolContext.h"
 
 namespace area {
@@ -33,4 +36,4 @@ std::vector<std::string> ToolRegistry::prefixes() const {
     return result;
 }
 
-} // namespace area
+}  // namespace area

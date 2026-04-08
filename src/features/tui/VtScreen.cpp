@@ -2,9 +2,9 @@
 
 #include <algorithm>
 #include <sstream>
+#include <cstdint>
 
 namespace area {
-
 VtScreen::VtScreen(int rows, int cols) : rows_(rows), cols_(cols) {
     grid_.assign(rows_, std::vector<VtCell>(cols_));
 }
@@ -17,10 +17,6 @@ void VtScreen::resize(int rows, int cols) {
     curCol_ = std::min(curCol_, cols_ - 1);
 }
 
-// ---------------------------------------------------------------------------
-// Feed raw bytes — UTF-8 decode then dispatch
-// ---------------------------------------------------------------------------
-
 void VtScreen::feed(const char* data, size_t len) {
     for (size_t i = 0; i < len; ++i) {
         auto b = static_cast<uint8_t>(data[i]);
@@ -30,7 +26,6 @@ void VtScreen::feed(const char* data, size_t len) {
                 utf8Acc_ = (utf8Acc_ << 6) | (b & 0x3F);
                 if (--utf8Remaining_ == 0) processChar(utf8Acc_);
             } else {
-                // Bad continuation — reset and reprocess
                 utf8Remaining_ = 0;
                 --i;
             }
@@ -51,10 +46,6 @@ void VtScreen::feed(const char* data, size_t len) {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// State machine
-// ---------------------------------------------------------------------------
 
 void VtScreen::processChar(char32_t ch) {
     switch (state_) {
@@ -81,7 +72,6 @@ void VtScreen::processChar(char32_t ch) {
         } else if (ch == '#') {
             state_ = State::EscHash;
         } else {
-            // Two-char escape like ESC ( or ESC ) — ignore
             state_ = State::Ground;
         }
         break;
@@ -92,7 +82,6 @@ void VtScreen::processChar(char32_t ch) {
         } else if ((ch >= '0' && ch <= '9') || ch == ';') {
             paramBuf_ += static_cast<char>(ch);
         } else if (ch >= 0x40 && ch <= 0x7E) {
-            // Final byte
             if (decPrivate_) {
                 executeDecPrivate(static_cast<char>(ch));
             } else {
@@ -100,22 +89,20 @@ void VtScreen::processChar(char32_t ch) {
             }
             state_ = State::Ground;
         } else {
-            // Intermediate bytes (space, !, ", etc.) — ignore and keep parsing
         }
         break;
 
     case State::OscString:
-        // Consume until ST (ESC \) or BEL (0x07)
+
         if (ch == 0x07) {
             state_ = State::Ground;
         } else if (ch == 0x1B) {
-            // Might be ESC \ (ST) — peek isn't possible, just end
             state_ = State::Ground;
         }
         break;
 
     case State::EscHash:
-        // ESC # 8 = DECALN (fill screen with 'E') — ignore
+
         state_ = State::Ground;
         break;
     }
@@ -142,13 +129,9 @@ void VtScreen::executeControl(char32_t ch) {
         if (curCol_ > 0) --curCol_;
         break;
     default:
-        break; // BEL, etc. — ignore
+        break;
     }
 }
-
-// ---------------------------------------------------------------------------
-// CSI sequences
-// ---------------------------------------------------------------------------
 
 std::vector<int> VtScreen::parseParams(int defaultVal) const {
     std::vector<int> params;
@@ -173,7 +156,7 @@ void VtScreen::executeCsi(char f) {
     auto p = parseParams(f == 'm' ? 0 : 1);
 
     switch (f) {
-    case 'H': // CUP — cursor position (1-based)
+    case 'H':
     case 'f': {
         int row = (p.size() > 0 ? p[0] : 1) - 1;
         int col = (p.size() > 1 ? p[1] : 1) - 1;
@@ -181,44 +164,41 @@ void VtScreen::executeCsi(char f) {
         curCol_ = std::clamp(col, 0, cols_ - 1);
         break;
     }
-    case 'A': // CUU — cursor up
+    case 'A':
         curRow_ = std::max(0, curRow_ - p[0]);
         break;
-    case 'B': // CUD — cursor down
+    case 'B':
         curRow_ = std::min(rows_ - 1, curRow_ + p[0]);
         break;
-    case 'C': // CUF — cursor forward
+    case 'C':
         curCol_ = std::min(cols_ - 1, curCol_ + p[0]);
         break;
-    case 'D': // CUB — cursor backward
+    case 'D':
         curCol_ = std::max(0, curCol_ - p[0]);
         break;
-    case 'G': // CHA — cursor horizontal absolute (1-based)
+    case 'G':
         curCol_ = std::clamp(p[0] - 1, 0, cols_ - 1);
         break;
-    case 'd': // VPA — cursor vertical absolute (1-based)
+    case 'd':
         curRow_ = std::clamp(p[0] - 1, 0, rows_ - 1);
         break;
-    case 'J': { // ED — erase in display
+    case 'J': {
         int mode = p[0];
         if (mode == 0) {
-            // Cursor to end
             clearCells(curRow_, curCol_, cols_);
             for (int r = curRow_ + 1; r < rows_; ++r)
                 clearCells(r, 0, cols_);
         } else if (mode == 1) {
-            // Start to cursor
             for (int r = 0; r < curRow_; ++r)
                 clearCells(r, 0, cols_);
             clearCells(curRow_, 0, curCol_ + 1);
         } else if (mode == 2 || mode == 3) {
-            // Entire screen
             for (int r = 0; r < rows_; ++r)
                 clearCells(r, 0, cols_);
         }
         break;
     }
-    case 'K': { // EL — erase in line
+    case 'K': {
         int mode = p[0];
         if (mode == 0) {
             clearCells(curRow_, curCol_, cols_);
@@ -229,7 +209,7 @@ void VtScreen::executeCsi(char f) {
         }
         break;
     }
-    case 'L': { // IL — insert lines
+    case 'L': {
         int n = p[0];
         for (int i = 0; i < n && curRow_ + i < rows_; ++i) {
             grid_.insert(grid_.begin() + curRow_, std::vector<VtCell>(cols_));
@@ -237,28 +217,28 @@ void VtScreen::executeCsi(char f) {
         }
         break;
     }
-    case 'M': { // DL — delete lines
+    case 'M': {
         int n = p[0];
-        for (int i = 0; i < n && curRow_ < (int)grid_.size(); ++i) {
+        for (int i = 0; i < n && curRow_ < static_cast<int>(grid_.size()); ++i) {
             grid_.erase(grid_.begin() + curRow_);
             grid_.push_back(std::vector<VtCell>(cols_));
         }
         break;
     }
-    case 'm': // SGR
+    case 'm':
         executeSgr();
         break;
-    case 'S': // SU — scroll up
+    case 'S':
         for (int i = 0; i < p[0]; ++i) scrollUp();
         break;
-    case 'T': // SD — scroll down
+    case 'T':
         for (int i = 0; i < p[0]; ++i) {
             grid_.insert(grid_.begin(), std::vector<VtCell>(cols_));
             grid_.resize(rows_);
         }
         break;
     default:
-        break; // Unhandled — ignore
+        break;
     }
 }
 
@@ -268,7 +248,7 @@ void VtScreen::executeDecPrivate(char f) {
 
     for (int code : p) {
         switch (code) {
-        case 1049: // Alt screen
+        case 1049:
             if (set && !altScreen_) {
                 savedGrid_ = grid_;
                 savedRow_ = curRow_;
@@ -285,12 +265,12 @@ void VtScreen::executeDecPrivate(char f) {
                 altScreen_ = false;
             }
             break;
-        case 1000: // Mouse tracking
-        case 1006: // SGR mouse mode
+        case 1000:
+        case 1006:
             mouseTracking_ = set;
             break;
         default:
-            break; // 25 (cursor), 2026 (sync output), etc. — ignore
+            break;
         }
     }
 }
@@ -300,29 +280,29 @@ void VtScreen::executeSgr() {
     for (size_t i = 0; i < p.size(); ++i) {
         int code = p[i];
         switch (code) {
-        case 0: // Reset
+        case 0:
             curAttr_ = VtCell{};
             break;
-        case 1: // Bold
+        case 1:
             curAttr_.bold = true;
             break;
-        case 7: // Inverse
+        case 7:
             curAttr_.inverse = true;
             break;
-        case 22: // Normal intensity
+        case 22:
             curAttr_.bold = false;
             break;
-        case 27: // Inverse off
+        case 27:
             curAttr_.inverse = false;
             break;
-        case 38: // Foreground extended — skip sub-params
+        case 38:
             if (i + 1 < p.size() && p[i + 1] == 2) {
-                i += 4; // 38;2;R;G;B
+                i += 4;
             } else if (i + 1 < p.size() && p[i + 1] == 5) {
-                i += 2; // 38;5;N
+                i += 2;
             }
             break;
-        case 48: // Background extended — skip sub-params
+        case 48:
             if (i + 1 < p.size() && p[i + 1] == 2) {
                 i += 4;
             } else if (i + 1 < p.size() && p[i + 1] == 5) {
@@ -330,15 +310,11 @@ void VtScreen::executeSgr() {
             }
             break;
         default:
-            // 30-37, 40-47, 90-97, etc. — color codes, ignore for text output
+
             break;
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Screen operations
-// ---------------------------------------------------------------------------
 
 void VtScreen::putChar(char32_t ch) {
     if (curCol_ >= cols_) {
@@ -370,10 +346,6 @@ void VtScreen::clearCells(int row, int colStart, int colEnd) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Text output
-// ---------------------------------------------------------------------------
-
 static void appendUtf8(std::string& out, char32_t cp) {
     if (cp < 0x80) {
         out += static_cast<char>(cp);
@@ -396,13 +368,12 @@ std::string VtScreen::text() const {
     std::string out;
     out.reserve(rows_ * (cols_ + 1));
     for (int r = 0; r < rows_; ++r) {
-        // Build row, then trim trailing spaces
         std::string row;
         row.reserve(cols_ * 2);
         for (int c = 0; c < cols_; ++c) {
             appendUtf8(row, grid_[r][c].ch);
         }
-        // Trim trailing spaces
+
         auto end = row.find_last_not_of(' ');
         if (end != std::string::npos) {
             row.resize(end + 1);
@@ -414,5 +385,4 @@ std::string VtScreen::text() const {
     }
     return out;
 }
-
-} // namespace area
+}  // namespace area

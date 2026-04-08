@@ -1,9 +1,7 @@
 #include "features/strings/StringsTool.h"
-#include "infra/tools/ToolContext.h"
-#include "infra/agent/Agent.h"
 
+#include <bits/chrono.h>
 #include <algorithm>
-#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -11,18 +9,22 @@
 #include <set>
 #include <sstream>
 #include <vector>
+#include <cctype>
+#include <functional>
+#include <system_error>
+#include <utility>
+
+#include "infra/tools/ToolContext.h"
+#include "infra/agent/Agent.h"
 
 namespace fs = std::filesystem;
 
 namespace area {
-
-// Base64 decode (returns empty string on invalid input)
 static std::string base64Decode(const std::string& encoded) {
     static const std::string chars =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     if (encoded.size() < 8) return "";
 
-    // Validate
     for (char c : encoded) {
         if (c != '=' && chars.find(c) == std::string::npos) return "";
     }
@@ -33,25 +35,23 @@ static std::string base64Decode(const std::string& encoded) {
         if (c == '=') break;
         auto pos = chars.find(c);
         if (pos == std::string::npos) return "";
-        val = (val << 6) | (int)pos;
+        val = (val << 6) | static_cast<int>(pos);
         bits += 6;
         if (bits >= 0) {
-            result += char((val >> bits) & 0xFF);
+            result += static_cast<char>((val >> bits) & 0xFF);
             bits -= 8;
         }
     }
 
-    // Validate decoded output is printable text
     for (char c : result) {
         if (c != '\n' && c != '\r' && c != '\t' && (c < 0x20 || c > 0x7e))
-            return ""; // binary content, not useful as decoded string
+            return "";
     }
     return result;
 }
 
-// Detect obfuscation-related smali patterns in a line
 struct ObfuscationIndicator {
-    std::string type;   // "xor_cipher", "string_building", "reflection_setup", "native_bridge", "anti_analysis"
+    std::string type;
     std::string detail;
     int line;
 };
@@ -72,21 +72,16 @@ struct ExtractedString {
     std::string file;
     int line;
     std::string value;
-    std::string context; // what kind of string (const-string, field, xml attr, etc.)
+    std::string context;
 };
 
-// Extract string from smali const-string line:
-//   const-string v0, "hello world"
-//   const-string/jumbo v0, "hello world"
 static std::string extractConstString(const std::string& line) {
-    // Find the opening quote after the comma
     auto commaPos = line.find(',');
     if (commaPos == std::string::npos) return "";
 
     auto quoteStart = line.find('"', commaPos);
     if (quoteStart == std::string::npos) return "";
 
-    // Find matching close quote (handle escaped quotes)
     std::string result;
     for (size_t i = quoteStart + 1; i < line.size(); i++) {
         if (line[i] == '\\' && i + 1 < line.size()) {
@@ -102,7 +97,6 @@ static std::string extractConstString(const std::string& line) {
     return result;
 }
 
-// Extract string from XML android:name="..." or similar attributes
 static std::vector<std::string> extractXmlStrings(const std::string& line) {
     std::vector<std::string> results;
     size_t pos = 0;
@@ -112,7 +106,7 @@ static std::vector<std::string> extractXmlStrings(const std::string& line) {
         auto qEnd = line.find('"', qStart + 1);
         if (qEnd == std::string::npos) break;
         std::string val = line.substr(qStart + 1, qEnd - qStart - 1);
-        if (!val.empty() && val.size() > 2) { // skip very short strings
+        if (!val.empty() && val.size() > 2) {
             results.push_back(val);
         }
         pos = qEnd + 1;
@@ -120,21 +114,17 @@ static std::vector<std::string> extractXmlStrings(const std::string& line) {
     return results;
 }
 
-// Classify a string for interest
 static bool isInteresting(const std::string& s) {
     if (s.size() < 3) return false;
     std::string lower = toLowerST(s);
 
-    // URLs (including mining pool protocols)
     if (lower.starts_with("http://") || lower.starts_with("https://") ||
         lower.starts_with("ftp://") || lower.starts_with("ws://") ||
         lower.starts_with("wss://") || lower.starts_with("stratum://") ||
         lower.starts_with("stratum+tcp://") || lower.starts_with("stratum+ssl://")) return true;
 
-    // Telegram bot API URLs
     if (lower.find("api.telegram.org/bot") != std::string::npos) return true;
 
-    // IP addresses (rough check)
     if (s.find('.') != std::string::npos) {
         int dots = 0, digits = 0;
         for (char c : s) {
@@ -144,17 +134,14 @@ static bool isInteresting(const std::string& s) {
         if (dots == 3 && digits >= 4) return true;
     }
 
-    // File paths
     if (lower.find('/') != std::string::npos && lower.size() > 5) return true;
 
-    // Domain-like strings
     if (lower.find(".com") != std::string::npos || lower.find(".net") != std::string::npos ||
         lower.find(".org") != std::string::npos || lower.find(".io") != std::string::npos ||
         lower.find(".ru") != std::string::npos || lower.find(".cn") != std::string::npos ||
         lower.find(".top") != std::string::npos || lower.find(".xyz") != std::string::npos ||
         lower.find(".onion") != std::string::npos) return true;
 
-    // Dynamic DNS domains (common in malware C2)
     if (lower.find(".duckdns.org") != std::string::npos ||
         lower.find(".no-ip.com") != std::string::npos ||
         lower.find(".no-ip.org") != std::string::npos ||
@@ -163,60 +150,56 @@ static bool isInteresting(const std::string& s) {
         lower.find(".zapto.org") != std::string::npos ||
         lower.find(".sytes.net") != std::string::npos) return true;
 
-    // Content URIs
     if (lower.starts_with("content://")) return true;
 
-    // Bitcoin addresses (bc1, 1, 3 prefixed, 26-62 chars)
     if ((s.starts_with("bc1") || s.starts_with("1") || s.starts_with("3")) && s.size() >= 26 && s.size() <= 62) {
         bool validBtc = true;
         for (char c : s) {
-            if (!std::isalnum(c)) { validBtc = false; break; }
+            if (!std::isalnum(c)) {
+                validBtc = false; break;
+            }
         }
         if (validBtc) return true;
     }
 
-    // Ethereum addresses (0x followed by 40 hex chars)
     if (s.starts_with("0x") && s.size() == 42) {
         bool validEth = true;
         for (size_t i = 2; i < s.size(); i++) {
-            if (!std::isxdigit(s[i])) { validEth = false; break; }
+            if (!std::isxdigit(s[i])) {
+                validEth = false; break;
+            }
         }
         if (validEth) return true;
     }
 
-    // Monero addresses (start with 4, 95 chars)
     if (s.starts_with("4") && s.size() == 95) {
         bool validXmr = true;
         for (char c : s) {
-            if (!std::isalnum(c)) { validXmr = false; break; }
+            if (!std::isalnum(c)) {
+                validXmr = false; break;
+            }
         }
         if (validXmr) return true;
     }
 
-    // Package names
     if (std::count(lower.begin(), lower.end(), '.') >= 2 && lower.find(' ') == std::string::npos) return true;
 
-    // Crypto/encoding keywords
     if (lower.find("aes") != std::string::npos || lower.find("rsa") != std::string::npos ||
         lower.find("sha") != std::string::npos || lower.find("md5") != std::string::npos ||
         lower.find("base64") != std::string::npos || lower.find("cipher") != std::string::npos ||
         lower.find("hmac") != std::string::npos || lower.find("pkcs") != std::string::npos) return true;
 
-    // SQL
     if (lower.find("select ") != std::string::npos || lower.find("insert ") != std::string::npos ||
         lower.find("create table") != std::string::npos) return true;
 
-    // Commands/shell
     if (lower.starts_with("su") || lower.find("/bin/") != std::string::npos ||
         lower.find("chmod") != std::string::npos || lower.find("/system/") != std::string::npos ||
         lower.find("runtime.exec") != std::string::npos) return true;
 
-    // Suspicious file extensions
     if (lower.ends_with(".dex") || lower.ends_with(".apk") || lower.ends_with(".jar") ||
         lower.ends_with(".so") || lower.ends_with(".locked") || lower.ends_with(".encrypted") ||
         lower.ends_with(".enc")) return true;
 
-    // Base64-like (long alphanumeric strings)
     if (s.size() > 20) {
         bool allAlnum = true;
         for (char c : s) {
@@ -228,23 +211,23 @@ static bool isInteresting(const std::string& s) {
         if (allAlnum) return true;
     }
 
-    // Hex-encoded strings (potential encrypted payloads or keys)
     if (s.size() >= 16 && s.size() % 2 == 0) {
         bool allHex = true;
         for (char c : s) {
-            if (!std::isxdigit(c)) { allHex = false; break; }
+            if (!std::isxdigit(c)) {
+                allHex = false; break;
+            }
         }
         if (allHex) return true;
     }
 
-    // Any string longer than 10 chars could be interesting
     if (s.size() > 10) return true;
 
     return false;
 }
 
 std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, ToolContext& ctx) {
-    if (action.find("STRINGS:") != 0)
+    if (!action.starts_with("STRINGS:"))
         return std::nullopt;
 
     std::string args = action.substr(8);
@@ -255,7 +238,6 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
         return ToolResult{"OBSERVATION: Error — provide a path after STRINGS:"};
     }
 
-    // Parse: path | filter
     std::string path, filter;
     auto pipePos = args.find('|');
     if (pipePos != std::string::npos) {
@@ -282,7 +264,7 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
 
     std::string filterLower = toLowerST(filter);
     std::vector<ExtractedString> strings;
-    std::set<std::string> seen; // deduplicate
+    std::set<std::string> seen;
     int filesProcessed = 0;
     static constexpr int MAX_FILES = 50000;
     static constexpr int MAX_STRINGS = 200;
@@ -293,7 +275,9 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
     std::vector<ObfuscationIndicator> obfuscationIndicators;
 
     auto processFile = [&](const fs::path& filePath) {
-        if ((int)strings.size() >= MAX_STRINGS) { truncated = true; return; }
+        if (static_cast<int>(strings.size()) >= MAX_STRINGS) {
+            truncated = true; return;
+        }
 
         std::string ext = filePath.extension().string();
         for (auto& c : ext) c = std::tolower(static_cast<unsigned char>(c));
@@ -311,12 +295,13 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
         int lineNum = 0;
         while (std::getline(file, line)) {
             lineNum++;
-            if ((int)strings.size() >= MAX_STRINGS) { truncated = true; return; }
+            if (static_cast<int>(strings.size()) >= MAX_STRINGS) {
+                truncated = true; return;
+            }
 
             std::string lineLower = toLowerST(line);
 
             if (ext == ".smali") {
-                // Detect obfuscation patterns in smali
                 if (lineLower.find("xor-int") != std::string::npos) {
                     obfuscationIndicators.push_back({"xor_cipher",
                         "XOR operation: " + line, lineNum});
@@ -356,7 +341,6 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
                         "String construction via StringBuilder: " + line, lineNum});
                 }
 
-                // Extract const-string values
                 if (lineLower.find("const-string") != std::string::npos) {
                     std::string val = extractConstString(line);
                     if (!val.empty() && seen.insert(val).second) {
@@ -377,7 +361,6 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
                     }
                 }
             } else {
-                // For other files, extract quoted strings
                 size_t pos = 0;
                 while (pos < line.size()) {
                     char q = 0;
@@ -416,18 +399,28 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
         auto it = fs::recursive_directory_iterator(
             path, fs::directory_options::skip_permission_denied, ec);
         for (; it != fs::recursive_directory_iterator(); it.increment(ec)) {
-            if (ec) { ec.clear(); continue; }
-            if (truncated || filesProcessed > MAX_FILES) { truncated = true; break; }
+            if (ec) {
+                ec.clear(); continue;
+            }
+            if (truncated || filesProcessed > MAX_FILES) {
+                truncated = true; break;
+            }
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - startTime).count();
-            if (elapsed > MAX_MS) { truncated = true; break; }
+            if (elapsed > MAX_MS) {
+                truncated = true; break;
+            }
 
             if (it->is_directory(ec) && !ec && shouldSkipDirST(it->path().filename().string())) {
                 it.disable_recursion_pending();
                 continue;
             }
-            if (ec) { ec.clear(); continue; }
-            if (!it->is_regular_file(ec) || ec) { ec.clear(); continue; }
+            if (ec) {
+                ec.clear(); continue;
+            }
+            if (!it->is_regular_file(ec) || ec) {
+                ec.clear(); continue;
+            }
 
             std::string ext = it->path().extension().string();
             for (auto& c : ext) c = std::tolower(static_cast<unsigned char>(c));
@@ -444,7 +437,6 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
         return ToolResult{obs + "."};
     }
 
-    // Categorize strings
     struct Category {
         std::string name;
         std::vector<ExtractedString*> items;
@@ -452,7 +444,9 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
     std::vector<Category> categories;
     auto addToCategory = [&](const std::string& name, ExtractedString* s) {
         for (auto& cat : categories) {
-            if (cat.name == name) { cat.items.push_back(s); return; }
+            if (cat.name == name) {
+                cat.items.push_back(s); return;
+            }
         }
         categories.push_back({name, {s}});
     };
@@ -464,7 +458,6 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
             addToCategory("Mining Pool URLs", &s);
         } else if (lower.starts_with("http://") || lower.starts_with("https://") ||
             lower.starts_with("ftp://") || lower.starts_with("ws://")) {
-            // Sub-categorize URLs
             if (lower.find("api.telegram.org/bot") != std::string::npos) {
                 addToCategory("Telegram Bot APIs", &s);
             } else {
@@ -480,23 +473,28 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
                    lower.find("create table") != std::string::npos) {
             addToCategory("SQL", &s);
         } else if ([&]() {
-            // Bitcoin addresses
             if ((s.value.starts_with("bc1") || s.value.starts_with("1") || s.value.starts_with("3"))
                 && s.value.size() >= 26 && s.value.size() <= 62) {
                 bool valid = true;
-                for (char c : s.value) if (!std::isalnum(c)) { valid = false; break; }
+                for (char c : s.value) if (!std::isalnum(c)) {
+                    valid = false; break;
+                }
                 if (valid) return true;
             }
-            // Ethereum addresses
+
             if (s.value.starts_with("0x") && s.value.size() == 42) {
                 bool valid = true;
-                for (size_t i = 2; i < s.value.size(); i++) if (!std::isxdigit(s.value[i])) { valid = false; break; }
+                for (size_t i = 2; i < s.value.size(); i++) if (!std::isxdigit(s.value[i])) {
+                    valid = false; break;
+                }
                 if (valid) return true;
             }
-            // Monero addresses
+
             if (s.value.starts_with("4") && s.value.size() == 95) {
                 bool valid = true;
-                for (char c : s.value) if (!std::isalnum(c)) { valid = false; break; }
+                for (char c : s.value) if (!std::isalnum(c)) {
+                    valid = false; break;
+                }
                 if (valid) return true;
             }
             return false;
@@ -538,7 +536,6 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
                    lower.ends_with(".so") || lower.ends_with(".locked") || lower.ends_with(".encrypted")) {
             addToCategory("Suspicious File Extensions", &s);
         } else {
-            // Try Base64 decode for long alphanumeric strings
             bool categorized = false;
             if (s.value.size() >= 12) {
                 bool looksBase64 = true;
@@ -552,7 +549,7 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
                     std::string decoded = base64Decode(s.value);
                     if (!decoded.empty() && decoded.size() >= 4) {
                         s.context += " [Base64 decoded: \"" + decoded.substr(0, 120) + "\"]";
-                        // Re-check if decoded content reveals a URL, IP, or other indicator
+
                         std::string decodedLower = toLowerST(decoded);
                         if (decodedLower.starts_with("http://") || decodedLower.starts_with("https://") ||
                             decodedLower.find(".com") != std::string::npos ||
@@ -570,11 +567,12 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
                 }
             }
 
-            // Check for hex-encoded strings (potential keys, encrypted payloads)
             if (!categorized && s.value.size() >= 32 && s.value.size() % 2 == 0) {
                 bool allHex = true;
                 for (char c : s.value) {
-                    if (!std::isxdigit(c)) { allHex = false; break; }
+                    if (!std::isxdigit(c)) {
+                        allHex = false; break;
+                    }
                 }
                 if (allHex) {
                     addToCategory("Hex-Encoded Data", &s);
@@ -597,16 +595,17 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
         out << "== " << cat.name << " (" << cat.items.size() << ") ==\n";
         for (auto* s : cat.items) {
             std::string display = s->value;
-            if (display.size() > 150) display = display.substr(0, 150) + "...";
+            if (display.size() > 150) {
+              display.resize(150);
+              display += "...";
+            }
             out << "  \"" << display << "\"\n";
             out << "    " << s->file << ":" << s->line << " (" << s->context << ")\n";
         }
         out << "\n";
     }
 
-    // Output obfuscation indicators if any were found
     if (!obfuscationIndicators.empty()) {
-        // Deduplicate by type
         std::map<std::string, std::vector<ObfuscationIndicator*>> byType;
         for (auto& ind : obfuscationIndicators) {
             byType[ind.type].push_back(&ind);
@@ -630,7 +629,10 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
                     break;
                 }
                 std::string detail = ind->detail;
-                if (detail.size() > 120) detail = detail.substr(0, 120) + "...";
+                if (detail.size() > 120) {
+                  detail.resize(120);
+                  detail += "...";
+                }
                 out << "    line " << ind->line << ": " << detail << "\n";
                 shown++;
             }
@@ -646,5 +648,4 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
     ctx.cb({AgentMessage::RESULT, result});
     return ToolResult{"OBSERVATION: " + result};
 }
-
-} // namespace area
+}  // namespace area

@@ -3,10 +3,10 @@ SHELL := /bin/bash
 BUILD_DIR ?= /tmp/area-build
 
 all:
-	cmake -B $(BUILD_DIR) && cmake --build $(BUILD_DIR) -j14
+	cmake -B $(BUILD_DIR) && cmake --build $(BUILD_DIR) -j$$(nproc)
 
 test:
-	cmake -B $(BUILD_DIR) && cmake --build $(BUILD_DIR) -j14 --target area_tests && cd $(BUILD_DIR) && ctest --output-on-failure
+	cmake -B $(BUILD_DIR) && cmake --build $(BUILD_DIR) -j$$(nproc) --target area_tests && cd $(BUILD_DIR) && ctest --output-on-failure
 
 debug:
 	cmake -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Debug && cmake --build $(BUILD_DIR)
@@ -15,7 +15,7 @@ debug:
 watch:
 	@set -m; while true; do \
 		cmake -B $(BUILD_DIR) 2>&1 | tail -1; \
-		cmake --build $(BUILD_DIR) -j14 2>&1; \
+		cmake --build $(BUILD_DIR) -j$$(nproc) 2>&1; \
 		if [ -x ./area ]; then \
 			printf '\033[32m[ok]\033[0m\n'; \
 			./area; \
@@ -87,6 +87,23 @@ improve-bg: improve-build
 
 improve-attach:
 	sudo docker attach area-improve-session
+
+lint:
+	./scripts/lint-no-comments.sh .
+	cpplint --recursive src/ include/
+	cppcheck --enable=warning,performance,portability --error-exitcode=1 --suppress=missingIncludeSystem --inline-suppr -j$$(nproc) -I include src/
+	./scripts/lint-iwyu.sh
+
+lint-diff:
+	@FILES=$$(git diff --name-only --diff-filter=d HEAD -- 'src/*.cpp' 'src/*.h' 'include/*.h' 'include/*.cpp' 2>/dev/null; \
+	          git diff --name-only --diff-filter=d --cached -- 'src/*.cpp' 'src/*.h' 'include/*.h' 'include/*.cpp' 2>/dev/null); \
+	if [ -z "$$FILES" ]; then echo "No changed source files."; exit 0; fi; \
+	echo "Linting $$(echo $$FILES | wc -w) changed files..."; \
+	./scripts/lint-no-comments.sh . && \
+	echo $$FILES | xargs cpplint && \
+	cppcheck --enable=warning,performance,portability --error-exitcode=1 --suppress=missingIncludeSystem --inline-suppr -j$$(nproc) -I include $$FILES && \
+	CPPS=$$(echo $$FILES | tr ' ' '\n' | grep '\.cpp$$' || true); \
+	if [ -n "$$CPPS" ]; then ./scripts/lint-iwyu.sh $$CPPS; fi
 
 clean:
 	rm -rf $(BUILD_DIR) area area_tests

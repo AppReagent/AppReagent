@@ -29,7 +29,7 @@ struct ConfirmResult {
 using ConfirmCallback = std::function<ConfirmResult(const std::string& description)>;
 
 class Agent {
-public:
+ public:
     Agent(std::unique_ptr<LLMBackend> backend, ToolRegistry& tools,
           Harness harness = Harness::createDefault());
     Agent(LLMBackend* sharedBackend, ToolRegistry& tools,
@@ -48,7 +48,7 @@ public:
     void setSystemContext(const std::string& ctx) { systemContext_ = ctx; }
     void setPromptsDir(const std::string& dir) { promptsDir_ = dir; }
 
-private:
+ private:
     std::string buildSystemPrompt() const;
     std::string extractThought(const std::string& response, std::string& thought);
     void compressHistory(MessageCallback cb);
@@ -67,4 +67,4 @@ private:
     static constexpr double COMPRESS_THRESHOLD = 0.9;
 };
 
-} // namespace area
+}  // namespace area

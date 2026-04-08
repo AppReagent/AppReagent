@@ -9,7 +9,6 @@
 #include <vector>
 
 namespace area {
-
 struct ActiveScan {
     std::string run_id;
     std::string chat_id;
@@ -18,7 +17,7 @@ struct ActiveScan {
     int files_total = 0;
     int files_scanned = 0;
     std::chrono::steady_clock::time_point started;
-    std::shared_ptr<std::atomic<bool>> interrupt; // set to true to pause
+    std::shared_ptr<std::atomic<bool>> interrupt;
 };
 
 struct PausedScan {
@@ -27,12 +26,11 @@ struct PausedScan {
     std::string goal;
     int files_total = 0;
     int files_scanned = 0;
-    std::string jsonl_path; // for resume
+    std::string jsonl_path;
 };
 
 class ScanState {
-public:
-    // Start tracking a scan. Returns the interrupt flag to pass to ScanCommand.
+ public:
     std::shared_ptr<std::atomic<bool>> start(const ActiveScan& scan) {
         std::lock_guard lk(mu_);
         auto flag = std::make_shared<std::atomic<bool>>(false);
@@ -56,25 +54,22 @@ public:
         scans_.erase(run_id);
     }
 
-    // Pause a running scan by setting its interrupt flag.
-    // Moves it to the paused list with its JSONL path for resume.
     bool pause(const std::string& run_id, const std::string& jsonl_path) {
         std::lock_guard lk(mu_);
         auto it = scans_.find(run_id);
         if (it == scans_.end()) return false;
-        // Signal the scan to stop
+
         if (it->second.interrupt) it->second.interrupt->store(true);
-        // Record as paused
+
         paused_[run_id] = {
             run_id, it->second.path, it->second.goal,
             it->second.files_total, it->second.files_scanned,
             jsonl_path
         };
-        // Don't remove from active — ScanCommand will finish its current file and call finish()
+
         return true;
     }
 
-    // Get a paused scan for resume
     bool getPaused(const std::string& run_id, PausedScan& out) const {
         std::lock_guard lk(mu_);
         auto it = paused_.find(run_id);
@@ -125,10 +120,9 @@ public:
         return out;
     }
 
-private:
+ private:
     mutable std::mutex mu_;
     std::unordered_map<std::string, ActiveScan> scans_;
     std::unordered_map<std::string, PausedScan> paused_;
 };
-
-} // namespace area
+}  // namespace area

@@ -1,18 +1,24 @@
 #include "features/read/ReadCodeTool.h"
+
+#include <stddef.h>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <algorithm>
+#include <compare>
+#include <functional>
+#include <system_error>
+#include <vector>
+
 #include "infra/tools/ToolContext.h"
 #include "infra/agent/Agent.h"
 #include "domains/elf/disassembler.h"
 #include "domains/smali/parser.h"
 #include "util/file_io.h"
 
-#include <filesystem>
-#include <fstream>
-#include <sstream>
-
 namespace fs = std::filesystem;
 
 namespace area {
-
 static bool hasElfMagic(const std::string& path) {
     std::ifstream f(path, std::ios::binary);
     if (!f) return false;
@@ -26,7 +32,6 @@ static std::string formatSmaliFile(const smali::SmaliFile& parsed, const std::st
     std::ostringstream out;
 
     if (!methodFilter.empty()) {
-        // Show only the requested method
         for (auto& m : parsed.methods) {
             if (m.name == methodFilter || m.name.find(methodFilter) != std::string::npos) {
                 out << "Class: " << parsed.class_name << "\n"
@@ -34,7 +39,6 @@ static std::string formatSmaliFile(const smali::SmaliFile& parsed, const std::st
                     << "Lines: " << m.line_start << "-" << m.line_end << "\n\n"
                     << m.body << "\n";
 
-                // Show calls made by this method
                 auto calls = smali::extractCalls(m.body);
                 if (!calls.empty()) {
                     out << "\nCalls from this method:\n";
@@ -55,7 +59,6 @@ static std::string formatSmaliFile(const smali::SmaliFile& parsed, const std::st
         return out.str();
     }
 
-    // Show full file summary
     out << "Class: " << parsed.class_name << "\n";
     if (!parsed.super_class.empty()) out << "Super: " << parsed.super_class << "\n";
     if (!parsed.source_file.empty()) out << "Source: " << parsed.source_file << "\n";
@@ -80,11 +83,9 @@ static std::string formatSmaliFile(const smali::SmaliFile& parsed, const std::st
             << " [lines " << m.line_start << "-" << m.line_end << "]\n";
     }
 
-    // If the file is small enough, show full code
     if (parsed.raw.size() <= 8000) {
         out << "\n--- Full code ---\n" << parsed.raw;
     } else {
-        // Show each method body
         out << "\n--- Method bodies ---\n";
         for (auto& m : parsed.methods) {
             out << "\n" << m.body << "\n";
@@ -139,7 +140,6 @@ static std::string formatElfFile(const std::string& contents, const std::string&
         return out.str();
     }
 
-    // Show all functions (truncated)
     size_t totalSize = 0;
     for (auto& func : info.functions) {
         out << "\n" << func.name << " (0x" << std::hex << func.address
@@ -156,7 +156,7 @@ static std::string formatElfFile(const std::string& contents, const std::string&
 }
 
 std::optional<ToolResult> ReadCodeTool::tryExecute(const std::string& action, ToolContext& ctx) {
-    if (action.find("READ:") != 0)
+    if (!action.starts_with("READ:"))
         return std::nullopt;
 
     std::string args = action.substr(5);
@@ -168,9 +168,8 @@ std::optional<ToolResult> ReadCodeTool::tryExecute(const std::string& action, To
                           "Usage: READ: <path> [method_or_function_name]"};
     }
 
-    // Split into path and optional method/function filter
     std::string path, filter;
-    // Try to find the split point: last token that isn't a path component
+
     auto spacePos = args.rfind(' ');
     if (spacePos != std::string::npos) {
         std::string maybePath = args.substr(0, spacePos);
@@ -178,14 +177,13 @@ std::optional<ToolResult> ReadCodeTool::tryExecute(const std::string& action, To
         while (!maybePath.empty() && maybePath.back() == ' ') maybePath.pop_back();
         while (!maybeFilter.empty() && maybeFilter[0] == ' ') maybeFilter.erase(0, 1);
 
-        // If the full string is a valid path, use it without filter
         if (fs::exists(args)) {
             path = args;
         } else if (fs::exists(maybePath)) {
             path = maybePath;
             filter = maybeFilter;
         } else {
-            path = args; // Let it fail with a file-not-found error
+            path = args;
         }
     } else {
         path = args;
@@ -204,7 +202,9 @@ std::optional<ToolResult> ReadCodeTool::tryExecute(const std::string& action, To
         std::error_code ec;
         for (auto it = fs::directory_iterator(path, fs::directory_options::skip_permission_denied, ec);
              it != fs::directory_iterator(); it.increment(ec)) {
-            if (ec) { ec.clear(); continue; }
+            if (ec) {
+                ec.clear(); continue;
+            }
             std::string name = it->path().filename().string();
             if (it->is_regular_file(ec) && !ec) {
                 if (name.ends_with(".smali")) smaliCount++;
@@ -234,7 +234,6 @@ std::optional<ToolResult> ReadCodeTool::tryExecute(const std::string& action, To
 
     ctx.cb({AgentMessage::THINKING, "Reading: " + fs::path(path).filename().string()});
 
-    // Handle by file type
     if (path.ends_with(".smali")) {
         std::string contents = util::readFile(path);
         if (contents.empty()) {
@@ -256,20 +255,20 @@ std::optional<ToolResult> ReadCodeTool::tryExecute(const std::string& action, To
         return ToolResult{"OBSERVATION: " + result};
     }
 
-    // Generic file read (for AndroidManifest, configs, etc.)
     std::string contents = util::readFile(path);
     if (contents.empty()) {
         return ToolResult{"OBSERVATION: Could not read file (empty or binary): " + path};
     }
 
     if (contents.size() > 10000) {
-        contents = contents.substr(0, 10000) + "\n\n... (truncated at 10000 chars, file is "
-                   + std::to_string(contents.size()) + " chars total)";
+        auto totalSize = contents.size();
+        contents.resize(10000);
+        contents += "\n\n... (truncated at 10000 chars, file is "
+                   + std::to_string(totalSize) + " chars total)";
     }
 
     std::string result = "File: " + path + " (" + std::to_string(contents.size()) + " bytes)\n\n" + contents;
     ctx.cb({AgentMessage::RESULT, result});
     return ToolResult{"OBSERVATION: " + result};
 }
-
-} // namespace area
+}  // namespace area

@@ -1,16 +1,20 @@
 #include "features/testing/McpTestClient.h"
 
-#include <cstdlib>
 #include <poll.h>
 #include <signal.h>
-#include <stdexcept>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <errno.h>
+#include <cstdlib>
+#include <stdexcept>
+#include <utility>
+
+#include "nlohmann/detail/json_ref.hpp"
+#include "nlohmann/json.hpp"
 
 using json = nlohmann::json;
 
 namespace area::features::testing {
-
 McpTestClient::McpTestClient(std::string binary, std::string dataDir)
     : binary_(std::move(binary)), dataDir_(std::move(dataDir)) {}
 
@@ -30,7 +34,6 @@ bool McpTestClient::start() {
     }
 
     if (pid == 0) {
-        // Child: stdin = toChild[0], stdout = fromChild[1]
         close(toChild[1]);
         close(fromChild[0]);
         dup2(toChild[0], STDIN_FILENO);
@@ -42,21 +45,23 @@ bool McpTestClient::start() {
         _exit(127);
     }
 
-    // Parent
     close(toChild[0]);
     close(fromChild[1]);
     writeFd_ = toChild[1];
     readFd_ = fromChild[0];
     child_ = pid;
 
-    // Send initialize
     auto resp = sendRequest("initialize", {});
     return resp.contains("result");
 }
 
 void McpTestClient::stop() {
-    if (writeFd_ >= 0) { close(writeFd_); writeFd_ = -1; }
-    if (readFd_ >= 0) { close(readFd_); readFd_ = -1; }
+    if (writeFd_ >= 0) {
+        close(writeFd_); writeFd_ = -1;
+    }
+    if (readFd_ >= 0) {
+        close(readFd_); readFd_ = -1;
+    }
     if (child_ > 0) {
         kill(child_, SIGTERM);
         int status;
@@ -83,7 +88,7 @@ std::string McpTestClient::readLine() {
     char c;
     while (true) {
         struct pollfd pfd = {readFd_, POLLIN, 0};
-        int r = poll(&pfd, 1, 30000); // 30s timeout
+        int r = poll(&pfd, 1, 30000);
         if (r <= 0) throw std::runtime_error("timeout reading from MCP process");
 
         ssize_t n = read(readFd_, &c, 1);
@@ -115,8 +120,6 @@ std::string McpTestClient::callTool(const std::string& name, const json& args) {
     return "";
 }
 
-// ── Convenience wrappers ──
-
 void McpTestClient::serverStart() {
     callTool("area_server_start");
 }
@@ -144,5 +147,4 @@ std::string McpTestClient::tuiKey(const std::string& key) {
 std::string McpTestClient::tuiType(const std::string& text) {
     return callTool("area_tui_type", {{"text", text}});
 }
-
-} // namespace area::features::testing
+}  // namespace area::features::testing

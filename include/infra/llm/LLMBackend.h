@@ -1,11 +1,13 @@
 #pragma once
 
+#include <stddef.h>
 #include <atomic>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <utility>
 
 #include "infra/config/Config.h"
 
@@ -28,7 +30,7 @@ struct ChatResult {
 };
 
 class LLMBackend {
-public:
+ public:
     virtual ~LLMBackend() = default;
 
     virtual std::string chat(const std::string& system,
@@ -47,29 +49,26 @@ public:
 
     const AiEndpoint& endpoint() const { return endpoint_; }
 
-    // Set a flag that, when true, aborts in-flight HTTP requests
     void setCancelFlag(std::atomic<bool>* flag) { cancelFlag_ = flag; }
 
     static std::unique_ptr<LLMBackend> create(const AiEndpoint& ep);
 
-protected:
+ protected:
     explicit LLMBackend(const AiEndpoint& ep) : endpoint_(ep) {}
     AiEndpoint endpoint_;
     std::atomic<bool>* cancelFlag_ = nullptr;
 };
 
-
 class OllamaBackend : public LLMBackend {
-public:
+ public:
     explicit OllamaBackend(const AiEndpoint& ep) : LLMBackend(ep) {}
 
     std::string chat(const std::string& system,
                      const std::vector<ChatMessage>& messages) override;
 };
 
-
 class OpenAIBackend : public LLMBackend {
-public:
+ public:
     explicit OpenAIBackend(const AiEndpoint& ep) : LLMBackend(ep) {}
 
     std::string chat(const std::string& system,
@@ -79,28 +78,30 @@ public:
                              int max_tokens = 0) override;
 };
 
-
-/// Structured mock prompt entry for MockBackend.
-/// Structured mock prompt entry for MockBackend.
-/// `match` checks system+all messages. `user_match` checks only the last user message.
 struct MockPromptEntry {
-    std::string id;                                     // e.g. "triage", "agent_scan"
-    std::vector<std::string> match;                     // ALL must appear in system+messages
-    std::vector<std::string> user_match;                // ALL must appear in last user message only
-    std::string response;                               // response template with {{key}} placeholders
-    std::unordered_map<std::string, std::string> data;  // interpolation values
+    std::string id;
+    std::vector<std::string> match;
+    std::vector<std::string> user_match;
+    std::string response;
+    std::unordered_map<std::string, std::string> data;
 };
 
 class MockBackend : public LLMBackend {
-public:
+ public:
     explicit MockBackend(const AiEndpoint& ep);
 
     std::string chat(const std::string& system,
                      const std::vector<ChatMessage>& messages) override;
 
-    void setResponse(const std::string& response) { std::lock_guard lk(mu_); canned_ = response; }
-    void setResponses(std::vector<std::string> responses) { std::lock_guard lk(mu_); sequence_ = std::move(responses); seqIdx_ = 0; }
-    void setPromptEntries(std::vector<MockPromptEntry> entries) { std::lock_guard lk(mu_); promptEntries_ = std::move(entries); }
+    void setResponse(const std::string& response) {
+        std::lock_guard lk(mu_); canned_ = response;
+    }
+    void setResponses(std::vector<std::string> responses) {
+        std::lock_guard lk(mu_); sequence_ = std::move(responses); seqIdx_ = 0;
+    }
+    void setPromptEntries(std::vector<MockPromptEntry> entries) {
+        std::lock_guard lk(mu_); promptEntries_ = std::move(entries);
+    }
     void setFailAfter(int n) { failAfter_.store(n); callCount_.store(0); }
     void setLatencyMs(int ms) { latencyMs_.store(ms); }
 
@@ -111,7 +112,7 @@ public:
     std::string lastSystem() const { std::lock_guard lk(mu_); return lastSystem_; }
     std::string lastMatchedId() const { std::lock_guard lk(mu_); return lastMatchedId_; }
 
-private:
+ private:
     void loadResponseFile(const std::string& path);
     static std::string interpolate(const std::string& tmpl,
                                    const std::unordered_map<std::string, std::string>& data);
@@ -134,4 +135,4 @@ private:
     std::atomic<int> peakConcurrent_{0};
 };
 
-} // namespace area
+}  // namespace area

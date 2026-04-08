@@ -1,4 +1,7 @@
 #include "features/shell/ShellTool.h"
+
+#include <functional>
+
 #include "infra/tools/ToolContext.h"
 #include "infra/agent/Agent.h"
 #include "infra/agent/Harness.h"
@@ -7,7 +10,7 @@
 namespace area {
 
 std::optional<ToolResult> ShellTool::tryExecute(const std::string& action, ToolContext& ctx) {
-    if (action.find("SHELL:") != 0)
+    if (!action.starts_with("SHELL:"))
         return std::nullopt;
 
     std::string command = action.substr(6);
@@ -45,4 +48,4 @@ std::optional<ToolResult> ShellTool::tryExecute(const std::string& action, ToolC
     return ToolResult{feedback};
 }
 
-} // namespace area
+}  // namespace area

@@ -8,7 +8,6 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
-#include <nlohmann/json.hpp>
 
 #include "infra/agent/Agent.h"
 #include "infra/llm/BackendPool.h"
@@ -18,6 +17,7 @@
 #include "features/scan/ScanState.h"
 #include "infra/tools/ToolRegistry.h"
 #include "infra/events/EventBus.h"
+#include <nlohmann/json.hpp>
 
 namespace area {
 
@@ -29,20 +29,17 @@ struct ChatSession {
     std::unique_ptr<Sandbox> sandbox;
     std::unique_ptr<ToolRegistry> tools;
 
-    // Display messages (what the TUI shows)
     struct DisplayMsg {
-        std::string who; // "user" or "agent"
-        std::string type; // "thinking", "sql", "result", "answer", "error"
+        std::string who;
+        std::string type;
         std::string content;
     };
     std::vector<DisplayMsg> messages;
     std::mutex messagesMu;
 
-    // Processing state
     std::atomic<bool> processing{false};
     std::thread processingThread;
 
-    // Confirm state
     std::mutex confirmMu;
     std::condition_variable confirmCv;
     std::atomic<bool> confirmPending{false};
@@ -52,13 +49,10 @@ struct ChatSession {
     ConfirmResult confirmResult;
     bool confirmResponded = false;
 
-    // Mode
     std::atomic<bool> dangerousMode{false};
 
-    // Attached client fd (-1 = none)
     std::atomic<int> clientFd{-1};
 
-    // Chat data directory
     std::string dataDir;
 
     void saveConvo();
@@ -66,14 +60,14 @@ struct ChatSession {
 };
 
 class AreaServer {
-public:
-    AreaServer(Config config, const std::string& dataDir = "/opt/area");
+ public:
+    explicit AreaServer(Config config, const std::string& dataDir = "/opt/area");
     ~AreaServer();
 
     void run();
     void shutdown();
 
-private:
+ private:
     void handleClient(int clientFd);
     void handleMessage(int clientFd, const nlohmann::json& msg);
 
@@ -92,13 +86,12 @@ private:
 
     ScanState scanState_;
     EventBus eventBus_;
-    std::unique_ptr<BackendPool> chatPool_; // shared across all chat agents
+    std::unique_ptr<BackendPool> chatPool_;
     std::unordered_map<std::string, std::unique_ptr<ChatSession>> chats_;
     std::mutex chatsMu_;
 
-    // Connected clients
     std::vector<int> clientFds_;
     std::mutex clientsMu_;
 };
 
-} // namespace area
+}  // namespace area

@@ -1,8 +1,15 @@
 #include "features/build/BuildFeature.h"
-#include "mcp/McpUtil.h"
+
+#include <stddef.h>
 
 #include <iostream>
+#include <map>
+#include <vector>
 
+#include "mcp/McpTool.h"
+#include "mcp/McpUtil.h"
+#include "nlohmann/detail/json_ref.hpp"
+#include "nlohmann/json.hpp"
 using json = nlohmann::json;
 
 namespace area::features::build {
@@ -33,4 +40,4 @@ void registerTools(mcp::McpServer& server, const std::string& workDir) {
     });
 }
 
-} // namespace area::features::build
+}  // namespace area::features::build

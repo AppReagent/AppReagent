@@ -1,23 +1,29 @@
 #include "features/server/ServerFeature.h"
-#include "mcp/McpUtil.h"
-#include "infra/ipc/IPC.h"
-#include "util/file_io.h"
 
 #include <fcntl.h>
-#include <filesystem>
-#include <fstream>
-#include <iostream>
 #include <signal.h>
+#include <stdlib.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <map>
+#include <system_error>
+
+#include "infra/ipc/IPC.h"
+#include "mcp/McpTool.h"
+#include "nlohmann/detail/json_ref.hpp"
+#include "nlohmann/json.hpp"
+#include "util/file_io.h"
 namespace fs = std::filesystem;
 using json = nlohmann::json;
 
 namespace area::features::server {
 
-static constexpr int kServerStartPollIter = 24;  // x 500ms = 12s
-static constexpr int kServerStopPollIter  = 20;  // x 500ms = 10s
+static constexpr int kServerStartPollIter = 24;
+static constexpr int kServerStopPollIter  = 20;
 
 static std::string findBin(const std::string& workDir) {
     auto exe = util::selfExe();
@@ -61,7 +67,9 @@ static mcp::ToolResult startServer(const std::string& dataDir,
         pid_t srv = fork();
         if (srv == 0) {
             int devnull = open("/dev/null", O_WRONLY);
-            if (devnull >= 0) { dup2(devnull, STDOUT_FILENO); close(devnull); }
+            if (devnull >= 0) {
+                dup2(devnull, STDOUT_FILENO); close(devnull);
+            }
             setenv("AREA_DATA_DIR", dataDir.c_str(), 1);
             execl(bin.c_str(), bin.c_str(), "server", nullptr);
             _exit(1);
@@ -159,4 +167,4 @@ void registerTools(mcp::McpServer& server,
     });
 }
 
-} // namespace area::features::server
+}  // namespace area::features::server

@@ -1,31 +1,34 @@
 #include "features/improve/ImproveTool.h"
-#include "infra/tools/ToolContext.h"
-#include "infra/agent/Agent.h"
-#include "infra/agent/Harness.h"
-#include "features/scan/ScanCommand.h"
-#include "features/scan/ScanLog.h"
-#include "util/string_util.h"
 
+#include <sys/wait.h>
+#include <unistd.h>
+#include <bits/types/struct_FILE.h>
+#include <time.h>
 #include <array>
 #include <algorithm>
-#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <memory>
-#include <iostream>
-#include <signal.h>
 #include <sstream>
-#include <sys/wait.h>
-#include <unistd.h>
+#include <cctype>
+#include <map>
+#include <vector>
+
+#include "infra/tools/ToolContext.h"
+#include "infra/agent/Agent.h"
+#include "features/scan/ScanCommand.h"
+#include "features/scan/ScanLog.h"
+#include "util/string_util.h"
+#include "nlohmann/detail/iterators/iter_impl.hpp"
+#include "nlohmann/detail/iterators/iteration_proxy.hpp"
+#include "nlohmann/json.hpp"
 
 namespace fs = std::filesystem;
 
 namespace area {
-
-// Alias for brevity — escapes single quotes for use inside shell strings.
 static inline std::string escapeShell(const std::string& s) {
     return util::shellEscape(s);
 }
@@ -44,7 +47,7 @@ ImproveTool::CmdResult ImproveTool::exec(const std::string& cmd) {
     std::string result;
     FILE* pipe = popen((cmd + " 2>&1").c_str(), "r");
     if (!pipe) return {"popen failed", -1};
-    // RAII guard to ensure pclose is called even if an exception occurs
+
     auto pcloseDeleter = [](FILE* f) { return pclose(f); };
     std::unique_ptr<FILE, decltype(pcloseDeleter)> pipeGuard(pipe, pcloseDeleter);
     std::array<char, 4096> buf;
@@ -67,7 +70,6 @@ std::string ImproveTool::improveMode() const {
     return env ? env : "local";
 }
 
-// Launch a coding agent locally via fork+pipe (headless). Returns exit code.
 int ImproveTool::runAgentLocal(const std::string& prompt,
                                std::function<void(const std::string&)> onLine) {
     std::string promptFile = "/tmp/area-improve-prompt-" + std::to_string(getpid()) + ".md";
@@ -124,20 +126,17 @@ int ImproveTool::runAgentLocal(const std::string& prompt,
     return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
 
-// Launch a coding agent in a Docker container. Returns exit code.
 int ImproveTool::runAgentDocker(const std::string& prompt, bool headful,
                                 std::function<void(const std::string&)> onLine) {
     std::string agent = agentName();
     std::string image = "area-improve-" + agent;
 
-    // Write prompt to workspace so the container can read it
     std::string promptFile = repoDir_ + "/.task.md";
     {
         std::ofstream f(promptFile);
         f << prompt;
     }
 
-    // Build image if needed
     std::string buildCmd = "sudo docker build -f '" + escapeShell(repoDir_) + "/Dockerfile.improve'"
         + " -t '" + escapeShell(image) + "'"
         + " --build-arg AGENT='" + escapeShell(agent) + "'"
@@ -149,13 +148,11 @@ int ImproveTool::runAgentDocker(const std::string& prompt, bool headful,
         return -1;
     }
 
-    // Launch container
     std::ostringstream runCmd;
-    // Truncate and escape prompt for use as env var
+
     std::string taskSnippet = escapeShell(prompt.substr(0, 200));
 
     if (headful) {
-        // Detached with TTY — user can docker attach to watch
         runCmd << "sudo docker run -dt --rm"
                << " --network host"
                << " -v '" << escapeShell(repoDir_) << ":/workspace'"
@@ -165,7 +162,6 @@ int ImproveTool::runAgentDocker(const std::string& prompt, bool headful,
                << " -e ANTHROPIC_API_KEY -e OPENAI_API_KEY"
                << " '" << escapeShell(image) << "'";
     } else {
-        // Headless — capture output directly
         runCmd << "sudo docker run --rm"
                << " --network host"
                << " -v '" << escapeShell(repoDir_) << ":/workspace'"
@@ -177,7 +173,6 @@ int ImproveTool::runAgentDocker(const std::string& prompt, bool headful,
     }
 
     if (headful) {
-        // Launch detached, report container ID, then follow logs
         auto startResult = exec(runCmd.str());
         if (startResult.exitCode != 0) {
             if (onLine) onLine("Docker run failed: " + startResult.output);
@@ -189,7 +184,6 @@ int ImproveTool::runAgentDocker(const std::string& prompt, bool headful,
         if (onLine) onLine("Agent running in container: " + containerId);
         if (onLine) onLine("Attach with: sudo docker attach " + containerId);
 
-        // Follow logs until container exits
         std::string logsCmd = "sudo docker logs --follow '" + escapeShell(containerId) + "' 2>&1";
         FILE* logFp = popen(logsCmd.c_str(), "r");
         if (logFp) {
@@ -204,9 +198,10 @@ int ImproveTool::runAgentDocker(const std::string& prompt, bool headful,
 
         auto waitResult = exec("sudo docker wait '" + escapeShell(containerId) + "' 2>/dev/null");
         std::remove(promptFile.c_str());
-        try { return std::stoi(waitResult.output); } catch (...) { return -1; }
+        try {
+            return std::stoi(waitResult.output); } catch (...) { return -1;
+        }
     } else {
-        // Headless — run synchronously and stream output
         FILE* fp = popen((runCmd.str() + " 2>&1").c_str(), "r");
         if (!fp) {
             std::remove(promptFile.c_str());
@@ -228,13 +223,11 @@ ImproveTool::FileScore ImproveTool::scoreFile(
     const std::string& key, const nlohmann::json& label,
     const std::string& relevance, int riskScore,
     const std::string& profileJson) {
-
     FileScore fs;
     std::string expectedClass = label.value("expected_class", "");
     int minScore = label.value("min_risk_score", 0);
     int maxScore = label.value("max_risk_score", 100);
 
-    // Classification (0 or 1)
     if (expectedClass == "relevant") {
         fs.classification = (relevance == "relevant") ? 1.0 : 0.0;
     } else if (expectedClass == "not_relevant") {
@@ -243,7 +236,6 @@ ImproveTool::FileScore ImproveTool::scoreFile(
         fs.classification = (relevance == "relevant" || relevance == "partially_relevant") ? 1.0 : 0.0;
     }
 
-    // Calibration (0.0 to 1.0)
     if (expectedClass == "relevant") {
         fs.calibration = (riskScore >= minScore) ? 1.0 : static_cast<double>(riskScore) / minScore;
     } else if (expectedClass == "not_relevant") {
@@ -261,7 +253,6 @@ ImproveTool::FileScore ImproveTool::scoreFile(
         }
     }
 
-    // Evidence quality
     std::string profileLower = profileJson;
     std::transform(profileLower.begin(), profileLower.end(), profileLower.begin(),
                    [](unsigned char c) { return std::tolower(c); });
@@ -307,21 +298,20 @@ ImproveTool::EvalResult ImproveTool::evaluate() {
         return result;
     }
 
-    // Load labels
     nlohmann::json labels;
     {
         std::ifstream f(labelsPath_);
-        if (!f.is_open()) { result.failReason = "CANNOT_READ_LABELS"; return result; }
+        if (!f.is_open()) {
+            result.failReason = "CANNOT_READ_LABELS"; return result;
+        }
         f >> labels;
     }
 
-    // Run scan on corpus
     std::string runId = "eval-" + std::to_string(time(nullptr)) + "-" + std::to_string(getpid());
 
     ScanCommand scan(*config_, db_);
     auto summary = scan.run(corpusDir_, runId);
 
-    // Query results
     auto qr = db_.executeParams(
         "SELECT file_path, risk_score, risk_profile::text "
         "FROM scan_results WHERE run_id = $1",
@@ -333,12 +323,10 @@ ImproveTool::EvalResult ImproveTool::evaluate() {
         return result;
     }
 
-    // Count LLM calls
     auto countQr = db_.executeParams("SELECT COUNT(*) FROM llm_calls WHERE run_id = $1", {runId});
     if (countQr.ok() && !countQr.rows.empty() && !countQr.rows[0].empty())
         result.llmCalls = std::stoi(countQr.rows[0][0]);
 
-    // Score each file
     double totalScore = 0;
     int fileCount = 0;
     std::ostringstream breakdown;
@@ -346,7 +334,6 @@ ImproveTool::EvalResult ImproveTool::evaluate() {
     for (auto& [key, label] : labels.items()) {
         std::string filename = fs::path(key).filename().string();
 
-        // Find matching result row
         std::string relevance = "unknown";
         int riskScore = 0;
         std::string profileJson = "{}";
@@ -371,7 +358,6 @@ ImproveTool::EvalResult ImproveTool::evaluate() {
             continue;
         }
 
-        // Hard-fail: benign classified as relevant with high score
         if (label.value("expected_class", "") == "not_relevant" &&
             relevance == "relevant" && riskScore > 40) {
             result.failReason = "FALSE_POSITIVE:" + key + "(score=" + std::to_string(riskScore) + ")";
@@ -388,13 +374,14 @@ ImproveTool::EvalResult ImproveTool::evaluate() {
     result.score = (fileCount > 0) ? (totalScore / fileCount) * 100.0 : 0;
     result.breakdown = breakdown.str();
 
-    // Cleanup eval data
     ScanLog(db_).deleteRun(runId);
     return result;
 }
 
 void ImproveTool::gitCommit(const std::string& msg) {
-    exec("cd '" + escapeShell(repoDir_) + "' && git add prompts/ src/graph/graphs/scan_task_graph.cpp && git commit -m '" + escapeShell(msg) + "'");
+    exec("cd '" + escapeShell(repoDir_) +
+         "' && git add prompts/ src/graph/graphs/scan_task_graph.cpp"
+         " && git commit -m '" + escapeShell(msg) + "'");
 }
 
 void ImproveTool::gitRevert() {
@@ -405,7 +392,7 @@ bool ImproveTool::agentAvailable() {
     std::string agent = agentName();
     auto r = exec("command -v '" + escapeShell(agent) + "'");
     if (r.exitCode == 0 && !r.output.empty()) return true;
-    // Also check if Docker image exists
+
     auto dr = exec("sudo docker image inspect 'area-improve-" + escapeShell(agent) + "' >/dev/null 2>&1");
     return dr.exitCode == 0;
 }
@@ -423,13 +410,12 @@ int ImproveTool::runClaude(const std::string& prompt,
 }
 
 std::optional<ToolResult> ImproveTool::tryExecute(const std::string& action, ToolContext& ctx) {
-    if (action.find("IMPROVE:") != 0)
+    if (!action.starts_with("IMPROVE:"))
         return std::nullopt;
 
     std::string task = action.substr(8);
     while (!task.empty() && task[0] == ' ') task.erase(0, 1);
 
-    // Determine mode: eval-only or full improvement cycle
     bool evalOnly = false;
     {
         std::string lower = task;
@@ -445,7 +431,6 @@ std::optional<ToolResult> ImproveTool::tryExecute(const std::string& action, Too
             ". Create the corpus directory with labeled smali files and labels.json."};
     }
 
-    // 1. Run baseline evaluation
     ctx.cb({AgentMessage::THINKING, "Running corpus evaluation..."});
     auto baseline = evaluate();
 
@@ -460,7 +445,6 @@ std::optional<ToolResult> ImproveTool::tryExecute(const std::string& action, Too
              << baseline.llmCalls << " LLM calls)";
     ctx.cb({AgentMessage::THINKING, scoreMsg.str()});
 
-    // Eval-only mode: just return the score and breakdown
     if (evalOnly) {
         std::ostringstream result;
         result << std::fixed << std::setprecision(1)
@@ -470,11 +454,10 @@ std::optional<ToolResult> ImproveTool::tryExecute(const std::string& action, Too
                << "Per-file breakdown:\n" << baseline.breakdown;
 
         ctx.cb({AgentMessage::RESULT, "Corpus score: " +
-            std::to_string((int)baseline.score) + "/100"});
+            std::to_string(static_cast<int>(baseline.score)) + "/100"});
         return ToolResult{result.str()};
     }
 
-    // Full improvement cycle — check for coding agent
     if (!agentAvailable()) {
         std::ostringstream result;
         result << std::fixed << std::setprecision(1)
@@ -484,12 +467,11 @@ std::optional<ToolResult> ImproveTool::tryExecute(const std::string& action, Too
                << "Install a coding agent or build the Docker image to run the full improvement cycle, "
                << "or edit prompts manually and re-run 'IMPROVE: evaluate' to check your score.";
 
-        ctx.cb({AgentMessage::RESULT, "Baseline: " + std::to_string((int)baseline.score) +
+        ctx.cb({AgentMessage::RESULT, "Baseline: " + std::to_string(static_cast<int>(baseline.score)) +
             "/100 (no coding agent available for auto-improvement)"});
         return ToolResult{result.str()};
     }
 
-    // 2. Build the prompt for Claude Code
     std::string programMd;
     {
         std::ifstream f(repoDir_ + "/autoresearch/program.md");
@@ -511,7 +493,6 @@ std::optional<ToolResult> ImproveTool::tryExecute(const std::string& action, Too
            << "Edit prompt files in prompts/ or code in src/graph/graphs/scan_task_graph.cpp. "
            << "Explain what you changed and why.\n";
 
-    // 3. Launch coding agent
     std::string agent = agentName();
     std::string mode = improveMode();
     ctx.cb({AgentMessage::THINKING, "Launching " + agent + " (" + mode + ") to work on: " + task});
@@ -530,10 +511,10 @@ std::optional<ToolResult> ImproveTool::tryExecute(const std::string& action, Too
     if (agentExit != 0) {
         ctx.cb({AgentMessage::ERROR, agent + " exited with code " + std::to_string(agentExit)});
         gitRevert();
-        return ToolResult{"OBSERVATION: " + agent + " failed (exit " + std::to_string(agentExit) + "). Changes reverted."};
+        return ToolResult{"OBSERVATION: " + agent + " failed (exit " +
+                          std::to_string(agentExit) + "). Changes reverted."};
     }
 
-    // 4. Rebuild if C++ was changed
     auto diffResult = exec("cd '" + escapeShell(repoDir_) + "' && git diff --name-only -- src/ include/");
     if (!diffResult.output.empty()) {
         ctx.cb({AgentMessage::THINKING, "C++ files changed, rebuilding..."});
@@ -546,7 +527,6 @@ std::optional<ToolResult> ImproveTool::tryExecute(const std::string& action, Too
         ctx.cb({AgentMessage::THINKING, "Build succeeded."});
     }
 
-    // 5. Re-evaluate
     ctx.cb({AgentMessage::THINKING, "Evaluating changes..."});
     auto after = evaluate();
 
@@ -566,10 +546,10 @@ std::optional<ToolResult> ImproveTool::tryExecute(const std::string& action, Too
                   << "  After:  " << after.score << " (+" << delta << ")\n\n"
                   << "Per-file breakdown:\n" << after.breakdown;
 
-        gitCommit("improve: " + task + " (" + std::to_string((int)after.score) + ")");
+        gitCommit("improve: " + task + " (" + std::to_string(static_cast<int>(after.score)) + ")");
         ctx.cb({AgentMessage::RESULT,
-            "Score improved: " + std::to_string((int)baseline.score) + " -> " +
-            std::to_string((int)after.score) + " (+" + std::to_string((int)delta) + ")"});
+            "Score improved: " + std::to_string(static_cast<int>(baseline.score)) + " -> " +
+            std::to_string(static_cast<int>(after.score)) + " (+" + std::to_string(static_cast<int>(delta)) + ")"});
     } else {
         resultStr << "OBSERVATION: No improvement.\n"
                   << "  Before: " << baseline.score << "\n"
@@ -579,11 +559,10 @@ std::optional<ToolResult> ImproveTool::tryExecute(const std::string& action, Too
 
         gitRevert();
         ctx.cb({AgentMessage::RESULT,
-            "No improvement: " + std::to_string((int)baseline.score) + " -> " +
-            std::to_string((int)after.score) + ". Reverted."});
+            "No improvement: " + std::to_string(static_cast<int>(baseline.score)) + " -> " +
+            std::to_string(static_cast<int>(after.score)) + ". Reverted."});
     }
 
     return ToolResult{resultStr.str()};
 }
-
-} // namespace area
+}  // namespace area

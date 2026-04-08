@@ -1,11 +1,17 @@
 #include "domains/graph/engine/graph_runner.h"
 
+#include <stddef.h>
 #include <semaphore>
 #include <stdexcept>
 #include <thread>
+#include <type_traits>
+
+#include "domains/graph/engine/node.h"
+#include "domains/graph/engine/task_context.h"
+#include "domains/graph/engine/task_graph.h"
+#include "domains/graph/nodes/splitter_node.h"
 
 namespace area::graph {
-
 void GraphRunner::emitStart(const std::string& name, const TaskContext& ctx) {
     std::lock_guard lk(cbMu_);
     if (onStart_) onStart_(name, ctx);
@@ -34,7 +40,7 @@ TaskContext GraphRunner::executeFrom(RunState& state, const std::string& nodeNam
 
     auto* collector = dynamic_cast<CollectorNode*>(node);
     if (collector) {
-        auto result = collector->collect(std::move(state.collected));
+        auto result = collector->collect(state.collected);
         state.collected.clear();
         emitEnd(nodeName, result);
 
@@ -52,9 +58,6 @@ TaskContext GraphRunner::executeFrom(RunState& state, const std::string& nodeNam
         return discarded;
     }
 
-    // Detect splitter nodes by presence of a "collect" edge OR multi-output.
-    // Single-function ELF binaries produce 1 output but still need collector routing
-    // when a "collect" edge exists.
     std::string subgraphEntry;
     std::string collectorName;
     for (auto* e : state.graph.allEdgesFrom(nodeName)) {
@@ -76,7 +79,7 @@ TaskContext GraphRunner::executeFrom(RunState& state, const std::string& nodeNam
         std::mutex collectedMu;
         size_t n = nr.outputs.size();
 
-        int concurrency = maxParallel_ > 0 ? maxParallel_ : (int)n;
+        int concurrency = maxParallel_ > 0 ? maxParallel_ : static_cast<int>(n);
 
         if (concurrency <= 1) {
             for (auto& splitCtx : nr.outputs) {
@@ -101,7 +104,6 @@ TaskContext GraphRunner::executeFrom(RunState& state, const std::string& nodeNam
                             collected.push_back(std::move(result));
                         }
                     } catch (...) {
-                        // Ensure semaphore is always released even on exception
                     }
                     sem.release();
                 });
@@ -141,5 +143,4 @@ TaskContext GraphRunner::executeFrom(RunState& state, const std::string& nodeNam
     if (nextEdges.empty()) return output;
     return executeFrom(state, nextEdges[0]->to, std::move(output));
 }
-
-} // namespace area::graph
+}  // namespace area::graph

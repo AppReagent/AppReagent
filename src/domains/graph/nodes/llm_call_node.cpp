@@ -1,6 +1,12 @@
 #include "domains/graph/nodes/llm_call_node.h"
 
 #include <regex>
+#include <map>
+#include <utility>
+#include <vector>
+
+#include "domains/graph/engine/node.h"
+#include "nlohmann/json.hpp"
 
 namespace area::graph {
 
@@ -24,7 +30,7 @@ std::string resolveTemplate(const std::string& tmpl, const TaskContext& ctx) {
                 output += val.dump();
             }
         } else {
-            output += match[0].str(); // leave unresolved
+            output += match[0].str();
         }
         it += match.position() + match.length();
     }
@@ -49,4 +55,4 @@ NodeResult LLMCallNode::execute(TaskContext ctx) {
 
 const LLMCallConfig& LLMCallNode::config() const { return config_; }
 
-} // namespace area::graph
+}  // namespace area::graph

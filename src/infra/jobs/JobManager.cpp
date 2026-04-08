@@ -1,11 +1,15 @@
 #include "infra/jobs/JobManager.h"
 
+#include <bits/chrono.h>
+#include <stdint.h>
 #include <algorithm>
-#include <chrono>
 #include <iostream>
+#include <compare>
+#include <exception>
+#include <string>
+#include <utility>
 
 namespace area {
-
 JobManager::JobManager(std::vector<std::unique_ptr<ServerRunner>> runners,
                        JobQueue& queue, int pollIntervalMs, int flushTimeoutSec)
     : runners_(std::move(runners))
@@ -73,9 +77,7 @@ void JobManager::stop() {
 }
 
 ServerRunner* JobManager::findServer(int minTier) {
-    // Start at the job's minimum tier and move upward
     for (int t = minTier; t <= maxTier_; t++) {
-        // Find the server at this tier with the most capacity
         ServerRunner* best = nullptr;
         int bestAvail = 0;
         for (auto& r : runners_) {
@@ -96,7 +98,6 @@ void JobManager::mainLoop() {
     auto lastActivity = std::chrono::steady_clock::now();
 
     while (running_) {
-        // Count total available capacity across all servers
         int totalAvail = 0;
         for (auto& r : runners_) {
             if (r->healthy()) {
@@ -109,8 +110,6 @@ void JobManager::mainLoop() {
             continue;
         }
 
-        // Dequeue up to available capacity, any tier
-        // We grab jobs and then route them individually
         std::vector<Job> batch;
         try {
             batch = queue_.dequeueAtOrBelow(maxTier_, totalAvail);
@@ -128,20 +127,16 @@ void JobManager::mainLoop() {
                 int64_t jobId = job.id;
                 if (server) {
                     if (!server->submit(std::move(job))) {
-                        // server full, requeue
                         queue_.requeue(jobId);
                     }
                 } else {
-                    // no server available, requeue
                     queue_.requeue(jobId);
                 }
             }
         } else {
-            // No work. Check flush timeout.
             auto elapsed = std::chrono::steady_clock::now() - lastActivity;
             auto timeout = std::chrono::seconds(flushTimeoutSec_);
             if (elapsed > timeout) {
-                // extended idle, reduce polling frequency
                 std::this_thread::sleep_for(std::chrono::seconds(2));
             } else {
                 std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs_));
@@ -149,5 +144,4 @@ void JobManager::mainLoop() {
         }
     }
 }
-
-} // namespace area
+}  // namespace area

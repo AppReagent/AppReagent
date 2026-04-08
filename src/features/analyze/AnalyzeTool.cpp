@@ -1,14 +1,16 @@
 #include "features/analyze/AnalyzeTool.h"
+
+#include <sstream>
+#include <functional>
+
 #include "infra/tools/ToolContext.h"
 #include "infra/agent/Agent.h"
 #include "features/analyze/AnalyzeCommand.h"
 
-#include <sstream>
-
 namespace area {
 
 std::optional<ToolResult> AnalyzeTool::tryExecute(const std::string& action, ToolContext& ctx) {
-    if (action.find("ANALYZE:") != 0)
+    if (!action.starts_with("ANALYZE:"))
         return std::nullopt;
 
     std::string args = action.substr(8);
@@ -17,9 +19,8 @@ std::optional<ToolResult> AnalyzeTool::tryExecute(const std::string& action, Too
 
     if (args.empty()) args = "latest";
 
-    // Support "reanalyze <run_id>" to force re-analysis
     bool forceReanalyze = false;
-    if (args.find("reanalyze") == 0) {
+    if (args.starts_with("reanalyze")) {
         forceReanalyze = true;
         args = args.substr(9);
         while (!args.empty() && args[0] == ' ') args.erase(0, 1);
@@ -64,4 +65,4 @@ std::optional<ToolResult> AnalyzeTool::tryExecute(const std::string& action, Too
     return ToolResult{"OBSERVATION: " + observation};
 }
 
-} // namespace area
+}  // namespace area

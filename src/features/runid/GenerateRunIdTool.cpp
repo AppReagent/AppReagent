@@ -1,4 +1,7 @@
 #include "features/runid/GenerateRunIdTool.h"
+
+#include <functional>
+
 #include "infra/tools/ToolContext.h"
 #include "infra/agent/Agent.h"
 #include "features/scan/ScanLog.h"
@@ -6,7 +9,7 @@
 namespace area {
 
 std::optional<ToolResult> GenerateRunIdTool::tryExecute(const std::string& action, ToolContext& ctx) {
-    if (action.find("GENERATE_RUN_ID:") != 0 && action.find("GENERATE_RUN_ID") != 0)
+    if (!action.starts_with("GENERATE_RUN_ID:") && !action.starts_with("GENERATE_RUN_ID"))
         return std::nullopt;
 
     if (ctx.confirm) {
@@ -22,4 +25,4 @@ std::optional<ToolResult> GenerateRunIdTool::tryExecute(const std::string& actio
     return ToolResult{"OBSERVATION: Generated run ID: " + runId};
 }
 
-} // namespace area
+}  // namespace area

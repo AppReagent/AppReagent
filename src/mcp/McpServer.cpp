@@ -1,6 +1,13 @@
 #include "mcp/McpServer.h"
 
 #include <iostream>
+#include <exception>
+#include <functional>
+#include <map>
+#include <utility>
+
+#include "nlohmann/detail/json_ref.hpp"
+#include "nlohmann/json.hpp"
 
 using json = nlohmann::json;
 
@@ -47,7 +54,9 @@ int McpServer::run() {
         if (line.empty()) continue;
 
         json req;
-        try { req = json::parse(line); }
+        try {
+            req = json::parse(line);
+        }
         catch (...) { continue; }
 
         auto id     = req.contains("id") ? req["id"] : json();
@@ -91,4 +100,4 @@ int McpServer::run() {
     return 0;
 }
 
-} // namespace area::mcp
+}  // namespace area::mcp

@@ -1,20 +1,19 @@
 #include "features/tui/HeadlessTui.h"
 
-#include <cerrno>
-#include <csignal>
-#include <cstdlib>
-#include <cstring>
 #include <poll.h>
 #include <pty.h>
 #include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <cerrno>
+#include <csignal>
+#include <cstdint>
+#include <cstdlib>
+#include <utility>
 
 namespace area {
-
 HeadlessTui::HeadlessTui(std::string binary, std::string socketPath)
     : binary_(std::move(binary)), socketPath_(std::move(socketPath)) {
-    // Derive data dir from socket path (socket is at <dataDir>/area.sock)
     auto slash = socketPath_.rfind('/');
     if (slash != std::string::npos)
         dataDir_ = socketPath_.substr(0, slash);
@@ -32,14 +31,13 @@ bool HeadlessTui::start(int rows, int cols) {
     screen_.resize(rows, cols);
 
     struct winsize ws{};
-    ws.ws_row = static_cast<unsigned short>(rows);
-    ws.ws_col = static_cast<unsigned short>(cols);
+    ws.ws_row = static_cast<uint16_t>(rows);
+    ws.ws_col = static_cast<uint16_t>(cols);
 
     pid_t pid = forkpty(&masterFd_, nullptr, nullptr, &ws);
     if (pid < 0) return false;
 
     if (pid == 0) {
-        // Child — exec the TUI
         setenv("TERM", "xterm-256color", 1);
         setenv("AREA_DATA_DIR", dataDir_.c_str(), 1);
         execl(binary_.c_str(), binary_.c_str(), "tui", nullptr);
@@ -48,7 +46,6 @@ bool HeadlessTui::start(int rows, int cols) {
 
     childPid_ = pid;
 
-    // Give the TUI a moment to initialize and render first frame
     drainAndSettle(500);
     return true;
 }
@@ -72,7 +69,9 @@ bool HeadlessTui::isRunning() {
     pid_t r = waitpid(childPid_, &status, WNOHANG);
     if (r == childPid_) {
         childPid_ = -1;
-        if (masterFd_ >= 0) { close(masterFd_); masterFd_ = -1; }
+        if (masterFd_ >= 0) {
+            close(masterFd_); masterFd_ = -1;
+        }
         return false;
     }
     return true;
@@ -146,13 +145,11 @@ void HeadlessTui::sendKey(const std::string& keyName) {
             return;
         }
     }
-    // Unknown key — try sending as literal
+
     writePty(keyName);
 }
 
 std::string HeadlessTui::mouseSeq(int button, int col, int row, bool press) {
-    // SGR mouse: ESC [ < button ; col ; row M/m
-    // Coordinates are 1-based
     std::string s = "\033[<";
     s += std::to_string(button);
     s += ';';
@@ -175,13 +172,12 @@ void HeadlessTui::resize(int rows, int cols) {
     screen_.resize(rows, cols);
     if (masterFd_ >= 0) {
         struct winsize ws{};
-        ws.ws_row = static_cast<unsigned short>(rows);
-        ws.ws_col = static_cast<unsigned short>(cols);
+        ws.ws_row = static_cast<uint16_t>(rows);
+        ws.ws_col = static_cast<uint16_t>(cols);
         ioctl(masterFd_, TIOCSWINSZ, &ws);
     }
     if (childPid_ > 0) {
         kill(childPid_, SIGWINCH);
     }
 }
-
-} // namespace area
+}  // namespace area

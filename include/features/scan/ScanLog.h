@@ -7,27 +7,23 @@
 namespace area {
 
 class ScanLog {
-public:
+ public:
     explicit ScanLog(Database& db);
 
     void ensureTables();
     void dropTables();
 
-    // Check if a file (by content hash) has already been scanned in this run
     bool fileCompleted(const std::string& run_id, const std::string& file_hash);
 
-    // Find a recent scan whose files overlap with the given path.
-    // Returns run_id and file count, or empty string if none found.
     struct ExistingScan {
         std::string run_id;
         int file_count = 0;
         int flagged_count = 0;
         int max_risk = 0;
-        std::string latest;  // timestamp
+        std::string latest;
     };
     std::optional<ExistingScan> findRecentScan(const std::string& path);
 
-    // Check if a prompt (by hash) has already been run in this run, return cached response
     std::string findCachedPrompt(const std::string& run_id, const std::string& prompt_hash);
 
     void logLLMCall(const std::string& run_id,
@@ -68,21 +64,19 @@ public:
                           double confidence,
                           const std::string& threat_category = "none");
 
-    // Store a file's contents in the database for a given run
     void storeFile(const std::string& run_id, const std::string& file_path,
                    const std::string& file_hash, const std::string& contents);
 
-    // Delete all data for a run_id from scan_results, llm_calls, method_calls, and scan_files
     void deleteRun(const std::string& run_id);
 
     static std::string sha256(const std::string& data);
     static std::string generateRunId();
     static std::string loadDDL();
-    // Encode binary data as PostgreSQL hex BYTEA literal (\xDEAD...)
+
     static std::string bytesToPgHex(const std::string& data);
 
-private:
+ private:
     Database& db_;
 };
 
-} // namespace area
+}  // namespace area

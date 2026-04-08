@@ -1,12 +1,19 @@
 #include "infra/agent/Agent.h"
+
+#include <stddef.h>
+#include <algorithm>
+#include <cctype>
+#include <exception>
+#include <optional>
+#include <utility>
+
 #include "infra/tools/ToolContext.h"
 #include "util/file_io.h"
 #include "util/string_util.h"
-
-#include <sstream>
+#include "infra/config/Config.h"
+#include "infra/tools/Tool.h"
 
 namespace area {
-
 Agent::Agent(std::unique_ptr<LLMBackend> backend, ToolRegistry& tools, Harness harness)
     : ownedBackend_(std::move(backend)), backend_(ownedBackend_.get()),
       tools_(tools), harness_(std::move(harness)) {
@@ -66,9 +73,9 @@ std::string Agent::extractThought(const std::string& response, std::string& thou
 int Agent::estimateTokens() const {
     int chars = 0;
     for (auto& m : history_) {
-        chars += (int)m.content.size();
+        chars += static_cast<int>(m.content.size());
     }
-    chars += (int)systemContext_.size();
+    chars += static_cast<int>(systemContext_.size());
     return chars / 4;
 }
 
@@ -103,7 +110,9 @@ void Agent::compressHistory(MessageCallback cb) {
 
     history_.clear();
     history_.push_back({"user", "Here is a summary of our conversation so far:\n\n" + summary});
-    history_.push_back({"assistant", "THOUGHT: I have the context from our conversation.\nANSWER: Understood. How can I help you next?"});
+    history_.push_back({"assistant",
+        "THOUGHT: I have the context from our conversation.\n"
+        "ANSWER: Understood. How can I help you next?"});
 }
 
 static std::string templateReplace(const std::string& s, const std::string& key, const std::string& val) {
@@ -117,10 +126,11 @@ static std::string templateReplace(const std::string& s, const std::string& key,
 }
 
 std::string Agent::buildSystemPrompt() const {
-    // Try session-specific override, then default prompt file
     std::string prompt;
     if (!promptsDir_.empty()) {
-        try { prompt = util::readFileOrThrow(promptsDir_ + "/agent_system.prompt"); } catch (...) {}
+        try {
+            prompt = util::readFileOrThrow(promptsDir_ + "/agent_system.prompt"); } catch (...) {
+        }
     }
     if (prompt.empty()) {
         prompt = util::readFile("prompts/agent_system.prompt");
@@ -130,7 +140,6 @@ std::string Agent::buildSystemPrompt() const {
                  "{{system_context}}\n\n{{tools}}\n\n{{guides}}\n";
     }
 
-    // Template substitution
     prompt = templateReplace(prompt, "tools", tools_.describeAll());
     prompt = templateReplace(prompt, "system_context", systemContext_);
     prompt = templateReplace(prompt, "guides", harness_.guideText());
@@ -140,7 +149,7 @@ std::string Agent::buildSystemPrompt() const {
 
 void Agent::process(const std::string& userInput, MessageCallback cb,
                     ConfirmCallback confirm) {
-    if (contextPercent() >= (int)(COMPRESS_THRESHOLD * 100)) {
+    if (contextPercent() >= static_cast<int>((COMPRESS_THRESHOLD * 100))) {
         compressHistory(cb);
     }
 
@@ -155,8 +164,7 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
             return;
         }
 
-        // Check context usage before every LLM call, not just at loop start
-        if (iter > 0 && contextPercent() >= (int)(COMPRESS_THRESHOLD * 100)) {
+        if (iter > 0 && contextPercent() >= static_cast<int>((COMPRESS_THRESHOLD * 100))) {
             compressHistory(cb);
         }
 
@@ -191,7 +199,7 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
 
         if (action.empty()) action = rawResponse;
 
-        if (action.find("ANSWER:") == 0) {
+        if (action.starts_with("ANSWER:")) {
             std::string answer = action.substr(7);
             util::ltrimInPlace(answer);
 
@@ -214,15 +222,14 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
         if (toolResult.has_value()) {
             history_.push_back({"assistant", rawResponse});
 
-            // Run generic sensors on all tool results for error recovery hints
             std::string toolName;
             for (auto& prefix : tools_.prefixes()) {
-                if (action.find(prefix) == 0) {
+                if (action.starts_with(prefix)) {
                     toolName = prefix;
-                    // Remove trailing ':'
+
                     if (!toolName.empty() && toolName.back() == ':')
                         toolName.pop_back();
-                    // Lowercase for sensor trigger matching
+
                     for (auto& c : toolName)
                         c = std::tolower(static_cast<unsigned char>(c));
                     break;
@@ -249,5 +256,4 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
 
     cb({AgentMessage::ANSWER, "(max iterations reached)"});
 }
-
-} // namespace area
+}  // namespace area

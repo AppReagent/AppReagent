@@ -7,13 +7,10 @@
 
 namespace area::mcp {
 
-/// Result from a tool handler: {text, isError}
 using ToolResult = std::pair<std::string, bool>;
 
-/// A tool handler receives JSON args and returns a result.
 using ToolHandler = std::function<ToolResult(const nlohmann::json& args)>;
 
-/// Registration info for an MCP tool.
 struct McpTool {
     std::string name;
     std::string description;
@@ -21,4 +18,4 @@ struct McpTool {
     ToolHandler handler;
 };
 
-} // namespace area::mcp
+}  // namespace area::mcp

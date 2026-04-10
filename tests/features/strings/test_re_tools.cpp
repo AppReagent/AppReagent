@@ -187,6 +187,105 @@ TEST(StringsTool, ExtractsFilePaths) {
     removeTempFile(path);
 }
 
+TEST(StringsTool, ExtractsApiKeys) {
+    std::string smali = R"(
+.class public Lcom/test/Config;
+.super Ljava/lang/Object;
+.method public init()V
+    .locals 1
+    const-string v0, "AIzaSyA1234567890abcdefghijklmnop"
+    return-void
+.end method
+)";
+    auto path = createTempFile(".smali", smali);
+
+    area::StringsTool tool;
+    ToolMessages msgs;
+    area::Harness h;
+    area::ToolContext ctx{msgs.cb(), nullptr, h};
+
+    auto result = tool.tryExecute("STRINGS: " + path, ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NE(result->observation.find("AIza"), std::string::npos);
+    EXPECT_NE(result->observation.find("API Key"), std::string::npos);
+
+    removeTempFile(path);
+}
+
+TEST(StringsTool, ExtractsEmailAddresses) {
+    std::string smali = R"(
+.class public Lcom/test/Exfil;
+.super Ljava/lang/Object;
+.method public send()V
+    .locals 1
+    const-string v0, "attacker@evil-domain.com"
+    return-void
+.end method
+)";
+    auto path = createTempFile(".smali", smali);
+
+    area::StringsTool tool;
+    ToolMessages msgs;
+    area::Harness h;
+    area::ToolContext ctx{msgs.cb(), nullptr, h};
+
+    auto result = tool.tryExecute("STRINGS: " + path, ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NE(result->observation.find("attacker@evil-domain.com"), std::string::npos);
+    EXPECT_NE(result->observation.find("Email"), std::string::npos);
+
+    removeTempFile(path);
+}
+
+TEST(StringsTool, ExtractsJwtTokens) {
+    std::string smali = R"(
+.class public Lcom/test/Auth;
+.super Ljava/lang/Object;
+.method public auth()V
+    .locals 1
+    const-string v0, "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"
+    return-void
+.end method
+)";
+    auto path = createTempFile(".smali", smali);
+
+    area::StringsTool tool;
+    ToolMessages msgs;
+    area::Harness h;
+    area::ToolContext ctx{msgs.cb(), nullptr, h};
+
+    auto result = tool.tryExecute("STRINGS: " + path, ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NE(result->observation.find("eyJ"), std::string::npos);
+    EXPECT_NE(result->observation.find("JWT"), std::string::npos);
+
+    removeTempFile(path);
+}
+
+TEST(StringsTool, ExtractsMixedCharsetSecrets) {
+    std::string smali = R"(
+.class public Lcom/test/Secrets;
+.super Ljava/lang/Object;
+.method public getKey()V
+    .locals 1
+    const-string v0, "s3cr3t_k3y_12345"
+    return-void
+.end method
+)";
+    auto path = createTempFile(".smali", smali);
+
+    area::StringsTool tool;
+    ToolMessages msgs;
+    area::Harness h;
+    area::ToolContext ctx{msgs.cb(), nullptr, h};
+
+    auto result = tool.tryExecute("STRINGS: " + path, ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NE(result->observation.find("s3cr3t_k3y"), std::string::npos);
+
+    removeTempFile(path);
+}
+
 TEST(StringsTool, IgnoresNonMatchingAction) {
     area::StringsTool tool;
     ToolMessages msgs;

@@ -12,7 +12,8 @@ class StringsTool : public Tool {
     std::string name() const override { return "STRINGS"; }
     std::string description() const override {
         return "<path> [| <filter>] — extract hardcoded strings from smali/code files. "
-               "Pulls const-string values, URLs, IPs, file paths, and other string literals. "
+               "Pulls const-string values, URLs, IPs, file paths, API keys, emails, "
+               "crypto wallets, JWTs, and other IOCs. Detects obfuscation patterns. "
                "Optional filter to search within extracted strings.\n"
                "  Example: STRINGS: /path/to/app\n"
                "  Example: STRINGS: /path/to/File.smali | http\n"

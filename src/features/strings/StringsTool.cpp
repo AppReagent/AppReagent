@@ -134,13 +134,19 @@ static bool isInteresting(const std::string& s) {
         if (dots == 3 && digits >= 4) return true;
     }
 
-    if (lower.find('/') != std::string::npos && lower.size() > 5) return true;
+    if (s.starts_with("/") && s.size() > 5) return true;
+    if (lower.starts_with("file://")) return true;
 
     if (lower.find(".com") != std::string::npos || lower.find(".net") != std::string::npos ||
         lower.find(".org") != std::string::npos || lower.find(".io") != std::string::npos ||
         lower.find(".ru") != std::string::npos || lower.find(".cn") != std::string::npos ||
         lower.find(".top") != std::string::npos || lower.find(".xyz") != std::string::npos ||
-        lower.find(".onion") != std::string::npos) return true;
+        lower.find(".onion") != std::string::npos ||
+        lower.find(".cc") != std::string::npos ||
+        lower.find(".tk") != std::string::npos ||
+        lower.find(".info") != std::string::npos ||
+        lower.find(".biz") != std::string::npos ||
+        lower.find(".pw") != std::string::npos) return true;
 
     if (lower.find(".duckdns.org") != std::string::npos ||
         lower.find(".no-ip.com") != std::string::npos ||
@@ -200,6 +206,39 @@ static bool isInteresting(const std::string& s) {
         lower.ends_with(".so") || lower.ends_with(".locked") || lower.ends_with(".encrypted") ||
         lower.ends_with(".enc")) return true;
 
+    // Email addresses
+    if (s.find('@') != std::string::npos && s.size() > 5) {
+        auto at = s.find('@');
+        if (at > 0 && at < s.size() - 3 && s.find('.', at) != std::string::npos) return true;
+    }
+
+    // API key / token prefixes
+    if (s.starts_with("AIza") || s.starts_with("AKIA") || s.starts_with("ASIA") ||
+        s.starts_with("sk-") || s.starts_with("pk-") ||
+        s.starts_with("ghp_") || s.starts_with("gho_") || s.starts_with("ghu_") ||
+        s.starts_with("ghs_") || s.starts_with("ghr_")) return true;
+
+    // JWT tokens
+    if (s.starts_with("eyJ") && s.size() > 20) return true;
+
+    // Private key / certificate markers
+    if (lower.find("begin private key") != std::string::npos ||
+        lower.find("begin rsa private") != std::string::npos ||
+        lower.find("begin certificate") != std::string::npos) return true;
+
+    // Phone numbers
+    if (s.size() >= 10) {
+        int phDigits = 0;
+        bool validPhone = true;
+        for (char c : s) {
+            if (std::isdigit(static_cast<unsigned char>(c))) phDigits++;
+            else if (c != '+' && c != '-' && c != '(' && c != ')' && c != ' ') {
+                validPhone = false; break;
+            }
+        }
+        if (validPhone && phDigits >= 7) return true;
+    }
+
     if (s.size() > 20) {
         bool allAlnum = true;
         for (char c : s) {
@@ -221,7 +260,18 @@ static bool isInteresting(const std::string& s) {
         if (allHex) return true;
     }
 
-    if (s.size() > 10) return true;
+    // Mixed-charset strings (likely secrets, tokens, credentials)
+    if (s.size() >= 12 && s.find(' ') == std::string::npos) {
+        int upCnt = 0, loCnt = 0, dgCnt = 0, spCnt = 0;
+        for (char c : s) {
+            if (std::isupper(static_cast<unsigned char>(c))) upCnt++;
+            else if (std::islower(static_cast<unsigned char>(c))) loCnt++;
+            else if (std::isdigit(static_cast<unsigned char>(c))) dgCnt++;
+            else spCnt++;
+        }
+        int classes = (upCnt > 0) + (loCnt > 0) + (dgCnt > 0) + (spCnt > 0);
+        if (classes >= 3) return true;
+    }
 
     return false;
 }
@@ -340,6 +390,10 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
                     obfuscationIndicators.push_back({"string_building",
                         "String construction via StringBuilder: " + line, lineNum});
                 }
+                if (lineLower.find("invoke-custom") != std::string::npos) {
+                    obfuscationIndicators.push_back({"invoke_custom",
+                        "invoke-custom (lambda/dynamic): " + line, lineNum});
+                }
 
                 if (lineLower.find("const-string") != std::string::npos) {
                     std::string val = extractConstString(line);
@@ -425,7 +479,8 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
             std::string ext = it->path().extension().string();
             for (auto& c : ext) c = std::tolower(static_cast<unsigned char>(c));
             if (ext != ".smali" && ext != ".xml" && ext != ".java" && ext != ".kt" &&
-                ext != ".json" && ext != ".properties" && ext != ".txt") continue;
+                ext != ".json" && ext != ".properties" && ext != ".txt" &&
+                ext != ".yml" && ext != ".yaml" && ext != ".gradle") continue;
 
             processFile(it->path());
         }
@@ -535,6 +590,20 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
         } else if (lower.ends_with(".dex") || lower.ends_with(".apk") || lower.ends_with(".jar") ||
                    lower.ends_with(".so") || lower.ends_with(".locked") || lower.ends_with(".encrypted")) {
             addToCategory("Suspicious File Extensions", &s);
+        } else if (s.value.starts_with("AIza") || s.value.starts_with("AKIA") ||
+                   s.value.starts_with("ASIA") || s.value.starts_with("sk-") ||
+                   s.value.starts_with("pk-") || s.value.starts_with("ghp_") ||
+                   s.value.starts_with("gho_") || s.value.starts_with("ghu_") ||
+                   s.value.starts_with("ghs_") || s.value.starts_with("ghr_")) {
+            addToCategory("API Keys / Secrets", &s);
+        } else if (s.value.starts_with("eyJ") && s.value.size() > 20) {
+            addToCategory("JWT Tokens", &s);
+        } else if (s.value.find('@') != std::string::npos &&
+                   s.value.find('.') != std::string::npos &&
+                   s.value.size() > 5) {
+            addToCategory("Email Addresses", &s);
+        } else if (s.value.starts_with("/") || lower.starts_with("file://")) {
+            addToCategory("File Paths", &s);
         } else {
             bool categorized = false;
             if (s.value.size() >= 12) {
@@ -619,6 +688,7 @@ std::optional<ToolResult> StringsTool::tryExecute(const std::string& action, Too
             else if (type == "dynamic_loading") label = "Dynamic Code Loading";
             else if (type == "anti_analysis") label = "Anti-Analysis Checks";
             else if (type == "string_building") label = "Runtime String Construction";
+            else if (type == "invoke_custom") label = "Lambda/Dynamic Invocation";
 
             out << "  " << label << " (" << indicators.size() << " occurrence"
                 << (indicators.size() > 1 ? "s" : "") << "):\n";

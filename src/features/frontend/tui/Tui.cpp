@@ -39,6 +39,24 @@ static constexpr int COLOR_CYAN    = 36;
 static constexpr int COLOR_WHITE   = 37;
 static constexpr int COLOR_GRAY    = 90;
 
+static constexpr const char* BOX_H              = "\xe2\x94\x80";
+static constexpr const char* BOX_V              = "\xe2\x94\x82";
+static constexpr const char* BOX_TOP_LEFT       = "\xe2\x94\x8c";
+static constexpr const char* BOX_TOP_RIGHT      = "\xe2\x94\x90";
+static constexpr const char* BOX_BOTTOM_LEFT    = "\xe2\x94\x94";
+static constexpr const char* BOX_BOTTOM_RIGHT   = "\xe2\x94\x98";
+static constexpr const char* BOX_H_HEAVY        = "\xe2\x94\x81";
+static constexpr const char* BOX_V_HEAVY        = "\xe2\x94\x83";
+static constexpr const char* BOX_BL_HEAVY       = "\xe2\x94\x97";
+static constexpr const char* BOX_ROUND_TL       = "\xe2\x95\xad";
+static constexpr const char* BOX_ROUND_TR       = "\xe2\x95\xae";
+static constexpr const char* BOX_ROUND_BL       = "\xe2\x95\xb0";
+static constexpr const char* BOX_ROUND_BR       = "\xe2\x95\xaf";
+static constexpr const char* GLYPH_CHECK        = "\xe2\x9c\x93";
+static constexpr const char* GLYPH_TRIANGLE_R   = "\xe2\x96\xb6";
+static constexpr const char* GLYPH_WARNING      = "\xe2\x9a\xa0";
+static constexpr const char* GLYPH_CIRCLE       = "\xe2\x97\x8f";
+
 static volatile sig_atomic_t g_resized = 0;
 static volatile sig_atomic_t g_interrupted = 0;
 static void handleWinch(int) { g_resized = 1; }
@@ -310,13 +328,11 @@ std::vector<Tui::DisplayLine> Tui::wrapMessage(const AgentMessage& msg, int widt
             pos = nl + 1;
         }
 
-        // Detect code block fences
         bool isHeading = false;
         if (line.size() >= 3 && line.substr(0, 3) == "```") {
             inCodeBlock = !inCodeBlock;
         }
 
-        // Detect headings (only outside code blocks)
         if (!inCodeBlock && !line.empty() && line[0] == '#') {
             isHeading = true;
         }
@@ -401,9 +417,9 @@ void Tui::renderContextMenu(int screenRows, int screenCols) {
 
     moveCursor(row, col);
     setColor(COLOR_GRAY);
-    outputBuf_ += "\xe2\x94\x8c\xe2\x94\x80 View ";
-    for (int i = 0; i < menuWidth - 9; i++) outputBuf_ += "\xe2\x94\x80";
-    outputBuf_ += "\xe2\x94\x90";
+    outputBuf_ += std::string(BOX_TOP_LEFT) + BOX_H + " View ";
+    for (int i = 0; i < menuWidth - 9; i++) outputBuf_ += BOX_H;
+    outputBuf_ += BOX_TOP_RIGHT;
     resetStyle();
 
     struct { const char* label; bool checked; } items[] = {
@@ -415,10 +431,11 @@ void Tui::renderContextMenu(int screenRows, int screenCols) {
         bool sel = (i == contextMenuSel_);
         if (sel) outputBuf_ += "\033[7m";
         setColor(sel ? COLOR_WHITE : COLOR_GRAY);
-        outputBuf_ += "\xe2\x94\x82 ";
+        outputBuf_ += BOX_V;
+        outputBuf_ += " ";
         if (items[i].checked) {
             setColor(COLOR_GREEN);
-            outputBuf_ += "\xe2\x9c\x93";
+            outputBuf_ += GLYPH_CHECK;
             if (sel) {
                 setColor(COLOR_WHITE);
             } else {
@@ -439,15 +456,15 @@ void Tui::renderContextMenu(int screenRows, int screenCols) {
         } else {
             setColor(COLOR_GRAY);
         }
-        outputBuf_ += "\xe2\x94\x82";
+        outputBuf_ += BOX_V;
         resetStyle();
     }
 
     moveCursor(row + menuHeight - 1, col);
     setColor(COLOR_GRAY);
-    outputBuf_ += "\xe2\x94\x94";
-    for (int i = 0; i < menuWidth - 2; i++) outputBuf_ += "\xe2\x94\x80";
-    outputBuf_ += "\xe2\x94\x98";
+    outputBuf_ += BOX_BOTTOM_LEFT;
+    for (int i = 0; i < menuWidth - 2; i++) outputBuf_ += BOX_H;
+    outputBuf_ += BOX_BOTTOM_RIGHT;
     resetStyle();
 }
 
@@ -511,7 +528,6 @@ void Tui::renderMessages(int startRow, int height, int width) {
     scrollOffset_ = std::min(scrollOffset_, maxScroll);
     int visibleStart = std::max(0, maxScroll - scrollOffset_);
 
-    // Scrollbar: compute thumb position and size
     bool showScrollbar = totalLines > height && height >= 3;
     int thumbStart = 0, thumbLen = 1;
     if (showScrollbar) {
@@ -574,7 +590,6 @@ void Tui::renderMessages(int startRow, int height, int width) {
             if (textWidth > 1 && static_cast<int>(text.size()) > textWidth)
                 text = truncateUTF8(text, textWidth);
 
-            // Use markdown rendering for answer-type agent messages
             if (!dl.isUser && dl.type == AgentMessage::ANSWER
                 && !dl.isCodeBlock && !dl.isHeading) {
                 renderMarkdownLine(text, baseColor);
@@ -588,10 +603,10 @@ void Tui::renderMessages(int startRow, int height, int width) {
             moveCursor(startRow + i + 1, width);
             if (i >= thumbStart && i < thumbStart + thumbLen) {
                 setColor(COLOR_WHITE);
-                outputBuf_ += "\xe2\x94\x83";  // ┃ (thick vertical)
+                outputBuf_ += BOX_V_HEAVY;
             } else {
                 setColor(COLOR_GRAY);
-                outputBuf_ += "\xe2\x94\x82";  // │ (thin vertical)
+                outputBuf_ += BOX_V;
             }
             resetStyle();
         }
@@ -643,19 +658,20 @@ void Tui::renderTaskPane(int startRow, int height, int width) {
     clearLine(row, width);
     moveCursor(row, 1);
     setYellow();
-    outputBuf_ += " \xe2\x95\xad";
+    outputBuf_ += " ";
+    outputBuf_ += BOX_ROUND_TL;
     std::string title = " task ";
     int barWidth = width - 4;
     int leftBar = 2;
     int rightBar = barWidth - leftBar - static_cast<int>(title.size());
     if (rightBar < 0) rightBar = 0;
-    for (int i = 0; i < leftBar; i++) outputBuf_ += "\xe2\x94\x80";
+    for (int i = 0; i < leftBar; i++) outputBuf_ += BOX_H;
     setBold();
     outputBuf_ += title;
     resetStyle();
     setYellow();
-    for (int i = 0; i < rightBar; i++) outputBuf_ += "\xe2\x94\x80";
-    outputBuf_ += "\xe2\x95\xae";
+    for (int i = 0; i < rightBar; i++) outputBuf_ += BOX_H;
+    outputBuf_ += BOX_ROUND_TR;
     resetStyle();
     row++;
 
@@ -663,7 +679,8 @@ void Tui::renderTaskPane(int startRow, int height, int width) {
         clearLine(row, width);
         moveCursor(row, 1);
         setYellow();
-        outputBuf_ += " \xe2\x94\x82";
+        outputBuf_ += " ";
+        outputBuf_ += BOX_V;
         resetStyle();
 
         int lineIdx = visibleStart + i;
@@ -683,7 +700,7 @@ void Tui::renderTaskPane(int startRow, int height, int width) {
         }
 
         setYellow();
-        outputBuf_ += "\xe2\x94\x82";
+        outputBuf_ += BOX_V;
         resetStyle();
         row++;
     }
@@ -691,9 +708,10 @@ void Tui::renderTaskPane(int startRow, int height, int width) {
     clearLine(row, width);
     moveCursor(row, 1);
     setYellow();
-    outputBuf_ += " \xe2\x95\xb0";
-    for (int i = 0; i < barWidth; i++) outputBuf_ += "\xe2\x94\x80";
-    outputBuf_ += "\xe2\x95\xaf";
+    outputBuf_ += " ";
+    outputBuf_ += BOX_ROUND_BL;
+    for (int i = 0; i < barWidth; i++) outputBuf_ += BOX_H;
+    outputBuf_ += BOX_ROUND_BR;
     resetStyle();
 }
 
@@ -839,7 +857,9 @@ void Tui::renderConfirm(int row, int width) {
     } else {
         setColor(COLOR_YELLOW);
         setBold();
-        outputBuf_ += " \xe2\x96\xb6 ";
+        outputBuf_ += " ";
+        outputBuf_ += GLYPH_TRIANGLE_R;
+        outputBuf_ += " ";
         resetStyle();
         setColor(COLOR_WHITE);
         std::string desc = confirmDescription_;
@@ -884,20 +904,19 @@ void Tui::renderSeparator(int row, int width) {
     outputBuf_ += "\033[2K";
     setColor(COLOR_GRAY);
 
-    // Left side: session name
     std::string left = " " + currentChatId_;
     if (dangerousMode_) {
         left += " ";
         resetStyle();
         setColor(COLOR_RED);
         setBold();
-        left += "\xe2\x9a\xa0 dangerous";  // ⚠ dangerous
+        left += GLYPH_WARNING;
+        left += " dangerous";
     }
 
     outputBuf_ += left;
     resetStyle();
 
-    // Right side: status
     setColor(COLOR_GRAY);
     std::string right;
     if (processing_) {
@@ -972,7 +991,8 @@ void Tui::renderInput(int row, int width) {
             int g = 140 + static_cast<int>(t * 60);
             int b = 20 + static_cast<int>(t * 20);
             appendRGB(outputBuf_, r, g, b, true);
-            outputBuf_ += (ci < 2) ? "\xe2\x97\x8f " : "\xe2\x97\x8f";
+            outputBuf_ += GLYPH_CIRCLE;
+            if (ci < 2) outputBuf_ += " ";
         }
     }
     resetStyle();
@@ -1004,7 +1024,7 @@ void Tui::renderWaveBar(int row, int width) {
             appendRGB(outputBuf_, r, g, b);
             prevR = r; prevG = g; prevB = b;
         }
-        outputBuf_ += (i == 0) ? "\xe2\x94\x97" : "\xe2\x94\x81";
+        outputBuf_ += (i == 0) ? BOX_BL_HEAVY : BOX_H_HEAVY;
     }
     resetStyle();
 }
@@ -1186,9 +1206,7 @@ bool Tui::handleEscapeSequence() {
     char seq[2];
     if (read(STDIN_FILENO, &seq[0], 1) <= 0) return false;
 
-    // Alt+Backspace: \033 \x7f
     if (seq[0] == 127) {
-        // Delete previous word (same as Ctrl+W)
         if (cursorPos_ > 0) {
             int end = cursorPos_;
             while (cursorPos_ > 0 && inputBuffer_[cursorPos_ - 1] == ' ') cursorPos_--;
@@ -1239,7 +1257,6 @@ bool Tui::handleEscapeSequence() {
         return true;
     }
 
-    // Modified keys: \033[1;3C (Alt+Right), \033[1;3D (Alt+Left)
     if (seq[1] == '1') {
         char mod[2];
         if (read(STDIN_FILENO, &mod[0], 1) <= 0) return true;
@@ -1248,12 +1265,10 @@ bool Tui::handleEscapeSequence() {
             char dir;
             if (read(STDIN_FILENO, &dir, 1) <= 0) return true;
             if (dir == 'C') {
-                // Alt+Right: move to end of next word
                 int len = static_cast<int>(inputBuffer_.size());
                 while (cursorPos_ < len && inputBuffer_[cursorPos_] == ' ') cursorPos_++;
                 while (cursorPos_ < len && inputBuffer_[cursorPos_] != ' ') cursorPos_++;
             } else if (dir == 'D') {
-                // Alt+Left: move to start of previous word
                 while (cursorPos_ > 0 && inputBuffer_[cursorPos_ - 1] == ' ') cursorPos_--;
                 while (cursorPos_ > 0 && inputBuffer_[cursorPos_ - 1] != ' ') cursorPos_--;
             }

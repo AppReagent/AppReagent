@@ -7,14 +7,12 @@
 
 namespace area::tui {
 
-/// A styled span within a markdown line.
 struct MarkdownSpan {
     enum Style { NORMAL, BOLD, CODE };
     Style style;
     std::string text;
 };
 
-/// Parse inline markdown (** and `) into styled spans.
 inline std::vector<MarkdownSpan> parseMarkdownSpans(const std::string& text) {
     std::vector<MarkdownSpan> spans;
     size_t i = 0;
@@ -47,7 +45,6 @@ inline std::vector<MarkdownSpan> parseMarkdownSpans(const std::string& text) {
         current += text[i];
         i++;
     }
-    // Flush remaining
     auto finalStyle = inBold ? MarkdownSpan::BOLD : inCode ? MarkdownSpan::CODE : MarkdownSpan::NORMAL;
     flush(finalStyle);
     return spans;

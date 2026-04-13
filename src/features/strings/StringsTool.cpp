@@ -206,34 +206,31 @@ static bool isInteresting(const std::string& s) {
         lower.ends_with(".so") || lower.ends_with(".locked") || lower.ends_with(".encrypted") ||
         lower.ends_with(".enc")) return true;
 
-    // Email addresses
     if (s.find('@') != std::string::npos && s.size() > 5) {
         auto at = s.find('@');
         if (at > 0 && at < s.size() - 3 && s.find('.', at) != std::string::npos) return true;
     }
 
-    // API key / token prefixes
     if (s.starts_with("AIza") || s.starts_with("AKIA") || s.starts_with("ASIA") ||
         s.starts_with("sk-") || s.starts_with("pk-") ||
         s.starts_with("ghp_") || s.starts_with("gho_") || s.starts_with("ghu_") ||
         s.starts_with("ghs_") || s.starts_with("ghr_")) return true;
 
-    // JWT tokens
     if (s.starts_with("eyJ") && s.size() > 20) return true;
 
-    // Private key / certificate markers
     if (lower.find("begin private key") != std::string::npos ||
         lower.find("begin rsa private") != std::string::npos ||
         lower.find("begin certificate") != std::string::npos) return true;
 
-    // Phone numbers
     if (s.size() >= 10) {
         int phDigits = 0;
         bool validPhone = true;
         for (char c : s) {
-            if (std::isdigit(static_cast<unsigned char>(c))) phDigits++;
-            else if (c != '+' && c != '-' && c != '(' && c != ')' && c != ' ') {
-                validPhone = false; break;
+            if (std::isdigit(static_cast<unsigned char>(c))) {
+                phDigits++;
+            } else if (c != '+' && c != '-' && c != '(' && c != ')' && c != ' ') {
+                validPhone = false;
+                break;
             }
         }
         if (validPhone && phDigits >= 7) return true;
@@ -260,7 +257,6 @@ static bool isInteresting(const std::string& s) {
         if (allHex) return true;
     }
 
-    // Mixed-charset strings (likely secrets, tokens, credentials)
     if (s.size() >= 12 && s.find(' ') == std::string::npos) {
         int upCnt = 0, loCnt = 0, dgCnt = 0, spCnt = 0;
         for (char c : s) {

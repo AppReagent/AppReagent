@@ -55,8 +55,8 @@ void ScanLog::dropTables() {
 static std::vector<std::string> splitSqlStatements(const std::string& sql) {
     std::vector<std::string> out;
     std::string cur;
-    std::string dollarTag;  // non-empty when inside $tag$...$tag$
-    char strQuote = 0;      // 0, '\'', or '"'
+    std::string dollarTag;
+    char strQuote = 0;
     bool inLineComment = false;
     bool inBlockComment = false;
 
@@ -79,13 +79,23 @@ static std::vector<std::string> splitSqlStatements(const std::string& sql) {
         }
         if (inBlockComment) {
             cur += c;
-            if (c == '*' && n == '/') { cur += n; i += 2; inBlockComment = false; continue; }
+            if (c == '*' && n == '/') {
+                cur += n;
+                i += 2;
+                inBlockComment = false;
+                continue;
+            }
             i++; continue;
         }
         if (!dollarTag.empty()) {
             if (c == '$') {
                 auto tag = matchDollarTag(i);
-                if (tag == dollarTag) { cur += tag; i += tag.size(); dollarTag.clear(); continue; }
+                if (tag == dollarTag) {
+                    cur += tag;
+                    i += tag.size();
+                    dollarTag.clear();
+                    continue;
+                }
             }
             cur += c; i++; continue;
         }
@@ -95,12 +105,34 @@ static std::vector<std::string> splitSqlStatements(const std::string& sql) {
             i++; continue;
         }
 
-        if (c == '-' && n == '-') { cur += c; cur += n; i += 2; inLineComment = true; continue; }
-        if (c == '/' && n == '*') { cur += c; cur += n; i += 2; inBlockComment = true; continue; }
-        if (c == '\'' || c == '"') { strQuote = c; cur += c; i++; continue; }
+        if (c == '-' && n == '-') {
+            cur += c;
+            cur += n;
+            i += 2;
+            inLineComment = true;
+            continue;
+        }
+        if (c == '/' && n == '*') {
+            cur += c;
+            cur += n;
+            i += 2;
+            inBlockComment = true;
+            continue;
+        }
+        if (c == '\'' || c == '"') {
+            strQuote = c;
+            cur += c;
+            i++;
+            continue;
+        }
         if (c == '$') {
             auto tag = matchDollarTag(i);
-            if (!tag.empty()) { dollarTag = tag; cur += tag; i += tag.size(); continue; }
+            if (!tag.empty()) {
+                dollarTag = tag;
+                cur += tag;
+                i += tag.size();
+                continue;
+            }
         }
         if (c == ';') {
             out.push_back(cur);
@@ -119,7 +151,9 @@ void ScanLog::ensureTables() {
     for (auto& stmt : splitSqlStatements(ddl)) {
         while (!stmt.empty() && (stmt[0] == ' ' || stmt[0] == '\n' || stmt[0] == '\r' || stmt[0] == '\t'))
             stmt.erase(0, 1);
-        while (!stmt.empty() && (stmt.back() == ' ' || stmt.back() == '\n' || stmt.back() == '\r' || stmt.back() == '\t'))
+        while (!stmt.empty() &&
+               (stmt.back() == ' ' || stmt.back() == '\n' ||
+                stmt.back() == '\r' || stmt.back() == '\t'))
             stmt.pop_back();
         if (stmt.empty()) continue;
         auto qr = db_.execute(stmt);

@@ -16,10 +16,6 @@ namespace fs = std::filesystem;
 
 namespace area {
 
-// ---------------------------------------------------------------------------
-// Type conversion
-// ---------------------------------------------------------------------------
-
 static std::string typeToJava(const std::string& desc) {
     if (desc.empty()) return "void";
     if (desc == "V") return "void";
@@ -55,10 +51,6 @@ static std::string typeToJava(const std::string& desc) {
 
     return desc;
 }
-
-// ---------------------------------------------------------------------------
-// Signature parsing
-// ---------------------------------------------------------------------------
 
 struct MethodSig {
     std::vector<std::string> paramTypes;
@@ -104,10 +96,6 @@ static MethodSig parseMethodSig(const std::string& sig) {
     return result;
 }
 
-// ---------------------------------------------------------------------------
-// String helpers
-// ---------------------------------------------------------------------------
-
 static std::string trim(const std::string& s) {
     auto start = s.find_first_not_of(" \t\r\n");
     if (start == std::string::npos) return "";
@@ -120,10 +108,6 @@ static std::string toLowerStr(const std::string& s) {
     for (auto& c : result) c = std::tolower(static_cast<unsigned char>(c));
     return result;
 }
-
-// ---------------------------------------------------------------------------
-// Smali reference helpers
-// ---------------------------------------------------------------------------
 
 static std::string classSimpleName(const std::string& desc) {
     std::string java = typeToJava(desc);
@@ -164,10 +148,6 @@ static std::string extractReturnType(const std::string& ref) {
     if (paren == std::string::npos) return "void";
     return typeToJava(ref.substr(paren + 1));
 }
-
-// ---------------------------------------------------------------------------
-// Operand parsing helpers
-// ---------------------------------------------------------------------------
 
 struct Ops2 { std::string a, b; bool valid; };
 struct Ops3 { std::string a, b, c; bool valid; };
@@ -215,7 +195,6 @@ static std::vector<std::string> parseRegs(const std::string& s) {
                         regs.push_back(std::string(1, prefix) + std::to_string(r));
                     }
                 } catch (const std::exception&) {
-                    // Malformed register range — keep what we parsed so far
                 }
             }
         } else if (!t.empty()) {
@@ -247,10 +226,6 @@ static std::string buildArgString(const std::vector<std::string>& regs, size_t s
     return args;
 }
 
-// ---------------------------------------------------------------------------
-// Decompilation state (shared across opcode handlers)
-// ---------------------------------------------------------------------------
-
 struct DecompileState {
     std::ostringstream& out;
     const std::string indent = "    ";
@@ -276,10 +251,6 @@ static void emitCall(DecompileState& state, const std::string& call,
         state.out << state.indent << call << ";\n";
     }
 }
-
-// ---------------------------------------------------------------------------
-// Opcode handlers — each returns true if it handled the opcode
-// ---------------------------------------------------------------------------
 
 static bool handleConst(DecompileState& state, const std::string& opcode,
                         const std::string& operands) {
@@ -325,7 +296,6 @@ static bool handleInvoke(DecompileState& state, const std::string& opcode,
     std::string member = extractMemberName(ref);
     std::string retType = extractReturnType(ref);
 
-    // Constructor: invoke-direct <init>
     if (isDirect && member == "<init>" && !regs.empty()) {
         std::string objReg = regs[0];
         auto it = state.newInstances.find(objReg);
@@ -343,7 +313,6 @@ static bool handleInvoke(DecompileState& state, const std::string& opcode,
         }
     }
 
-    // Build the call expression
     std::string call;
     if (isStatic) {
         call = extractClassName(ref) + "." + member + "(" + buildArgString(regs, 0) + ")";
@@ -417,7 +386,6 @@ static bool handleFieldAccess(DecompileState& state, const std::string& opcode,
 static bool handleControlFlow(DecompileState& state, const std::string& opcode,
                                const std::string& operands) {
     if (opcode.starts_with("if-")) {
-        // Unary conditions (register vs zero)
         static const std::map<std::string, std::string> unaryConds = {
             {"if-eqz", " == 0"}, {"if-nez", " != 0"},
             {"if-ltz", " < 0"},  {"if-gez", " >= 0"},
@@ -434,7 +402,6 @@ static bool handleControlFlow(DecompileState& state, const std::string& opcode,
             return true;
         }
 
-        // Binary conditions (register vs register)
         static const std::map<std::string, std::string> binaryConds = {
             {"if-eq", " == "}, {"if-ne", " != "},
             {"if-lt", " < "},  {"if-ge", " >= "},
@@ -610,17 +577,12 @@ static bool handleMisc(DecompileState& state, const std::string& opcode,
     return false;
 }
 
-// ---------------------------------------------------------------------------
-// Method decompilation
-// ---------------------------------------------------------------------------
-
 static std::string decompileMethod(const std::vector<std::string>& lines,
                                     int startLine, int endLine,
                                     const std::string& className) {
     std::ostringstream out;
     DecompileState state{out};
 
-    // --- Parse method header ---
     std::string methodLine = trim(lines[startLine]);
     std::string access, methodName, fullSig;
     {
@@ -647,7 +609,6 @@ static std::string decompileMethod(const std::vector<std::string>& lines,
         methodName = fullSig.substr(0, parenPos);
         auto msig = parseMethodSig(fullSig.substr(parenPos));
 
-        // Collect .param names
         std::map<int, std::string> paramNames;
         for (int i = startLine + 1; i < endLine; i++) {
             std::string line = trim(lines[i]);
@@ -664,7 +625,6 @@ static std::string decompileMethod(const std::vector<std::string>& lines,
                     int idx = std::stoi(reg.substr(1));
                     paramNames[idx] = name;
                 } catch (const std::exception&) {
-                    // Malformed param register — skip
                 }
             }
         }
@@ -691,13 +651,11 @@ static std::string decompileMethod(const std::vector<std::string>& lines,
         out << access << " " << methodName << "() {\n";
     }
 
-    // --- Dispatch loop ---
     for (int i = startLine + 1; i < endLine; i++) {
         std::string line = trim(lines[i]);
         if (line.empty() || line.starts_with(".method") || line.starts_with(".end method"))
             continue;
 
-        // Skip metadata directives
         if (line.starts_with(".locals") || line.starts_with(".param") ||
             line.starts_with(".annotation") || line.starts_with(".end annotation") ||
             line.starts_with(".prologue") || line.starts_with(".line") ||
@@ -705,19 +663,16 @@ static std::string decompileMethod(const std::vector<std::string>& lines,
             line.starts_with(".source"))
             continue;
 
-        // Labels
         if (line[0] == ':') {
             out << "\n" << state.indent << line.substr(1) << ":\n";
             continue;
         }
 
-        // Comments
         if (line[0] == '#') {
             out << state.indent << "//" << line.substr(1) << "\n";
             continue;
         }
 
-        // .catch directives
         if (line.starts_with(".catch")) {
             auto braceStart = line.find('{');
             auto braceEnd = line.find('}');
@@ -734,7 +689,6 @@ static std::string decompileMethod(const std::vector<std::string>& lines,
             continue;
         }
 
-        // Parse opcode and operands
         std::string opcode, operands;
         auto spacePos = line.find(' ');
         if (spacePos != std::string::npos) {
@@ -744,7 +698,6 @@ static std::string decompileMethod(const std::vector<std::string>& lines,
             opcode = line;
         }
 
-        // move-result consumes the pending call; everything else flushes it
         if (handleMoveResult(state, opcode, operands)) continue;
         flushPendingCall(state);
 
@@ -756,7 +709,6 @@ static std::string decompileMethod(const std::vector<std::string>& lines,
         if (handleArray(state, opcode, operands)) continue;
         if (handleMisc(state, opcode, operands)) continue;
 
-        // Unrecognized instruction — emit as comment
         out << state.indent << "// " << line << "\n";
     }
 
@@ -764,10 +716,6 @@ static std::string decompileMethod(const std::vector<std::string>& lines,
     out << "}\n";
     return out.str();
 }
-
-// ---------------------------------------------------------------------------
-// File-level parsing helpers (used by tryExecute)
-// ---------------------------------------------------------------------------
 
 struct ClassInfo {
     std::string name;
@@ -845,10 +793,6 @@ static std::vector<MethodBounds> findMethods(const std::vector<std::string>& lin
     return methods;
 }
 
-// ---------------------------------------------------------------------------
-// Tool entry point
-// ---------------------------------------------------------------------------
-
 std::optional<ToolResult> DecompileTool::tryExecute(const std::string& action, ToolContext& ctx) {
     if (!action.starts_with("DECOMPILE:"))
         return std::nullopt;
@@ -858,7 +802,6 @@ std::optional<ToolResult> DecompileTool::tryExecute(const std::string& action, T
         return ToolResult{"OBSERVATION: Error — provide a .smali file path after DECOMPILE:"};
     }
 
-    // Parse filePath and modifier (e.g. "| method foo")
     std::string filePath, modifier;
     auto pipePos = args.find('|');
     if (pipePos != std::string::npos) {
@@ -906,7 +849,6 @@ std::optional<ToolResult> DecompileTool::tryExecute(const std::string& action, T
         return ToolResult{"OBSERVATION: No methods found in " + filePath};
     }
 
-    // Filter by target method if specified
     std::string targetMethod;
     if (!modifier.empty()) {
         std::string modLower = toLowerStr(modifier);
@@ -939,7 +881,6 @@ std::optional<ToolResult> DecompileTool::tryExecute(const std::string& action, T
         truncatedMethods = true;
     }
 
-    // Build output
     std::ostringstream out;
     out << "// Decompiled from: " << filePath << "\n";
     out << "class " << classInfo.name;

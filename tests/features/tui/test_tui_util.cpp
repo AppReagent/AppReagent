@@ -116,3 +116,77 @@ TEST(TuiUtil, ParseAgentType_UnknownDefaultsToAnswer) {
     EXPECT_EQ(parseAgentType("unknown"), area::AgentMessage::ANSWER);
     EXPECT_EQ(parseAgentType("ANSWER"), area::AgentMessage::ANSWER); // case sensitive
 }
+
+// ── parseMarkdownSpans ──────────────────────────────────────────────
+
+using area::tui::MarkdownSpan;
+using area::tui::parseMarkdownSpans;
+
+TEST(TuiUtil, MarkdownSpans_PlainText) {
+    auto spans = parseMarkdownSpans("hello world");
+    ASSERT_EQ(spans.size(), 1);
+    EXPECT_EQ(spans[0].style, MarkdownSpan::NORMAL);
+    EXPECT_EQ(spans[0].text, "hello world");
+}
+
+TEST(TuiUtil, MarkdownSpans_Bold) {
+    auto spans = parseMarkdownSpans("before **bold** after");
+    ASSERT_EQ(spans.size(), 3);
+    EXPECT_EQ(spans[0].style, MarkdownSpan::NORMAL);
+    EXPECT_EQ(spans[0].text, "before ");
+    EXPECT_EQ(spans[1].style, MarkdownSpan::BOLD);
+    EXPECT_EQ(spans[1].text, "bold");
+    EXPECT_EQ(spans[2].style, MarkdownSpan::NORMAL);
+    EXPECT_EQ(spans[2].text, " after");
+}
+
+TEST(TuiUtil, MarkdownSpans_InlineCode) {
+    auto spans = parseMarkdownSpans("use `foo()` here");
+    ASSERT_EQ(spans.size(), 3);
+    EXPECT_EQ(spans[0].style, MarkdownSpan::NORMAL);
+    EXPECT_EQ(spans[0].text, "use ");
+    EXPECT_EQ(spans[1].style, MarkdownSpan::CODE);
+    EXPECT_EQ(spans[1].text, "foo()");
+    EXPECT_EQ(spans[2].style, MarkdownSpan::NORMAL);
+    EXPECT_EQ(spans[2].text, " here");
+}
+
+TEST(TuiUtil, MarkdownSpans_BoldAndCode) {
+    auto spans = parseMarkdownSpans("**bold** and `code`");
+    ASSERT_EQ(spans.size(), 3);
+    EXPECT_EQ(spans[0].style, MarkdownSpan::BOLD);
+    EXPECT_EQ(spans[0].text, "bold");
+    EXPECT_EQ(spans[1].style, MarkdownSpan::NORMAL);
+    EXPECT_EQ(spans[1].text, " and ");
+    EXPECT_EQ(spans[2].style, MarkdownSpan::CODE);
+    EXPECT_EQ(spans[2].text, "code");
+}
+
+TEST(TuiUtil, MarkdownSpans_EmptyString) {
+    auto spans = parseMarkdownSpans("");
+    EXPECT_TRUE(spans.empty());
+}
+
+TEST(TuiUtil, MarkdownSpans_UnterminatedBold) {
+    auto spans = parseMarkdownSpans("start **bold no end");
+    ASSERT_EQ(spans.size(), 2);
+    EXPECT_EQ(spans[0].style, MarkdownSpan::NORMAL);
+    EXPECT_EQ(spans[0].text, "start ");
+    EXPECT_EQ(spans[1].style, MarkdownSpan::BOLD);
+    EXPECT_EQ(spans[1].text, "bold no end");
+}
+
+TEST(TuiUtil, MarkdownSpans_BackticksInsideBoldIgnored) {
+    // Backticks inside bold are treated as literal (bold takes precedence)
+    auto spans = parseMarkdownSpans("**bold `with` ticks**");
+    ASSERT_EQ(spans.size(), 1);
+    EXPECT_EQ(spans[0].style, MarkdownSpan::BOLD);
+    EXPECT_EQ(spans[0].text, "bold `with` ticks");
+}
+
+TEST(TuiUtil, MarkdownSpans_StarsInsideCodeIgnored) {
+    auto spans = parseMarkdownSpans("`code **with** stars`");
+    ASSERT_EQ(spans.size(), 1);
+    EXPECT_EQ(spans[0].style, MarkdownSpan::CODE);
+    EXPECT_EQ(spans[0].text, "code **with** stars");
+}

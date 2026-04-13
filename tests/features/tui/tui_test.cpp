@@ -133,3 +133,32 @@ TEST_F(TuiScreenshotTest, EscapeClosesContextMenu) {
     EXPECT_EQ(screen.find("View"), std::string::npos)
         << "Context menu should be closed:\n" << screen;
 }
+
+TEST_F(TuiScreenshotTest, SeparatorShowsSessionName) {
+    auto screen = client_->tuiScreen(1000);
+    // Separator line should show the default chat session name
+    EXPECT_NE(screen.find("default"), std::string::npos)
+        << "Session name not found in separator:\n" << screen;
+}
+
+TEST_F(TuiScreenshotTest, WaveBarSpansFullWidth) {
+    auto screen = client_->tuiScreen(1000);
+    // Find the last line containing wave bar chars (┗ or ━)
+    auto lastLine = screen.rfind('\n', screen.size() - 2);
+    std::string waveLine;
+    if (lastLine != std::string::npos) {
+        waveLine = screen.substr(lastLine + 1);
+    } else {
+        waveLine = screen;
+    }
+    // Wave bar should have multiple ━ chars spanning most of the width
+    int barCount = 0;
+    size_t pos = 0;
+    while ((pos = waveLine.find("━", pos)) != std::string::npos) {
+        barCount++;
+        pos += 3; // UTF-8 ━ is 3 bytes
+    }
+    EXPECT_GT(barCount, 30)
+        << "Wave bar should span more than 30 chars, got " << barCount
+        << " in: " << waveLine;
+}

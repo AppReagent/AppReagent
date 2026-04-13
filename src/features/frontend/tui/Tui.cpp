@@ -97,6 +97,26 @@ static void appendRGB(std::string& buf, int r, int g, int b, bool bold = false) 
     buf += esc;
 }
 
+void Tui::renderMarkdownLine(const std::string& text, int baseColor) {
+    auto spans = area::tui::parseMarkdownSpans(text);
+    for (auto& span : spans) {
+        switch (span.style) {
+            case tui::MarkdownSpan::BOLD:
+                setBold();
+                setColor(baseColor);
+                break;
+            case tui::MarkdownSpan::CODE:
+                setColor(COLOR_YELLOW);
+                break;
+            case tui::MarkdownSpan::NORMAL:
+                resetStyle();
+                setColor(baseColor);
+                break;
+        }
+        outputBuf_ += span.text;
+    }
+}
+
 Tui::Tui(int sockFd, const std::string& theme)
     : sockFd_(sockFd),
       theme_(theme == "light" ? lightTheme : darkTheme) {
@@ -215,6 +235,10 @@ void Tui::buildLayout() {
     YGNodeStyleSetHeight(inputNode_, 1);
     YGNodeInsertChild(root_, inputNode_, idx++);
 
+    waveBarNode_ = YGNodeNew();
+    YGNodeStyleSetHeight(waveBarNode_, 1);
+    YGNodeInsertChild(root_, waveBarNode_, idx++);
+
     YGNodeCalculateLayout(root_, static_cast<float>(ts.cols), static_cast<float>(ts.rows), YGDirectionLTR);
 }
 
@@ -228,6 +252,7 @@ void Tui::freeLayout() {
         contentNode_ = nullptr;
         separatorNode_ = nullptr;
         inputNode_ = nullptr;
+        waveBarNode_ = nullptr;
     }
 }
 
@@ -271,6 +296,7 @@ void Tui::flush() {
 std::vector<Tui::DisplayLine> Tui::wrapMessage(const AgentMessage& msg, int width) {
     std::vector<DisplayLine> lines;
     std::string text = msg.content;
+    bool inCodeBlock = false;
 
     size_t pos = 0;
     while (pos < text.size()) {
@@ -284,17 +310,37 @@ std::vector<Tui::DisplayLine> Tui::wrapMessage(const AgentMessage& msg, int widt
             pos = nl + 1;
         }
 
+        // Detect code block fences
+        bool isHeading = false;
+        if (line.size() >= 3 && line.substr(0, 3) == "```") {
+            inCodeBlock = !inCodeBlock;
+        }
+
+        // Detect headings (only outside code blocks)
+        if (!inCodeBlock && !line.empty() && line[0] == '#') {
+            isHeading = true;
+        }
+
         if (width > 0) {
             while (static_cast<int>(line.size()) > width) {
                 int bp = std::min(width, static_cast<int>(line.size()) - 1);
-                while (bp > 0 && line[bp] != ' ') bp--;
+                if (!inCodeBlock) {
+                    while (bp > 0 && line[bp] != ' ') bp--;
+                }
                 if (bp == 0) bp = std::min(width, static_cast<int>(line.size()));
-                lines.push_back({msg.type, line.substr(0, bp)});
+                DisplayLine dl{msg.type, line.substr(0, bp)};
+                dl.isCodeBlock = inCodeBlock;
+                dl.isHeading = isHeading;
+                lines.push_back(dl);
                 line = line.substr(bp);
                 if (!line.empty() && line[0] == ' ') line.erase(0, 1);
+                isHeading = false;
             }
         }
-        lines.push_back({msg.type, line});
+        DisplayLine dl{msg.type, line};
+        dl.isCodeBlock = inCodeBlock;
+        dl.isHeading = isHeading;
+        lines.push_back(dl);
     }
     return lines;
 }
@@ -465,6 +511,18 @@ void Tui::renderMessages(int startRow, int height, int width) {
     scrollOffset_ = std::min(scrollOffset_, maxScroll);
     int visibleStart = std::max(0, maxScroll - scrollOffset_);
 
+    // Scrollbar: compute thumb position and size
+    bool showScrollbar = totalLines > height && height >= 3;
+    int thumbStart = 0, thumbLen = 1;
+    if (showScrollbar) {
+        thumbLen = std::max(1, height * height / totalLines);
+        int scrollRange = height - thumbLen;
+        int scrollPos = maxScroll > 0 ? (maxScroll - scrollOffset_) * scrollRange / maxScroll : 0;
+        thumbStart = scrollPos;
+    }
+
+    int textWidth = showScrollbar ? width - 2 : width - 1;
+
     for (int i = 0; i < height; i++) {
         int lineIdx = visibleStart + i;
         clearLine(startRow + i + 1, width);
@@ -474,33 +532,67 @@ void Tui::renderMessages(int startRow, int height, int width) {
             auto& dl = cachedDisplayLines_[lineIdx];
             outputBuf_ += " ";
 
+            int baseColor = COLOR_WHITE;
             if (dl.isUser) {
                 setColor(COLOR_CYAN);
                 setBold();
+                baseColor = COLOR_CYAN;
+            } else if (dl.isCodeBlock) {
+                setColor(COLOR_YELLOW);
+                baseColor = COLOR_YELLOW;
+            } else if (dl.isHeading) {
+                setColor(COLOR_MAGENTA);
+                setBold();
+                baseColor = COLOR_MAGENTA;
             } else {
                 switch (dl.type) {
                     case AgentMessage::THINKING:
                         setColor(COLOR_GRAY);
+                        baseColor = COLOR_GRAY;
                         break;
                     case AgentMessage::SQL:
                         setColor(COLOR_GREEN);
+                        baseColor = COLOR_GREEN;
                         break;
                     case AgentMessage::RESULT:
                         setColor(COLOR_CYAN);
+                        baseColor = COLOR_CYAN;
                         break;
                     case AgentMessage::ANSWER:
                         setColor(COLOR_WHITE);
                         setBold();
+                        baseColor = COLOR_WHITE;
                         break;
                     case AgentMessage::ERROR:
                         setColor(COLOR_RED);
+                        baseColor = COLOR_RED;
                         break;
                 }
             }
 
             std::string text = dl.text;
-            if (width > 2 && static_cast<int>(text.size()) > width - 2) text = truncateUTF8(text, width - 2);
-            outputBuf_ += text;
+            if (textWidth > 1 && static_cast<int>(text.size()) > textWidth)
+                text = truncateUTF8(text, textWidth);
+
+            // Use markdown rendering for answer-type agent messages
+            if (!dl.isUser && dl.type == AgentMessage::ANSWER
+                && !dl.isCodeBlock && !dl.isHeading) {
+                renderMarkdownLine(text, baseColor);
+            } else {
+                outputBuf_ += text;
+            }
+            resetStyle();
+        }
+
+        if (showScrollbar) {
+            moveCursor(startRow + i + 1, width);
+            if (i >= thumbStart && i < thumbStart + thumbLen) {
+                setColor(COLOR_WHITE);
+                outputBuf_ += "\xe2\x94\x83";  // ┃ (thick vertical)
+            } else {
+                setColor(COLOR_GRAY);
+                outputBuf_ += "\xe2\x94\x82";  // │ (thin vertical)
+            }
             resetStyle();
         }
     }
@@ -787,6 +879,37 @@ void Tui::renderConfirm(int row, int width) {
     }
 }
 
+void Tui::renderSeparator(int row, int width) {
+    moveCursor(row + 1, 1);
+    outputBuf_ += "\033[2K";
+    setColor(COLOR_GRAY);
+
+    // Left side: session name
+    std::string left = " " + currentChatId_;
+    if (dangerousMode_) {
+        left += " ";
+        resetStyle();
+        setColor(COLOR_RED);
+        setBold();
+        left += "\xe2\x9a\xa0 dangerous";  // ⚠ dangerous
+    }
+
+    outputBuf_ += left;
+    resetStyle();
+
+    // Right side: status
+    setColor(COLOR_GRAY);
+    std::string right;
+    if (processing_) {
+        right = "processing ";
+    }
+
+    int pad = width - static_cast<int>(left.size()) - static_cast<int>(right.size());
+    if (pad > 0) outputBuf_ += std::string(pad, ' ');
+    outputBuf_ += right;
+    resetStyle();
+}
+
 void Tui::renderInput(int row, int width) {
     moveCursor(row, 1);
     outputBuf_ += "\033[2K";
@@ -854,7 +977,6 @@ void Tui::renderInput(int row, int width) {
     }
     resetStyle();
 
-    renderWaveBar(row + 1, width);
     animFrame_++;
 
     if (!confirmPending_) {
@@ -868,21 +990,16 @@ void Tui::renderWaveBar(int row, int width) {
     moveCursor(row, 1);
     auto& wBase = processing_ ? theme_.procBase : theme_.waveBase;
     auto& wAccent = processing_ ? theme_.procAccent : theme_.waveAccent;
-    int waveLen = std::min(width, 30);
     int prevR = -1, prevG = -1, prevB = -1;
     for (int i = 0; i < width; i++) {
-        int r, g, b;
-        if (i < waveLen) {
-            double env = (1.0 - static_cast<double>(i) / static_cast<double>(waveLen));
-            env = env * env * (3.0 - 2.0 * env);
-            double n = flowNoise(static_cast<double>(i), static_cast<double>(animFrame_));
-            double wave = (n + 1.0) * 0.5 * env;
-            r = wBase.r + static_cast<int>(wave * wAccent.r);
-            g = wBase.g + static_cast<int>(wave * wAccent.g);
-            b = wBase.b + static_cast<int>(wave * wAccent.b);
-        } else {
-            r = wBase.r; g = wBase.g; b = wBase.b;
-        }
+        double pos = static_cast<double>(i) / static_cast<double>(std::max(1, width));
+        double env = 1.0 - pos;
+        env = env * env * (3.0 - 2.0 * env);
+        double n = flowNoise(static_cast<double>(i) * 0.8, static_cast<double>(animFrame_));
+        double wave = (n + 1.0) * 0.5 * env;
+        int r = wBase.r + static_cast<int>(wave * wAccent.r);
+        int g = wBase.g + static_cast<int>(wave * wAccent.g);
+        int b = wBase.b + static_cast<int>(wave * wAccent.b);
         if (r != prevR || g != prevG || b != prevB) {
             appendRGB(outputBuf_, r, g, b);
             prevR = r; prevG = g; prevB = b;
@@ -934,7 +1051,12 @@ void Tui::render() {
     if (confirmPending_) {
         renderConfirm(contentRow + contentHeight, contentWidth);
     }
-    renderInput(sepRow + 1, inputWidth);
+    int sepWidth = static_cast<int>(YGNodeLayoutGetWidth(separatorNode_));
+    renderSeparator(sepRow, sepWidth);
+    renderInput(inputRow + 1, inputWidth);
+    int waveBarRow = static_cast<int>(YGNodeLayoutGetTop(waveBarNode_));
+    int waveBarWidth = static_cast<int>(YGNodeLayoutGetWidth(waveBarNode_));
+    renderWaveBar(waveBarRow + 1, waveBarWidth);
     renderContextMenu(ts.rows, ts.cols);
 
     outputBuf_ += "\033[?2026l";
@@ -948,9 +1070,9 @@ void Tui::renderInputOnly() {
         render();
         return;
     }
-    int sepRow = static_cast<int>(YGNodeLayoutGetTop(separatorNode_));
+    int inputRow = static_cast<int>(YGNodeLayoutGetTop(inputNode_));
     int inputWidth = static_cast<int>(YGNodeLayoutGetWidth(inputNode_));
-    renderInput(sepRow + 1, inputWidth);
+    renderInput(inputRow + 1, inputWidth);
     outputBuf_ += "\033[?2026l";
     flush();
 }
@@ -1063,6 +1185,19 @@ bool Tui::handleContextMenuInput(char c) {
 bool Tui::handleEscapeSequence() {
     char seq[2];
     if (read(STDIN_FILENO, &seq[0], 1) <= 0) return false;
+
+    // Alt+Backspace: \033 \x7f
+    if (seq[0] == 127) {
+        // Delete previous word (same as Ctrl+W)
+        if (cursorPos_ > 0) {
+            int end = cursorPos_;
+            while (cursorPos_ > 0 && inputBuffer_[cursorPos_ - 1] == ' ') cursorPos_--;
+            while (cursorPos_ > 0 && inputBuffer_[cursorPos_ - 1] != ' ') cursorPos_--;
+            inputBuffer_.erase(cursorPos_, end - cursorPos_);
+        }
+        return true;
+    }
+
     if (read(STDIN_FILENO, &seq[1], 1) <= 0) return false;
 
     if (seq[0] != '[') return true;
@@ -1101,6 +1236,28 @@ bool Tui::handleEscapeSequence() {
             return true;
         }
         scrollOffset_ = std::max(0, scrollOffset_ - 15);
+        return true;
+    }
+
+    // Modified keys: \033[1;3C (Alt+Right), \033[1;3D (Alt+Left)
+    if (seq[1] == '1') {
+        char mod[2];
+        if (read(STDIN_FILENO, &mod[0], 1) <= 0) return true;
+        if (read(STDIN_FILENO, &mod[1], 1) <= 0) return true;
+        if (mod[0] == ';' && mod[1] == '3') {
+            char dir;
+            if (read(STDIN_FILENO, &dir, 1) <= 0) return true;
+            if (dir == 'C') {
+                // Alt+Right: move to end of next word
+                int len = static_cast<int>(inputBuffer_.size());
+                while (cursorPos_ < len && inputBuffer_[cursorPos_] == ' ') cursorPos_++;
+                while (cursorPos_ < len && inputBuffer_[cursorPos_] != ' ') cursorPos_++;
+            } else if (dir == 'D') {
+                // Alt+Left: move to start of previous word
+                while (cursorPos_ > 0 && inputBuffer_[cursorPos_ - 1] == ' ') cursorPos_--;
+                while (cursorPos_ > 0 && inputBuffer_[cursorPos_ - 1] != ' ') cursorPos_--;
+            }
+        }
         return true;
     }
 

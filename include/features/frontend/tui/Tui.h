@@ -48,6 +48,7 @@ class Tui {
     void renderCluster(int startRow, int height, int width);
     void renderMessages(int startRow, int height, int width);
     void renderTaskPane(int startRow, int height, int width);
+    void renderSeparator(int row, int width);
     void renderInput(int row, int width);
     void renderWaveBar(int row, int width);
 
@@ -79,9 +80,12 @@ class Tui {
         std::string text;
         int addedAtFrame = 0;
         bool isUser = false;
+        bool isCodeBlock = false;
+        bool isHeading = false;
     };
 
     std::vector<DisplayLine> wrapMessage(const AgentMessage& msg, int width);
+    void renderMarkdownLine(const std::string& text, int baseColor);
 
     int sockFd_;
     std::string currentChatId_ = "default";
@@ -175,6 +179,7 @@ class Tui {
     YGNodeRef contentNode_ = nullptr;
     YGNodeRef separatorNode_ = nullptr;
     YGNodeRef inputNode_ = nullptr;
+    YGNodeRef waveBarNode_ = nullptr;
 };
 
 }  // namespace area

@@ -2,9 +2,56 @@
 
 #include <cmath>
 #include <string>
+#include <vector>
 #include "infra/agent/Agent.h"
 
 namespace area::tui {
+
+/// A styled span within a markdown line.
+struct MarkdownSpan {
+    enum Style { NORMAL, BOLD, CODE };
+    Style style;
+    std::string text;
+};
+
+/// Parse inline markdown (** and `) into styled spans.
+inline std::vector<MarkdownSpan> parseMarkdownSpans(const std::string& text) {
+    std::vector<MarkdownSpan> spans;
+    size_t i = 0;
+    bool inBold = false;
+    bool inCode = false;
+    std::string current;
+
+    auto flush = [&](MarkdownSpan::Style style) {
+        if (!current.empty()) {
+            spans.push_back({style, current});
+            current.clear();
+        }
+    };
+
+    while (i < text.size()) {
+        if (!inCode && i + 1 < text.size() && text[i] == '*' && text[i + 1] == '*') {
+            auto prevStyle = inBold ? MarkdownSpan::BOLD : MarkdownSpan::NORMAL;
+            flush(prevStyle);
+            inBold = !inBold;
+            i += 2;
+            continue;
+        }
+        if (!inBold && text[i] == '`') {
+            auto prevStyle = inCode ? MarkdownSpan::CODE : MarkdownSpan::NORMAL;
+            flush(prevStyle);
+            inCode = !inCode;
+            i++;
+            continue;
+        }
+        current += text[i];
+        i++;
+    }
+    // Flush remaining
+    auto finalStyle = inBold ? MarkdownSpan::BOLD : inCode ? MarkdownSpan::CODE : MarkdownSpan::NORMAL;
+    flush(finalStyle);
+    return spans;
+}
 
 inline double flowNoise(double x, double t) {
     return std::sin(x * 0.3 + t * 0.007) * 0.5

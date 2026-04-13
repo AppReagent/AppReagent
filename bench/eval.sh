@@ -112,45 +112,55 @@ for sub in "${SUBDIRS[@]}"; do
     agent_out="$SCORES_DIR/$sub.agent.txt"
     verdict="$SCORES_DIR/$sub.verdict.json"
 
+    # --- Pre-fetch Ghidra data for every binary so the agent doesn't need to
+    # orchestrate tool calls; it just reads and writes. This sidesteps the
+    # "agent loops forever on tool calls" failure mode and keeps the bench
+    # measuring writeup quality, not tool orchestration.
+    ghidra_ctx="$SCORES_DIR/$sub.ghidra.txt"
+    : > "$ghidra_ctx"
+    for b in "${bins[@]}"; do
+        echo "" >> "$ghidra_ctx"
+        echo "========== GHIDRA: $b ==========" >> "$ghidra_ctx"
+        for mode in overview imports strings; do
+            echo "" >> "$ghidra_ctx"
+            echo "--- $mode ---" >> "$ghidra_ctx"
+            sudo "$AREA_BIN" ghidra "$b" "$mode" >> "$ghidra_ctx" 2>&1 || echo "(ghidra $mode failed)" >> "$ghidra_ctx"
+        done
+    done
+    echo "  prefetched: $(wc -l < "$ghidra_ctx") lines of Ghidra data"
+
     {
-        echo "You are a senior malware reverse engineer. Your job: produce ONE final writeup that answers the questions below. You have a hard budget of 20 tool calls — use them, then STOP calling tools and emit the writeup."
+        echo "You are a senior malware reverse engineer. Produce ONE final writeup answering the questions below using ONLY the Ghidra data provided. Do not invent addresses, function names, or string literals that aren't present in the Ghidra output — if something is not in the data, say \"unknown — not in provided Ghidra data\"."
         echo
-        echo "Binaries to analyze:"
-        for b in "${bins[@]}"; do echo "  - $b"; done
+        echo "You may issue additional GHIDRA tool calls if you need to see decompiled C for a specific function:"
+        echo "  GHIDRA: <path> | decompile | <FUN_name>"
+        echo "  GHIDRA: <path> | decompile | 0x<address>"
+        echo "  GHIDRA: <path> | xrefs | <FUN_name_or_address>"
+        echo "Budget: at most 10 such calls, then emit the final answer."
         echo
-        echo "Primary tool: GHIDRA. Modes: overview, imports, strings, decompile (by function name), xrefs (by function name). Ghidra runs on PE and ELF — use it."
-        echo
-        echo "Work plan:"
-        echo "  1. GHIDRA: <path> | overview        (format, arch, entry, function count)"
-        echo "  2. GHIDRA: <path> | imports          (imports + exports)"
-        echo "  3. GHIDRA: <path> | strings          (suspicious strings, with xref counts)"
-        echo "  4. For each suspicious string or interesting export, decompile the referencing function:"
-        echo "       GHIDRA: <path> | decompile | <FUN_name>"
-        echo "  5. For any function you want to know who calls it:"
-        echo "       GHIDRA: <path> | xrefs | <FUN_name>"
-        echo "  6. STOP calling tools. Emit the answer."
-        echo
-        echo "Final response format (exactly this shape — the framework parses it):"
-        echo "  THOUGHT: <brief wrap-up note>"
+        echo "Final response format (the framework parses this exactly):"
+        echo "  THOUGHT: <one line>"
         echo "  ANSWER: <writeup>"
-        echo "  ...markdown writeup, see questions below..."
+        echo "  ...markdown writeup addressing all questions..."
         echo "  </writeup>"
         echo
-        echo "The writeup MUST explicitly address these questions, in order, with hex addresses, function names (use whatever Ghidra assigned, e.g. FUN_10001656), counts, and string literals quoted exactly as Ghidra reports them. If a question is truly unanswerable with the tools you have, say \"unknown — needs capability X\" and move on. Do NOT loop on failing tool calls."
-        echo
-        echo "Questions (answer every one):"
+        echo "Questions (answer every one, cite hex addresses and exact strings from the Ghidra data):"
         echo "  1. File format, architecture, compiler, packer (if any)."
-        echo "  2. Entry point / DllMain / relevant exports — with addresses."
-        echo "  3. Key imports that hint at functionality — list them."
-        echo "  4. Most suspicious strings, quoted with addresses."
-        echo "  5. For each notable function Ghidra identified (pick ~5 most interesting): decompile, describe what it does in 2-3 sentences, cite the address."
-        echo "  6. Stack-constructed strings or obfuscated data — decode them if you can; if you can't, say \"unknown — needs stack_string_reconstruction\"."
-        echo "  7. Host-based indicators (files, registry keys, services, mutexes)."
-        echo "  8. Network-based indicators (domains, IPs, URLs, ports, protocols) — quote the strings."
+        echo "  2. Entry point / DllMain / relevant exports — with their addresses as shown."
+        echo "  3. Key imports that hint at functionality — list by name."
+        echo "  4. Most suspicious strings, quoted verbatim with addresses."
+        echo "  5. Name ~5 of the most interesting functions (by function name from the overview). For each, say in 2-3 sentences what you think it does based on imports/strings xrefs, cite its address. Decompile it only if needed."
+        echo "  6. Stack-constructed strings or XOR-obfuscated data visible in the provided data — decode them if you can; otherwise mark \"unknown — needs stack_string_reconstruction\" or \"unknown — needs xor_decode\"."
+        echo "  7. Host-based indicators visible in strings (files, registry keys, services, mutexes)."
+        echo "  8. Network-based indicators visible in strings (domains, IPs, URLs, ports, protocols) — quote the strings."
         echo "  9. Overall classification (dropper / C2 / spyware / ransomware / backdoor / keylogger / proxy / etc.) with confidence."
         echo " 10. Anything else notable — shellcode patterns, embedded resources, VM-detection tricks, crypto keys."
         echo
-        echo "Begin."
+        echo "========================= GHIDRA DATA ========================="
+        cat "$ghidra_ctx"
+        echo "===================== END GHIDRA DATA ========================="
+        echo
+        echo "Now emit the writeup."
     } > "$prompt_file"
 
     # Fresh chat id per entry so context doesn't bleed across entries

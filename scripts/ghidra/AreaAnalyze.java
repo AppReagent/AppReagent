@@ -113,12 +113,59 @@ public class AreaAnalyze extends GhidraScript {
         pw.print("  }");
     }
 
+    // Resolve a filter string to a specific Function. Supports both name
+    // substrings ("gethostbyname") and hex addresses ("0x10001656" or
+    // "10001656") — when the filter looks like an address, the function
+    // containing that address is returned.
+    private Function resolveFilterFunction(String filter) {
+        if (filter == null || filter.isEmpty()) return null;
+        Address addr = parseAddressMaybe(filter);
+        if (addr != null) {
+            Function f = getFunctionContaining(addr);
+            if (f != null) return f;
+            f = getFunctionAt(addr);
+            return f;
+        }
+        String nameLower = filter.toLowerCase();
+        FunctionIterator iter = currentProgram.getListing().getFunctions(true);
+        while (iter.hasNext()) {
+            Function f = iter.next();
+            if (f.getName().toLowerCase().contains(nameLower)) return f;
+        }
+        return null;
+    }
+
+    // Try to parse a filter string as a hex address. Returns null if it
+    // doesn't look like a hex number we can resolve against the program's
+    // default address space.
+    private Address parseAddressMaybe(String filter) {
+        if (filter == null || filter.isEmpty()) return null;
+        String s = filter.trim();
+        if (s.startsWith("0x") || s.startsWith("0X")) s = s.substring(2);
+        if (s.isEmpty() || s.length() > 16) return null;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            boolean isHex = (c >= '0' && c <= '9')
+                         || (c >= 'a' && c <= 'f')
+                         || (c >= 'A' && c <= 'F');
+            if (!isHex) return null;
+        }
+        try {
+            long val = Long.parseUnsignedLong(s, 16);
+            return currentProgram.getAddressFactory().getDefaultAddressSpace().getAddress(val);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private void writeFunctions(boolean decompile, String filter) throws Exception {
         sectionSep();
         pw.println("  \"functions\": [");
         firstEntry = true;
 
         String filterLower = filter.toLowerCase();
+        Function targeted = filter.isEmpty() ? null : resolveFilterFunction(filter);
+        boolean addressFilter = !filter.isEmpty() && parseAddressMaybe(filter) != null;
 
         DecompInterface decomp = null;
         if (decompile) {
@@ -134,7 +181,12 @@ public class AreaAnalyze extends GhidraScript {
             Function f = iter.next();
 
             if (!filterLower.isEmpty()) {
-                if (!f.getName().toLowerCase().contains(filterLower)) continue;
+                if (addressFilter) {
+                    // address-based: only emit the resolved function
+                    if (targeted == null || !f.getEntryPoint().equals(targeted.getEntryPoint())) continue;
+                } else {
+                    if (!f.getName().toLowerCase().contains(filterLower)) continue;
+                }
             }
 
             if (!decompile && f.isThunk() && filterLower.isEmpty()) continue;
@@ -293,21 +345,12 @@ public class AreaAnalyze extends GhidraScript {
         pw.println("  \"xrefs\": {");
 
         if (funcName.isEmpty()) {
-            pw.println("    \"error\": \"xrefs mode requires a function name filter\"");
+            pw.println("    \"error\": \"xrefs mode requires a function name or hex address filter\"");
             pw.print("  }");
             return;
         }
 
-        String nameLower = funcName.toLowerCase();
-        Function target = null;
-        FunctionIterator iter = currentProgram.getListing().getFunctions(true);
-        while (iter.hasNext()) {
-            Function f = iter.next();
-            if (f.getName().toLowerCase().contains(nameLower)) {
-                target = f;
-                break;
-            }
-        }
+        Function target = resolveFilterFunction(funcName);
 
         if (target == null) {
             pw.println("    \"error\": \"function not found: " + escJson(funcName) + "\"");

@@ -15,10 +15,16 @@ class GhidraTool : public Tool {
                "object files. Provides decompiled C code, function signatures, imports, "
                "exports, strings with cross-references, and call graphs.\n"
                "  Modes: overview (default), decompile, strings, imports, xrefs, all\n"
+               "  Filter: function name substring OR hex address (0x1000D02E or 1000D02E).\n"
+               "    When given an address, decompile and xrefs resolve to the function\n"
+               "    containing that address — use this to answer \"what does code at\n"
+               "    0xNNN do\" or \"who calls the code at 0xNNN\" questions.\n"
                "  Example: GHIDRA: /path/to/binary.elf\n"
                "  Example: GHIDRA: /path/to/binary.so | decompile | main\n"
+               "  Example: GHIDRA: /path/to/binary.dll | decompile | 0x10001656\n"
                "  Example: GHIDRA: /path/to/malware.elf | strings\n"
                "  Example: GHIDRA: /path/to/lib.o | xrefs | connect\n"
+               "  Example: GHIDRA: /path/to/binary.dll | xrefs | 0x1000D02E\n"
                "  Example: GHIDRA: /path/to/binary | all";
     }
     std::optional<ToolResult> tryExecute(const std::string& action, ToolContext& ctx) override;

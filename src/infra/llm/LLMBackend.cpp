@@ -151,7 +151,7 @@ std::string OllamaBackend::chat(const std::string& system,
     }
 
     std::string url = endpoint_.url + "/api/chat";
-    std::string raw = httpPost(url, body.dump(), "", 60, cancelFlag_);
+    std::string raw = httpPost(url, body.dump(), "", 180, cancelFlag_);
 
     auto j = nlohmann::json::parse(raw);
     if (j.contains("error")) {
@@ -195,7 +195,7 @@ ChatResult OpenAIBackend::chatWithUsage(const std::string& system,
     }
 
     std::string url = endpoint_.url + "/v1/chat/completions";
-    std::string raw = httpPost(url, body.dump(), endpoint_.api_key, 60, cancelFlag_);
+    std::string raw = httpPost(url, body.dump(), endpoint_.api_key, 180, cancelFlag_);
     auto result = extractResult(raw, endpoint_.id);
     totalPromptTokens += result.usage.prompt_tokens;
     totalCompletionTokens += result.usage.completion_tokens;

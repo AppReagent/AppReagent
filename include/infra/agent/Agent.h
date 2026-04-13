@@ -69,8 +69,8 @@ class Agent {
     EventBus* eventBus_ = nullptr;
     std::string chatId_;
 
-    static constexpr int MAX_ITERATIONS = 25;
-    static constexpr int ITERATION_WARNING = 20;
+    static constexpr int MAX_ITERATIONS = 40;
+    static constexpr int ITERATION_WARNING = 30;
     static constexpr double COMPRESS_THRESHOLD = 0.9;
 };
 

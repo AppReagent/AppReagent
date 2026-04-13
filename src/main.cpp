@@ -26,6 +26,7 @@
 #include "infra/config/Config.h"
 #include "infra/db/Database.h"
 #include "infra/agent/Harness.h"
+#include "features/ghidra/GhidraTool.h"
 #include "features/scan/ScanCommand.h"
 #include "features/frontend/tui/Tui.h"
 #include "features/frontend/ws/WebSocketFrontend.h"
@@ -249,6 +250,45 @@ static void processChatResponse(int sockFd) {
     }
 }
 
+static int cmdGhidra(area::ArgParse& args) {
+    auto path = args.getPositionalArg(2);
+    if (!path) {
+        std::cerr << "Usage: area ghidra <binary> [mode] [filter]" << std::endl;
+        std::cerr << "  modes: overview (default), decompile, strings, imports, xrefs, all" << std::endl;
+        std::cerr << "  filter: function name substring or hex address (0x1000D02E)" << std::endl;
+        return 1;
+    }
+
+    auto mode = args.getPositionalArg(3).value_or("overview");
+    auto filter = args.getPositionalArg(4).value_or("");
+
+    area::GhidraTool tool;
+    area::Harness harness;
+    area::ToolContext ctx{
+        [](const area::AgentMessage& msg) {
+            if (msg.type == area::AgentMessage::RESULT ||
+                msg.type == area::AgentMessage::ANSWER) {
+                std::cout << msg.content << std::endl;
+            } else if (msg.type == area::AgentMessage::ERROR) {
+                std::cerr << msg.content << std::endl;
+            }
+        },
+        nullptr,
+        harness,
+    };
+
+    std::string action = "GHIDRA: " + *path + " | " + mode;
+    if (!filter.empty()) action += " | " + filter;
+
+    auto result = tool.tryExecute(action, ctx);
+    if (!result) {
+        std::cerr << "GhidraTool did not accept action" << std::endl;
+        return 1;
+    }
+    bool failed = result->observation.find("Error") != std::string::npos;
+    return failed ? 1 : 0;
+}
+
 static int cmdChat(area::ArgParse& args) {
     int sockFd = connectToServer();
     if (sockFd < 0) {
@@ -392,6 +432,7 @@ int main(int argc, char* argv[]) {
         {"server",      [&] { return cmdServer(config); }},
         {"kill-server", [&] { return cmdKillServer(); }},
         {"chat",        [&] { return cmdChat(args); }},
+        {"ghidra",      [&] { return cmdGhidra(args); }},
         {"evaluate",    [&] { return cmdEvaluate(config, db); }},
         {"improve",     [&] { return cmdImprove(config, db, args); }},
         {"tui",         [&] { return cmdTui(config); }},

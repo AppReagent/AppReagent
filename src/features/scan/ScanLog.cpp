@@ -52,19 +52,79 @@ void ScanLog::dropTables() {
     db_.execute("DROP TABLE IF EXISTS scan_files CASCADE");
 }
 
+static std::vector<std::string> splitSqlStatements(const std::string& sql) {
+    std::vector<std::string> out;
+    std::string cur;
+    std::string dollarTag;  // non-empty when inside $tag$...$tag$
+    char strQuote = 0;      // 0, '\'', or '"'
+    bool inLineComment = false;
+    bool inBlockComment = false;
+
+    auto matchDollarTag = [&](size_t i) -> std::string {
+        if (sql[i] != '$') return {};
+        size_t j = i + 1;
+        while (j < sql.size() && (isalnum(static_cast<unsigned char>(sql[j])) || sql[j] == '_')) j++;
+        if (j < sql.size() && sql[j] == '$') return sql.substr(i, j - i + 1);
+        return {};
+    };
+
+    for (size_t i = 0; i < sql.size();) {
+        char c = sql[i];
+        char n = i + 1 < sql.size() ? sql[i + 1] : 0;
+
+        if (inLineComment) {
+            cur += c;
+            if (c == '\n') inLineComment = false;
+            i++; continue;
+        }
+        if (inBlockComment) {
+            cur += c;
+            if (c == '*' && n == '/') { cur += n; i += 2; inBlockComment = false; continue; }
+            i++; continue;
+        }
+        if (!dollarTag.empty()) {
+            if (c == '$') {
+                auto tag = matchDollarTag(i);
+                if (tag == dollarTag) { cur += tag; i += tag.size(); dollarTag.clear(); continue; }
+            }
+            cur += c; i++; continue;
+        }
+        if (strQuote) {
+            cur += c;
+            if (c == strQuote) strQuote = 0;
+            i++; continue;
+        }
+
+        if (c == '-' && n == '-') { cur += c; cur += n; i += 2; inLineComment = true; continue; }
+        if (c == '/' && n == '*') { cur += c; cur += n; i += 2; inBlockComment = true; continue; }
+        if (c == '\'' || c == '"') { strQuote = c; cur += c; i++; continue; }
+        if (c == '$') {
+            auto tag = matchDollarTag(i);
+            if (!tag.empty()) { dollarTag = tag; cur += tag; i += tag.size(); continue; }
+        }
+        if (c == ';') {
+            out.push_back(cur);
+            cur.clear();
+            i++; continue;
+        }
+        cur += c; i++;
+    }
+    if (!cur.empty()) out.push_back(cur);
+    return out;
+}
+
 void ScanLog::ensureTables() {
     std::string ddl = loadDDL();
 
-    std::istringstream ss(ddl);
-    std::string stmt;
-    while (std::getline(ss, stmt, ';')) {
-        while (!stmt.empty() && (stmt[0] == ' ' || stmt[0] == '\n' || stmt[0] == '\r')) stmt.erase(0, 1);
-        while (!stmt.empty() && (stmt.back() == ' ' || stmt.back() == '\n' || stmt.back() == '\r')) stmt.pop_back();
-        if (!stmt.empty()) {
-            auto qr = db_.execute(stmt);
-            if (!qr.ok()) {
-                std::cerr << "[ddl] warning: " << qr.error << std::endl;
-            }
+    for (auto& stmt : splitSqlStatements(ddl)) {
+        while (!stmt.empty() && (stmt[0] == ' ' || stmt[0] == '\n' || stmt[0] == '\r' || stmt[0] == '\t'))
+            stmt.erase(0, 1);
+        while (!stmt.empty() && (stmt.back() == ' ' || stmt.back() == '\n' || stmt.back() == '\r' || stmt.back() == '\t'))
+            stmt.pop_back();
+        if (stmt.empty()) continue;
+        auto qr = db_.execute(stmt);
+        if (!qr.ok()) {
+            std::cerr << "[ddl] warning: " << qr.error << std::endl;
         }
     }
 }

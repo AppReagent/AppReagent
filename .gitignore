@@ -37,6 +37,9 @@ ca-certificate.crt
 # Improve output
 .improve-output/
 
+# Bench scores + runtime artifacts — never commit
+bench/.scores/
+
 # Test output
 area_tests
 

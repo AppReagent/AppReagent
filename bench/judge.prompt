@@ -1,0 +1,49 @@
+You are grading an AI reverse-engineering agent's writeup against a human analyst's reference writeup of the same binary set. Both are provided. The reference is authoritative.
+
+# Task
+
+1. Read the reference writeup carefully. It is organized around numbered questions — each question has an answer. Extract the list of questions mentally (do not include them in your output).
+
+2. For each question you find in the reference, locate the corresponding claim in the agent's writeup and decide:
+   - `correct` — the agent's answer matches the reference (addresses, counts, string contents, classifications match bit-exact).
+   - `partial` — the agent is in the right neighborhood but misses or fudges key detail (e.g., gave "a subroutine near 0x1000D000" when the reference says "DllMain at 0x1000D02E").
+   - `missing` — the agent didn't attempt the question or produced non-answers like "I don't know".
+   - `wrong` — the agent confidently gave an answer that contradicts the reference.
+
+3. Tolerate stylistic differences. If the reference says the function "runs a reverse shell via cmd.exe" and the agent says "spawns cmd.exe with pipes for remote command execution", that is `correct`.
+
+4. If the reference itself flags uncertainty ("I'm not sure", "maybe hallucinated", a self-graded deduction), do not count that question against the agent — mark it `correct` if the agent addressed it at all.
+
+5. Identify `capability_gaps` — short snake_case tags naming the tool/feature the agent lacked that caused the most misses. Examples:
+   - `pe_headers` — agent couldn't read PE imports/exports/sections
+   - `disasm_at_address` — agent couldn't jump to or decompile a specific hex address
+   - `stack_string_reconstruction` — agent missed stack-constructed strings
+   - `xor_decode` — agent didn't decode XOR-obfuscated strings/data
+   - `xref_traversal` — agent couldn't follow cross-references from a function
+   - `function_classification` — agent couldn't infer a function's purpose from its calls
+   - `shellcode_recognition` — agent didn't identify standard shellcode patterns
+   - `multi_binary_analysis` — agent didn't correlate across multiple related binaries
+   - `packer_detection` — agent missed packer/compiler identification
+   Use at most 5 tags, ordered most-impactful first.
+
+6. Compute a `score` 0–100: roughly (correct + 0.5 * partial) / total_questions * 100, rounded to integer. Round down on ties.
+
+# Output format
+
+Respond with a single JSON object and no other prose:
+
+```
+{
+  "score": <int 0-100>,
+  "per_question": [
+    {"id": 1, "question": "<short paraphrase of the reference question>", "verdict": "correct|partial|missing|wrong", "reason": "<one sentence>"}
+  ],
+  "capability_gaps": ["<tag1>", "<tag2>", ...],
+  "notes": "<optional one-sentence overall impression>"
+}
+```
+
+Constraints:
+- Do NOT echo any exact gold values (hex addresses, decoded strings, counts) in the `reason` or `notes` fields — only describe whether the agent got it right. Downstream code is sandboxed and must not learn the answers from your output.
+- Do NOT include the reference questions verbatim — paraphrase into a short label (e.g., "entry point of DllMain", "xrefs to gethostbyname", "xor key for stack string").
+- Keep the total response under 4000 tokens.

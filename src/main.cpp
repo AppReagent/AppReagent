@@ -263,9 +263,16 @@ static int cmdChat(area::ArgParse& args) {
     waitForState(sockFd);
 
     std::vector<std::string> queries;
-    std::string line;
-    while (std::getline(std::cin, line)) {
-        if (!line.empty()) queries.push_back(line);
+    if (isatty(fileno(stdin))) {
+        std::string line;
+        while (std::getline(std::cin, line)) {
+            if (!line.empty()) queries.push_back(line);
+        }
+    } else {
+        std::string all((std::istreambuf_iterator<char>(std::cin)),
+                        std::istreambuf_iterator<char>());
+        while (!all.empty() && (all.back() == '\n' || all.back() == '\r')) all.pop_back();
+        if (!all.empty()) queries.push_back(all);
     }
 
     for (auto& query : queries) {

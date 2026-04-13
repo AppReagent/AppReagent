@@ -113,24 +113,44 @@ for sub in "${SUBDIRS[@]}"; do
     verdict="$SCORES_DIR/$sub.verdict.json"
 
     {
-        echo "You are a senior malware reverse engineer. Produce a thorough RE writeup for the following binaries. Use the GHIDRA tool aggressively — one call per mode (overview, imports, strings, decompile, xrefs) per binary is the floor. When the question asks about a specific address, function, count, or decoded string, give the bit-exact answer. When uncertain, say so."
+        echo "You are a senior malware reverse engineer. Your job: produce ONE final writeup that answers the questions below. You have a hard budget of 20 tool calls — use them, then STOP calling tools and emit the writeup."
         echo
-        echo "Answer these canonical questions for each binary (PMA-style):"
-        echo "  1. File format, architecture, compiler, packer (if any)."
-        echo "  2. Key imports that hint at functionality."
-        echo "  3. Most suspicious strings (quote hex addresses)."
-        echo "  4. Entry-point address (main / DllMain / export of interest)."
-        echo "  5. For each notable subroutine: decompile, name its purpose, cite address."
-        echo "  6. Stack strings and obfuscated data — decode them explicitly."
-        echo "  7. Host-based indicators (files, registry, services, mutexes)."
-        echo "  8. Network-based indicators (domains, IPs, URLs, ports, protocols)."
-        echo "  9. Overall classification (dropper / C2 / spyware / ransomware / backdoor / etc.) with confidence."
-        echo " 10. Anything else notable — shellcode, embedded resources, VM-detection, crypto keys."
-        echo
-        echo "Binaries:"
+        echo "Binaries to analyze:"
         for b in "${bins[@]}"; do echo "  - $b"; done
         echo
-        echo "Write the final writeup in markdown between <writeup>…</writeup> tags. Use the GHIDRA tool — do not guess."
+        echo "Primary tool: GHIDRA. Modes: overview, imports, strings, decompile (by function name), xrefs (by function name). Ghidra runs on PE and ELF — use it."
+        echo
+        echo "Work plan:"
+        echo "  1. GHIDRA: <path> | overview        (format, arch, entry, function count)"
+        echo "  2. GHIDRA: <path> | imports          (imports + exports)"
+        echo "  3. GHIDRA: <path> | strings          (suspicious strings, with xref counts)"
+        echo "  4. For each suspicious string or interesting export, decompile the referencing function:"
+        echo "       GHIDRA: <path> | decompile | <FUN_name>"
+        echo "  5. For any function you want to know who calls it:"
+        echo "       GHIDRA: <path> | xrefs | <FUN_name>"
+        echo "  6. STOP calling tools. Emit the answer."
+        echo
+        echo "Final response format (exactly this shape — the framework parses it):"
+        echo "  THOUGHT: <brief wrap-up note>"
+        echo "  ANSWER: <writeup>"
+        echo "  ...markdown writeup, see questions below..."
+        echo "  </writeup>"
+        echo
+        echo "The writeup MUST explicitly address these questions, in order, with hex addresses, function names (use whatever Ghidra assigned, e.g. FUN_10001656), counts, and string literals quoted exactly as Ghidra reports them. If a question is truly unanswerable with the tools you have, say \"unknown — needs capability X\" and move on. Do NOT loop on failing tool calls."
+        echo
+        echo "Questions (answer every one):"
+        echo "  1. File format, architecture, compiler, packer (if any)."
+        echo "  2. Entry point / DllMain / relevant exports — with addresses."
+        echo "  3. Key imports that hint at functionality — list them."
+        echo "  4. Most suspicious strings, quoted with addresses."
+        echo "  5. For each notable function Ghidra identified (pick ~5 most interesting): decompile, describe what it does in 2-3 sentences, cite the address."
+        echo "  6. Stack-constructed strings or obfuscated data — decode them if you can; if you can't, say \"unknown — needs stack_string_reconstruction\"."
+        echo "  7. Host-based indicators (files, registry keys, services, mutexes)."
+        echo "  8. Network-based indicators (domains, IPs, URLs, ports, protocols) — quote the strings."
+        echo "  9. Overall classification (dropper / C2 / spyware / ransomware / backdoor / keylogger / proxy / etc.) with confidence."
+        echo " 10. Anything else notable — shellcode patterns, embedded resources, VM-detection tricks, crypto keys."
+        echo
+        echo "Begin."
     } > "$prompt_file"
 
     # Fresh chat id per entry so context doesn't bleed across entries

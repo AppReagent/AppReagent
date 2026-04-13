@@ -127,7 +127,7 @@ payload = {
 # Allow overriding the judge model via env. Default to a known-fast,
 # non-reasoning model — reasoning models burn the max_tokens budget on
 # internal thinking and return empty content.
-JUDGE_MODEL_OVERRIDE = os.environ.get("BENCH_JUDGE_MODEL", "openai/gpt-oss-120b")
+JUDGE_MODEL_OVERRIDE = os.environ.get("BENCH_JUDGE_MODEL", "zai-org/GLM-5.1-FP8")
 
 def call_llm(ep_url: str, ep_model: str, ep_key: str) -> dict:
     req_url = ep_url.rstrip("/")

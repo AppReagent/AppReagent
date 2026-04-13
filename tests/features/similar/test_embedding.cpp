@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "infra/llm/Embedding.h"
+#include "infra/llm/RagProvider.h"
 #include "infra/config/Config.h"
 
 using namespace area;
@@ -21,6 +22,47 @@ TEST_F(EmbeddingHelperTest, EmbedAndStoreSkipsWithoutBackend) {
     EmbeddingStore store(db_);
     // Should not throw — just silently skips
     EXPECT_NO_THROW(store.embedAndStore("run1", "/path", "hash", "Class", "method", "content"));
+}
+
+TEST_F(EmbeddingHelperTest, RagProviderNullWhenNoEmbeddingConfig) {
+    Config cfg;
+    auto rag = RagProvider::create(cfg, db_);
+    EXPECT_EQ(rag, nullptr);
+}
+
+TEST_F(EmbeddingHelperTest, RagProviderNullForUnknownProvider) {
+    Config cfg;
+    EmbeddingEndpoint ep;
+    ep.provider = "bogus";
+    cfg.embedding = ep;
+    auto rag = RagProvider::create(cfg, db_);
+    EXPECT_EQ(rag, nullptr);
+}
+
+TEST_F(EmbeddingHelperTest, RagProviderVultrRequiresCollectionId) {
+    Config cfg;
+    EmbeddingEndpoint ep;
+    ep.provider = "vultr";
+    ep.url = "https://api.vultrinference.com";
+    ep.api_key = "test-key";
+    // collection_id intentionally left blank
+    cfg.embedding = ep;
+    auto rag = RagProvider::create(cfg, db_);
+    ASSERT_NE(rag, nullptr);
+    EXPECT_FALSE(rag->available());
+}
+
+TEST_F(EmbeddingHelperTest, RagProviderVultrAvailableWithCollectionId) {
+    Config cfg;
+    EmbeddingEndpoint ep;
+    ep.provider = "vultr";
+    ep.url = "https://api.vultrinference.com";
+    ep.api_key = "test-key";
+    ep.collection_id = "test_collection";
+    cfg.embedding = ep;
+    auto rag = RagProvider::create(cfg, db_);
+    ASSERT_NE(rag, nullptr);
+    EXPECT_TRUE(rag->available());  // flags-only check; actual HTTP not exercised
 }
 
 TEST(EmbeddingBackendTest, CreateOllamaBackend) {

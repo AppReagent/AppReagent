@@ -54,9 +54,10 @@ Config Config::load(const std::string& path) {
         EmbeddingEndpoint ep;
         ep.provider = emb.at("provider").get<std::string>();
         ep.url = emb.value("url", "");
-        ep.model = emb.at("model").get<std::string>();
+        ep.model = emb.value("model", "");
         ep.api_key = emb.value("api_key", "");
         ep.dimensions = emb.value("dimensions", 768);
+        ep.collection_id = emb.value("collection_id", "");
         c.embedding = std::move(ep);
     }
 

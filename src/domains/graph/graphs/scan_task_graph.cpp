@@ -1,5 +1,7 @@
 #include "domains/graph/graphs/scan_task_graph.h"
 
+#include "infra/llm/RagProvider.h"
+
 #include <bits/std_abs.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -729,7 +731,7 @@ static nlohmann::json computeMethodStaticAnalysis(const std::string& methodBody)
 
 TaskGraph buildScanTaskGraph(const TierBackends& backends,
                              const std::string& prompts_dir,
-                             area::EmbeddingStore* embeddingStore) {
+                             area::RagProvider* rag) {
     TaskGraph g("ScanTask");
 
     auto read_file = g.add<CodeNode>("read_file", [](TaskContext ctx) {
@@ -1094,7 +1096,7 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
         ctx.discard_reason = "not_relevant";
     });
 
-    auto rag_enrich = g.add<CodeNode>("rag_enrich", [embeddingStore](TaskContext ctx) {
+    auto rag_enrich = g.add<CodeNode>("rag_enrich", [rag](TaskContext ctx) {
         if (ctx.has("method_calls")) {
             try {
                 auto calls = ctx.get("method_calls");
@@ -1118,7 +1120,7 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
             ctx.set("call_graph_context", "");
         }
 
-        if (!embeddingStore || !embeddingStore->hasBackend()) return ctx;
+        if (!rag || !rag->available()) return ctx;
 
         std::string methodBody = ctx.has("method_body") ? ctx.get("method_body").get<std::string>() : "";
         std::string methodName = ctx.has("method_name") ? ctx.get("method_name").get<std::string>() : "";
@@ -1137,7 +1139,7 @@ TaskGraph buildScanTaskGraph(const TierBackends& backends,
         }
 
         try {
-            auto results = embeddingStore->searchByText(query, 3);
+            auto results = rag->searchByText(query, 3);
             if (!results.empty()) {
                 std::ostringstream rag;
                 for (size_t i = 0; i < results.size(); i++) {

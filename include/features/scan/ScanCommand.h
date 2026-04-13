@@ -9,7 +9,7 @@
 
 #include "infra/config/Config.h"
 #include "infra/db/Database.h"
-#include "infra/llm/Embedding.h"
+#include "infra/llm/RagProvider.h"
 #include "features/scan/ScanLog.h"
 #include "features/scan/ScanOutputFile.h"
 #include <nlohmann/json.hpp>
@@ -90,8 +90,7 @@ using LogCallback = std::function<void(const std::string& message)>;
     LogCallback logCb_;
     std::shared_ptr<std::atomic<bool>> interrupt_;
     EventBus* events_ = nullptr;
-    std::unique_ptr<EmbeddingBackend> embeddingBackend_;
-    std::unique_ptr<EmbeddingStore> embeddingStore_;
+    std::unique_ptr<RagProvider> rag_;
 };
 
 }  // namespace area

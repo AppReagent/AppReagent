@@ -7,7 +7,7 @@
 #include "infra/tools/Tool.h"
 #include "infra/config/Config.h"
 #include "infra/db/Database.h"
-#include "infra/llm/Embedding.h"
+#include "infra/llm/RagProvider.h"
 
 namespace area {
 
@@ -25,11 +25,10 @@ class SimilarTool : public Tool {
     }
     std::optional<ToolResult> tryExecute(const std::string& action, ToolContext& ctx) override;
 
-    bool available() const { return store_ && store_->hasBackend(); }
+    bool available() const { return rag_ && rag_->available(); }
 
  private:
-    std::unique_ptr<EmbeddingBackend> backend_;
-    std::unique_ptr<EmbeddingStore> store_;
+    std::unique_ptr<RagProvider> rag_;
 };
 
 }  // namespace area

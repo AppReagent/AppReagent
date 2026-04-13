@@ -18,11 +18,12 @@ struct AiEndpoint {
 };
 
 struct EmbeddingEndpoint {
-    std::string provider;
+    std::string provider;        // "openai" | "ollama" | "lmstudio" | "vultr"
     std::string url;
-    std::string model;
+    std::string model;           // unused when provider == "vultr"
     std::string api_key;
-    int dimensions = 768;
+    int dimensions = 768;        // unused when provider == "vultr"
+    std::string collection_id;   // only for provider == "vultr"
 };
 
 struct Config {

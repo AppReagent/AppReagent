@@ -12,12 +12,8 @@
 
 namespace area {
 SimilarTool::SimilarTool(const Config* config, Database& db) {
-    if (config && config->embedding.has_value()) {
-        try {
-            backend_ = EmbeddingBackend::create(*config->embedding);
-            store_ = std::make_unique<EmbeddingStore>(db, backend_.get());
-        } catch (const std::exception& e) {
-        }
+    if (config) {
+        rag_ = RagProvider::create(*config, db);
     }
 }
 
@@ -33,16 +29,16 @@ std::optional<ToolResult> SimilarTool::tryExecute(const std::string& action, Too
         return ToolResult{"OBSERVATION: Error — provide a search query after SIMILAR:"};
     }
 
-    if (!store_ || !store_->hasBackend()) {
+    if (!rag_ || !rag_->available()) {
         return ToolResult{"OBSERVATION: Error — embedding search not available. "
                           "Configure an embedding endpoint in config.json."};
     }
 
     ctx.cb({AgentMessage::THINKING, "Searching embeddings: " + query});
 
-    std::vector<EmbeddingStore::SearchResult> results;
+    std::vector<RagSearchResult> results;
     try {
-        results = store_->searchByText(query, 10);
+        results = rag_->searchByText(query, 10);
     } catch (const std::exception& e) {
         ctx.cb({AgentMessage::ERROR, std::string("Embedding search failed: ") + e.what()});
         return ToolResult{"OBSERVATION: Embedding search failed: " + std::string(e.what())};

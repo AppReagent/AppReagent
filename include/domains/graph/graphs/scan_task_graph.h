@@ -6,7 +6,7 @@
 #include "domains/graph/engine/task_graph.h"
 #include "infra/llm/LLMBackend.h"
 
-namespace area { class EmbeddingStore; }
+namespace area { class RagProvider; }
 
 namespace area::graph {
 
@@ -20,6 +20,6 @@ std::string loadPrompt(const std::string& path);
 
 TaskGraph buildScanTaskGraph(const TierBackends& backends,
                              const std::string& prompts_dir = "prompts",
-                             area::EmbeddingStore* embeddingStore = nullptr);
+                             area::RagProvider* rag = nullptr);
 
 }  // namespace area::graph

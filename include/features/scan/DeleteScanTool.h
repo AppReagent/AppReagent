@@ -9,10 +9,12 @@ namespace area {
 
 class Database;
 class ScanState;
+struct Config;
 
 class DeleteScanTool : public Tool {
  public:
-    DeleteScanTool(Database& db, ScanState* state) : db_(db), state_(state) {}
+    DeleteScanTool(const Config* config, Database& db, ScanState* state)
+        : config_(config), db_(db), state_(state) {}
 
     std::string name() const override { return "DELETE_SCAN"; }
     std::string description() const override {
@@ -21,6 +23,7 @@ class DeleteScanTool : public Tool {
     std::optional<ToolResult> tryExecute(const std::string& action, ToolContext& ctx) override;
 
  private:
+    const Config* config_;
     Database& db_;
     ScanState* state_;
 };

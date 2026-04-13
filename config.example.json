@@ -52,6 +52,21 @@
         }
         */
     ],
+    // RAG backend — pick one:
+    //
+    // (a) Managed RAG via Vultr serverless inference: Vultr hosts the
+    //     embedding model and the vector store. Requires a collection
+    //     created via POST /v1/vector_store.
+    "embedding": {
+        "provider": "vultr",
+        "url": "https://api.vultrinference.com",
+        "api_key": "...",
+        "collection_id": "appreagent"
+    },
+    // (b) Custom RAG — your own embedding model (OpenAI / Ollama / LM Studio)
+    //     plus a local pgvector table. Replace the block above with this
+    //     if you'd rather bring your own embeddings.
+    /*
     "embedding": {
         "provider": "openai",
         "url": "https://api.openai.com",
@@ -59,6 +74,7 @@
         "api_key": "sk-...",
         "dimensions": 1536
     },
+    */
     "job_batch_size": 10,
     "flush_timeout_sec": 15,
     "theme": "dark"

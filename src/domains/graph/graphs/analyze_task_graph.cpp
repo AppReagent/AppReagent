@@ -19,7 +19,7 @@
 namespace area::graph {
 TaskGraph buildAnalyzeTaskGraph(const TierBackends& backends,
                                 Database& db,
-                                EmbeddingStore* embeddingStore,
+                                RagProvider* rag,
                                 const std::string& prompts_dir) {
     TaskGraph g("AnalyzeTask");
 
@@ -129,15 +129,15 @@ TaskGraph buildAnalyzeTaskGraph(const TierBackends& backends,
         return items;
     });
 
-    auto rag_retrieve = g.add<CodeNode>("rag_retrieve", [embeddingStore](TaskContext ctx) {
+    auto rag_retrieve = g.add<CodeNode>("rag_retrieve", [rag](TaskContext ctx) {
         std::string finding = ctx.has("finding") ? ctx.get("finding").get<std::string>() : "";
         std::string runId = ctx.has("run_id") ? ctx.get("run_id").get<std::string>() : "";
 
         std::string ragContext = "(no similar methods found in corpus)";
 
-        if (embeddingStore && embeddingStore->hasBackend() && !finding.empty()) {
+        if (rag && rag->available() && !finding.empty()) {
             try {
-                auto results = embeddingStore->searchByText(finding, 5, runId);
+                auto results = rag->searchByText(finding, 5, runId);
 
                 if (!results.empty()) {
                     std::ostringstream ss;

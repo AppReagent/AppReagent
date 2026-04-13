@@ -33,14 +33,7 @@ namespace fs = std::filesystem;
 namespace area {
 ScanCommand::ScanCommand(const Config& config, Database& db)
     : config_(config), db_(db), log_(db) {
-    if (config.embedding.has_value()) {
-        try {
-            embeddingBackend_ = EmbeddingBackend::create(*config.embedding);
-            embeddingStore_ = std::make_unique<EmbeddingStore>(db, embeddingBackend_.get());
-        } catch (const std::exception& e) {
-            std::cerr << "[scan] embedding init failed: " << e.what() << std::endl;
-        }
-    }
+    rag_ = RagProvider::create(config, db);
 }
 
 static bool fileHasElfMagic(const std::string& path) {
@@ -309,7 +302,7 @@ ScanSummary ScanCommand::run(const std::string& target_path, const std::string& 
 
     emitLog("Scanning " + std::to_string(files.size()) + " files (run " + runId + ")");
 
-    graph::TaskGraph graph = graph::buildScanTaskGraph(backends, promptsDir, embeddingStore_.get());
+    graph::TaskGraph graph = graph::buildScanTaskGraph(backends, promptsDir, rag_.get());
     graph::GraphRunner runner;
 
     runner.setMaxParallel(pool.totalConcurrency());
@@ -402,14 +395,14 @@ ScanSummary ScanCommand::run(const std::string& target_path, const std::string& 
                 prompt, promptHash, response, 0);
             output_.writeLLMCall(filePath, fileHash, nodeName, prompt, response, 0);
 
-            if (nodeName == "deep_analysis" && embeddingStore_ && embeddingStore_->hasBackend()) {
+            if (nodeName == "deep_analysis" && rag_ && rag_->available()) {
                 std::string className = ctx.has("class_name") ? ctx.get("class_name").get<std::string>() : "";
                 std::string methodName = ctx.has("method_name") ? ctx.get("method_name").get<std::string>() : "";
                 std::string methodBody = ctx.has("method_body") ? ctx.get("method_body").get<std::string>() : "";
 
                 std::string content = methodBody + "\n\n--- Analysis ---\n" + response;
-                embeddingStore_->embedAndStore(runId, filePath, fileHash,
-                                              className, methodName, content);
+                rag_->addDocument(runId, filePath, fileHash,
+                                  className, methodName, content);
             }
         }
     });

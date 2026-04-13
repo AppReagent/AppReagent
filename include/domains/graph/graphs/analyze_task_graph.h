@@ -5,13 +5,13 @@
 #include "domains/graph/engine/task_graph.h"
 #include "domains/graph/graphs/scan_task_graph.h"
 #include "infra/db/Database.h"
-#include "infra/llm/Embedding.h"
+#include "infra/llm/RagProvider.h"
 
 namespace area::graph {
 
 TaskGraph buildAnalyzeTaskGraph(const TierBackends& backends,
                                 Database& db,
-                                EmbeddingStore* embeddingStore,
+                                RagProvider* rag,
                                 const std::string& prompts_dir = "prompts");
 
 }

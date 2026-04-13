@@ -6,7 +6,7 @@
 
 #include "infra/config/Config.h"
 #include "infra/db/Database.h"
-#include "infra/llm/Embedding.h"
+#include "infra/llm/RagProvider.h"
 
 namespace area {
 class EventBus;
@@ -42,8 +42,7 @@ class AnalyzeCommand {
 
     const Config& config_;
     Database& db_;
-    std::unique_ptr<EmbeddingBackend> embeddingBackend_;
-    std::unique_ptr<EmbeddingStore> embeddingStore_;
+    std::unique_ptr<RagProvider> rag_;
     LogCallback logCb_;
     EventBus* events_ = nullptr;
     bool forceReanalyze_ = false;

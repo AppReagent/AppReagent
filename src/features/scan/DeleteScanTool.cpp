@@ -5,7 +5,8 @@
 
 #include "infra/tools/ToolContext.h"
 #include "infra/agent/Agent.h"
-#include "infra/llm/Embedding.h"
+#include "infra/config/Config.h"
+#include "infra/llm/RagProvider.h"
 #include "features/scan/ScanLog.h"
 #include "features/scan/ScanState.h"
 
@@ -28,8 +29,10 @@ std::optional<ToolResult> DeleteScanTool::tryExecute(const std::string& action, 
     ScanLog log(db_);
     log.deleteRun(runId);
 
-    EmbeddingStore embStore(db_);
-    embStore.deleteRun(runId);
+    if (config_) {
+        auto rag = RagProvider::create(*config_, db_);
+        if (rag) rag->deleteRun(runId);
+    }
 
     if (state_) state_->removePaused(runId);
 

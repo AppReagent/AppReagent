@@ -159,7 +159,7 @@ std::shared_ptr<ChatSession> AreaServer::getOrCreateChat(const std::string& id,
         session->tools->add(std::make_unique<StateTool>(&scanState_));
         session->tools->add(std::make_unique<PauseScanTool>(&scanState_));
         session->tools->add(std::make_unique<ResumeScanTool>(&config_, db_, &scanState_, id));
-        session->tools->add(std::make_unique<DeleteScanTool>(db_, &scanState_));
+        session->tools->add(std::make_unique<DeleteScanTool>(&config_, db_, &scanState_));
         session->tools->add(std::make_unique<ShellTool>(session->sandbox.get()));
         session->tools->add(std::make_unique<FindFilesTool>());
         session->tools->add(std::make_unique<GrepTool>());

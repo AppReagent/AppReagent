@@ -23,14 +23,7 @@ namespace fs = std::filesystem;
 namespace area {
 AnalyzeCommand::AnalyzeCommand(const Config& config, Database& db)
     : config_(config), db_(db) {
-    if (config.embedding.has_value()) {
-        try {
-            embeddingBackend_ = EmbeddingBackend::create(*config.embedding);
-            embeddingStore_ = std::make_unique<EmbeddingStore>(db, embeddingBackend_.get());
-        } catch (const std::exception& e) {
-            std::cerr << "[analyze] embedding init failed: " << e.what() << std::endl;
-        }
-    }
+    rag_ = RagProvider::create(config, db);
 }
 
 void AnalyzeCommand::emitLog(const std::string& msg) {
@@ -122,7 +115,7 @@ AnalysisResult AnalyzeCommand::run(const std::string& run_id) {
     }
 
     graph::TaskGraph graph = graph::buildAnalyzeTaskGraph(
-        backends, db_, embeddingStore_.get(), promptsDir);
+        backends, db_, rag_.get(), promptsDir);
     graph::GraphRunner runner;
     runner.setMaxParallel(pool.totalConcurrency());
 

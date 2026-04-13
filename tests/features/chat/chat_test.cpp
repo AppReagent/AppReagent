@@ -38,7 +38,7 @@ protected:
         json cfg;
         if (fs::exists(srcConfig)) {
             std::ifstream in(srcConfig);
-            cfg = json::parse(in);
+            cfg = json::parse(in, nullptr, true, true);
         }
         // Resolve cert path
         auto cert = cfg.value("postgres_cert", "");

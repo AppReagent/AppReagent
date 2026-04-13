@@ -1,40 +1,56 @@
 {
+    // AppReagent config — line (//) and block (/* */) comments are supported.
     "postgres_url": "postgresql://user:password@host:port/dbname",
     "postgres_cert": "ca-certificate.crt",
     "ai_endpoints": [
+        // Tier 0 — cheap and fast (triage / supervisors).
         {
-            "id": "mac-mini-ollama",
+            "id": "local-ollama",
             "provider": "ollama",
-            "url": "http://10.99.0.2:11434",
+            "url": "http://192.0.2.10:11434",
             "model": "qwen2.5-coder:7b",
             "tier": 0,
             "max_concurrent": 1,
             "context_window": 32768
         },
         {
-            "id": "mac-mini-lmstudio",
+            "id": "local-lmstudio",
             "provider": "lmstudio",
-            "url": "http://10.99.0.32:1234",
+            "url": "http://192.0.2.11:1234",
             "model": "qwen2.5-coder-7b-instruct",
             "tier": 0,
             "max_concurrent": 1
         },
+        // Tier 1 — medium (deep analysis supervisor).
         {
-            "id": "mac-studio",
+            "id": "mid-tier",
             "provider": "ollama",
-            "url": "http://100.113.111.28:11434",
+            "url": "http://192.0.2.20:11434",
             "model": "qwen2.5-coder:14b",
             "tier": 1,
             "max_concurrent": 2
         },
+        // Tier 2 — expensive and smart (deep analysis worker, synthesis).
         {
-            "id": "win11-gpu",
+            "id": "gpu-host",
             "provider": "lmstudio",
-            "url": "http://100.71.68.106:1234",
+            "url": "http://192.0.2.30:1234",
             "model": "glm-4.7-flash",
             "tier": 2,
             "max_concurrent": 3
         }
+        /*
+        ,{
+            "id": "openai-gpt4o",
+            "provider": "openai",
+            "url": "https://api.openai.com",
+            "model": "gpt-4o",
+            "api_key": "sk-...",
+            "tier": 2,
+            "max_concurrent": 5,
+            "context_window": 128000
+        }
+        */
     ],
     "embedding": {
         "provider": "openai",

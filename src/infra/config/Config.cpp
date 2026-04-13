@@ -15,7 +15,7 @@ Config Config::load(const std::string& path) {
     if (!file.is_open()) {
         throw std::runtime_error("could not open " + path);
     }
-    auto j = nlohmann::json::parse(file);
+    auto j = nlohmann::json::parse(file, nullptr, true, true);
 
     Config c;
     c.postgres_url = j.at("postgres_url").get<std::string>();

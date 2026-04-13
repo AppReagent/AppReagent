@@ -37,7 +37,7 @@ protected:
         if (!fs::exists(srcConfig)) GTEST_SKIP() << "no config.json";
         {
             std::ifstream in(srcConfig);
-            auto cfg = nlohmann::json::parse(in);
+            auto cfg = nlohmann::json::parse(in, nullptr, true, true);
             auto cert = cfg.value("postgres_cert", "");
             if (!cert.empty() && cert[0] != '/') {
                 // Resolve relative to data dir

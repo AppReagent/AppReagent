@@ -165,6 +165,26 @@ TEST_F(ConfigTest, FlushTimeoutOverride) {
     EXPECT_EQ(c.flush_timeout_sec, 30);
 }
 
+TEST_F(ConfigTest, ParsesLineAndBlockComments) {
+    std::ofstream f(tmpPath);
+    f << R"({
+        // line comment before keys
+        "postgres_url": "postgresql://localhost/test",
+        "postgres_cert": "cert.crt",
+        "ai_endpoints": [
+            { "id": "a", "provider": "mock" }
+            /*
+            ,{ "id": "disabled", "provider": "mock" }
+            */
+        ]
+    })";
+    f.close();
+
+    auto c = area::Config::load(tmpPath);
+    ASSERT_EQ(c.ai_endpoints.size(), 1);
+    EXPECT_EQ(c.ai_endpoints[0].id, "a");
+}
+
 TEST_F(ConfigTest, ThreeTierEndpoints) {
     writeConfig({
         {"postgres_url", "postgresql://localhost/test"},

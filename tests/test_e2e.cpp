@@ -320,6 +320,29 @@ TEST(AgentPrompting, BenchStylePromptAddsGhidraRuntimeGuidance) {
     EXPECT_NE(system.find("GHIDRA xrefs on imports, strings, symbols, and addresses"), std::string::npos);
 }
 
+TEST(AgentPrompting, LargeBenchPromptAddsWrapUpRuntimeGuidance) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    auto* backendPtr = backend.get();
+
+    area::ToolRegistry tools;
+    tools.add(std::make_unique<FakeGhidraActionTool>());
+
+    area::Agent agent(std::move(backend), tools);
+    std::string prompt =
+        "Analyze /tmp/sample.dll.\n\nGHIDRA DATA:\nOverview, imports, strings.\n"
+        "Answer with entry point, interesting functions, suspicious strings, network IOCs, and malware behavior.\n";
+    prompt += std::string(21000, 'A');
+
+    std::vector<area::AgentMessage> msgs;
+    agent.process(prompt, [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    std::string system = backendPtr->lastSystem();
+    EXPECT_NE(system.find("This prompt already contains prefetched Ghidra data."), std::string::npos);
+    EXPECT_NE(system.find("answer instead of exhaustively exploring every suspicious string."),
+              std::string::npos);
+}
+
 TEST(AgentPrompting, GenericPromptDoesNotAddGhidraRuntimeGuidance) {
     area::AiEndpoint ep{"test", "mock", "", "auto"};
     auto backend = std::make_unique<area::MockBackend>(ep);
@@ -356,6 +379,12 @@ TEST(AgentPrompting, RuntimeGuidanceCanDriveGhidraFollowup) {
     area::ToolRegistry tools;
     auto ghidraTool = std::make_unique<FakeGhidraActionTool>();
     auto* ghidraPtr = ghidraTool.get();
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | xrefs | gethostbyname"] =
+        "=== Ghidra Cross-References: sample.dll ===\n\n"
+        "Import: gethostbyname [WS2_32.DLL] @ EXTERNAL:00000016\n"
+        "Functions calling: 1 | Call sites: 1\n\n"
+        "--- Callers (1) ---\n"
+        "  FUN_10001074 @ 100011af [COMPUTED_CALL]\n";
     tools.add(std::move(ghidraTool));
 
     area::Agent agent(std::move(backend), tools);
@@ -421,6 +450,122 @@ TEST(AgentPrompting, BenchStylePromptAutoRunsGhidraBootstrap) {
     EXPECT_EQ(ghidraPtr->actions[6], "GHIDRA: /tmp/sample.dll | disasm | 0x10001358");
     EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
     EXPECT_EQ(msgs.back().content, "done");
+}
+
+TEST(AgentPrompting, LargeBenchPromptSkipsGenericStringBootstrapSweep) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    backend->setResponse("ANSWER: done");
+
+    area::ToolRegistry tools;
+    auto ghidraTool = std::make_unique<FakeGhidraActionTool>();
+    auto* ghidraPtr = ghidraTool.get();
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | xrefs | gethostbyname"] =
+        "=== Ghidra Cross-References: sample.dll ===\n\n"
+        "Import: gethostbyname [WS2_32.DLL] @ EXTERNAL:00000016\n"
+        "Functions calling: 1 | Call sites: 1\n\n"
+        "--- Callers (1) ---\n"
+        "  FUN_10001074 @ 100011af [COMPUTED_CALL]\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | xrefs | 0x100171f0"] =
+        "=== Ghidra Cross-References: sample.dll ===\n\n"
+        "Requested address: 0100171F0\n"
+        "Data: 0100171F0 .. 0100171FF\n"
+        "Type: string\n"
+        "References: 1\n"
+        "Referenced by: FUN_10002000 @ 010002040 [READ]\n";
+    tools.add(std::move(ghidraTool));
+
+    area::Agent agent(std::move(backend), tools);
+    std::string prompt =
+        "Analyze /tmp/sample.dll.\n\n"
+        "Questions: interesting functions, suspicious strings, malware behavior.\n"
+        "========================= GHIDRA DATA =========================\n"
+        "========== GHIDRA: /tmp/sample.dll ==========\n"
+        "--- imports ---\n"
+        "  gethostbyname [WS2_32.DLL] (ordinal 52) @ EXTERNAL:00000016\n"
+        "--- strings ---\n"
+        "  [100171f0] \"cmd.exe\"\n"
+        "  [10017ff9] \"PSLIST\" (xrefs: 1)\n"
+        "  [10017352] \"GetSystemDefaultLangID\"\n"
+        "  [10017128] \"Sleep\"\n"
+        "===================== END GHIDRA DATA =========================\n";
+    prompt += std::string(21000, 'B');
+
+    std::vector<area::AgentMessage> msgs;
+    agent.process(prompt, [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    EXPECT_NE(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
+                        "GHIDRA: /tmp/sample.dll | xrefs | gethostbyname"),
+              ghidraPtr->actions.end());
+    EXPECT_NE(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
+                        "GHIDRA: /tmp/sample.dll | xrefs | 0x100171f0"),
+              ghidraPtr->actions.end());
+    EXPECT_EQ(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
+                        "GHIDRA: /tmp/sample.dll | xrefs | PSLIST"),
+              ghidraPtr->actions.end());
+    EXPECT_EQ(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
+                        "GHIDRA: /tmp/sample.dll | xrefs | Sleep"),
+              ghidraPtr->actions.end());
+    EXPECT_EQ(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
+                        "GHIDRA: /tmp/sample.dll | xrefs | GetSystemDefaultLangID"),
+              ghidraPtr->actions.end());
+}
+
+TEST(AgentPrompting, LargeBenchPromptCapsPostBootstrapGhidraActions) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    backend->setResponse("ANSWER: wrapped up");
+
+    area::MockPromptEntry firstFollowup;
+    firstFollowup.id = "large-ghidra-1";
+    firstFollowup.match = {"This prompt already contains prefetched Ghidra data."};
+    firstFollowup.user_match = {"Questions: interesting functions"};
+    firstFollowup.response = "THOUGHT: verify the import caller.\n"
+                             "GHIDRA: /tmp/sample.dll | xrefs | gethostbyname";
+
+    area::MockPromptEntry secondFollowup;
+    secondFollowup.id = "large-ghidra-2";
+    secondFollowup.match = {"Ghidra observation for GHIDRA: /tmp/sample.dll | xrefs | gethostbyname"};
+    secondFollowup.response = "THOUGHT: inspect that function.\n"
+                              "GHIDRA: /tmp/sample.dll | decompile | 0x10001074";
+
+    area::MockPromptEntry thirdBlocked;
+    thirdBlocked.id = "large-ghidra-3";
+    thirdBlocked.match = {"Ghidra observation for GHIDRA: /tmp/sample.dll | decompile | 0x10001074"};
+    thirdBlocked.response = "THOUGHT: inspect one more function.\n"
+                            "GHIDRA: /tmp/sample.dll | decompile | 0x10002000";
+
+    backend->setPromptEntries({firstFollowup, secondFollowup, thirdBlocked});
+
+    area::ToolRegistry tools;
+    auto ghidraTool = std::make_unique<FakeGhidraActionTool>();
+    auto* ghidraPtr = ghidraTool.get();
+    tools.add(std::move(ghidraTool));
+
+    area::Agent agent(std::move(backend), tools);
+    std::string prompt =
+        "Analyze /tmp/sample.dll.\n\n"
+        "Questions: interesting functions, suspicious strings, malware behavior.\n"
+        "========================= GHIDRA DATA =========================\n"
+        "========== GHIDRA: /tmp/sample.dll ==========\n"
+        "--- imports ---\n"
+        "  gethostbyname [WS2_32.DLL] (ordinal 52) @ EXTERNAL:00000016\n"
+        "===================== END GHIDRA DATA =========================\n";
+    prompt += std::string(21000, 'C');
+
+    std::vector<area::AgentMessage> msgs;
+    agent.process(prompt, [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    EXPECT_EQ(ghidraPtr->actions.size(), 3u);
+    EXPECT_EQ(ghidraPtr->actions[0], "GHIDRA: /tmp/sample.dll | xrefs | gethostbyname");
+    EXPECT_EQ(ghidraPtr->actions[1], "GHIDRA: /tmp/sample.dll | decompile | 0x10001074");
+    EXPECT_EQ(ghidraPtr->actions[2], "GHIDRA: /tmp/sample.dll | decompile | 0x10001074");
+    EXPECT_EQ(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
+                        "GHIDRA: /tmp/sample.dll | decompile | 0x10002000"),
+              ghidraPtr->actions.end());
+    ASSERT_FALSE(msgs.empty());
+    EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
+    EXPECT_FALSE(msgs.back().content.empty());
 }
 
 TEST(AgentPrompting, BenchStylePromptBootstrapsExplicitQuestionAddresses) {

@@ -5,6 +5,7 @@
 #include <cctype>
 #include <deque>
 #include <exception>
+#include <limits>
 #include <optional>
 #include <regex>
 #include <set>
@@ -54,6 +55,10 @@ bool looksLikeBinaryInvestigation(const std::string& userInput) {
     });
 
     return (hasGhidraData || hasBinaryPath) && hasBinaryQuestion;
+}
+
+bool isLargePrefetchedBinaryPrompt(const std::string& userInput) {
+    return userInput.size() >= 20000;
 }
 
 std::vector<std::string> extractGhidraBinaryPaths(const std::string& userInput) {
@@ -242,9 +247,10 @@ std::vector<std::string> extractPromptBootstrapQueries(const std::string& userIn
     });
 
     std::vector<std::string> queries;
+    size_t limit = 4;
     for (const auto& item : ranked) {
         queries.push_back(item.value);
-        if (queries.size() >= 4) break;
+        if (queries.size() >= limit) break;
     }
     return queries;
 }
@@ -471,7 +477,7 @@ std::string summarizeGhidraObservation(const std::string& action,
 std::string buildRuntimeGuidance(const std::string& userInput) {
     if (!looksLikeBinaryInvestigation(userInput)) return "";
 
-    return
+    std::string guidance =
         "BINARY ANALYSIS WITH GHIDRA — this request is asking for malware triage from binary data.\n"
         "- Do not stop at prefetched overview/imports/strings if they are already present.\n"
         "- Pick 3-6 GHIDRA follow-up calls before answering.\n"
@@ -484,7 +490,18 @@ std::string buildRuntimeGuidance(const std::string& userInput) {
         "that address instead of guessing names.\n"
         "- Prefer concrete evidence such as import callers, decompiled loops, decoded "
         "data, mutex names, filenames, registry keys, and network indicators.\n";
+
+    if (isLargePrefetchedBinaryPrompt(userInput)) {
+        guidance +=
+            "- This prompt already contains prefetched Ghidra data. Use that data and any "
+            "bootstrap evidence before making more than 1-2 additional GHIDRA calls.\n"
+            "- Once you can cite the main behavior chain with concrete addresses or "
+            "callers, answer instead of exhaustively exploring every suspicious string.\n";
+    }
+
+    return guidance;
 }
+
 }  // namespace
 
 Agent::Agent(std::unique_ptr<LLMBackend> backend, ToolRegistry& tools, Harness harness)
@@ -662,8 +679,10 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
 
     std::string systemPrompt = buildSystemPrompt(userInput);
     std::string bootstrapMemo;
+    bool binaryInvestigation = looksLikeBinaryInvestigation(userInput);
+    bool largeBinaryPrompt = binaryInvestigation && isLargePrefetchedBinaryPrompt(userInput);
 
-    if (looksLikeBinaryInvestigation(userInput)) {
+    if (binaryInvestigation) {
         auto paths = extractGhidraBinaryPaths(userInput);
         if (!paths.empty()) {
             const std::string& path = paths.front();
@@ -685,24 +704,27 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
                                        "GHIDRA: " + path + " | disasm | " + addr.value);
                 }
             }
-            if (auto dllMain = extractLineHexAddress(userInput, "Likely DllMain:")) {
-                appendUniqueAction(bootstrapActions, seenActions,
-                                   "GHIDRA: " + path + " | decompile | " + *dllMain);
+            if (!largeBinaryPrompt) {
+                if (auto dllMain = extractLineHexAddress(userInput, "Likely DllMain:")) {
+                    appendUniqueAction(bootstrapActions, seenActions,
+                                       "GHIDRA: " + path + " | decompile | " + *dllMain);
+                }
             }
             if (containsCaseInsensitive(userInput, "gethostbyname")) {
                 appendUniqueAction(bootstrapActions, seenActions,
                                    "GHIDRA: " + path + " | xrefs | gethostbyname");
             }
-            if (containsCaseInsensitive(userInput, "\"Sleep\"")
-                || containsCaseInsensitive(userInput, " Sleep ")) {
+            if (!largeBinaryPrompt
+                && (containsCaseInsensitive(userInput, "\"Sleep\"")
+                    || containsCaseInsensitive(userInput, " Sleep "))) {
                 appendUniqueAction(bootstrapActions, seenActions,
                                    "GHIDRA: " + path + " | xrefs | Sleep");
             }
-            if (containsCaseInsensitive(userInput, "GetSystemDefaultLangID")) {
+            if (!largeBinaryPrompt && containsCaseInsensitive(userInput, "GetSystemDefaultLangID")) {
                 appendUniqueAction(bootstrapActions, seenActions,
                                    "GHIDRA: " + path + " | xrefs | GetSystemDefaultLangID");
             }
-            if (containsCaseInsensitive(userInput, "GetLastInputInfo")) {
+            if (!largeBinaryPrompt && containsCaseInsensitive(userInput, "GetLastInputInfo")) {
                 appendUniqueAction(bootstrapActions, seenActions,
                                    "GHIDRA: " + path + " | xrefs | GetLastInputInfo");
             }
@@ -710,13 +732,15 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
                 appendUniqueAction(bootstrapActions, seenActions,
                                    "GHIDRA: " + path + " | xrefs | " + *addr);
             }
-            for (const auto& query : extractPromptBootstrapQueries(userInput)) {
-                appendUniqueAction(bootstrapActions, seenActions,
-                                   "GHIDRA: " + path + " | xrefs | " + query);
+            if (!largeBinaryPrompt) {
+                for (const auto& query : extractPromptBootstrapQueries(userInput)) {
+                    appendUniqueAction(bootstrapActions, seenActions,
+                                       "GHIDRA: " + path + " | xrefs | " + query);
+                }
             }
 
             ToolContext toolCtx{cb, confirm, harness_};
-            int bootstrapBudget = 8;
+            int bootstrapBudget = largeBinaryPrompt ? 4 : 8;
             std::vector<std::string> bootstrapSummaries;
             while (!bootstrapActions.empty() && bootstrapBudget-- > 0) {
                 std::string action = bootstrapActions.front();
@@ -743,7 +767,7 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
                                        "GHIDRA: " + path + " | decompile | " + target);
                     appendUniqueAction(bootstrapActions, seenActions,
                                        "GHIDRA: " + path + " | disasm | " + target);
-                    if (++followups >= 2) break;
+                    if (++followups >= (largeBinaryPrompt ? 1 : 2)) break;
                 }
             }
 
@@ -759,7 +783,12 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
         }
     }
 
-    for (int iter = 0; iter < MAX_ITERATIONS; iter++) {
+    int maxIterations = largeBinaryPrompt ? 16 : MAX_ITERATIONS;
+    int iterationWarning = std::min(ITERATION_WARNING, std::max(4, maxIterations - 4));
+    int remainingLargePromptGhidraActions =
+        largeBinaryPrompt ? 2 : std::numeric_limits<int>::max();
+
+    for (int iter = 0; iter < maxIterations; iter++) {
         if (interrupted_.load()) {
             AgentMessage msg{AgentMessage::ANSWER, "(interrupted)"};
             cb(msg);
@@ -771,10 +800,10 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
             compressHistory(cb);
         }
 
-        if (iter == ITERATION_WARNING) {
+        if (iter == iterationWarning) {
             history_.push_back({"user",
                 "SYSTEM: You have used " + std::to_string(iter) + " of " +
-                std::to_string(MAX_ITERATIONS) + " iterations. "
+                std::to_string(maxIterations) + " iterations. "
                 "Wrap up your investigation and provide an ANSWER with the evidence gathered so far. "
                 "If you need more analysis, recommend specific follow-up steps the user can request."});
         }
@@ -812,7 +841,7 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
             std::string answer = action.substr(7);
             util::ltrimInPlace(answer);
 
-            if (!bootstrapMemo.empty() && iter < MAX_ITERATIONS - 1) {
+            if (!bootstrapMemo.empty() && iter < maxIterations - 1) {
                 std::string lowerAnswer = toLowerCopy(answer);
                 bool citesImportAddr = answer.find("EXTERNAL:") != std::string::npos;
                 bool citesCallCounts = lowerAnswer.find("functions calling") != std::string::npos
@@ -835,7 +864,7 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
             }
 
             std::string sensorFeedback = harness_.runSensors("answer", answer, "");
-            if (!sensorFeedback.empty() && iter < MAX_ITERATIONS - 1) {
+            if (!sensorFeedback.empty() && iter < maxIterations - 1) {
                 history_.push_back({"assistant", rawResponse});
                 history_.push_back({"user", "SENSOR FEEDBACK on your answer:\n" + sensorFeedback +
                     "\nPlease reconsider and provide a more complete answer."});
@@ -847,6 +876,19 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
             cb(msg);
             emitEvent(msg);
             return;
+        }
+
+        if (largeBinaryPrompt && action.starts_with("GHIDRA:")) {
+            if (remainingLargePromptGhidraActions <= 0) {
+                history_.push_back({"assistant", rawResponse});
+                history_.push_back({"user",
+                    "SYSTEM: You have already used the additional GHIDRA budget for this "
+                    "large prefetched prompt. Answer now using the prefetched data and "
+                    "bootstrap evidence you already have. If evidence is still missing, "
+                    "state the specific next GHIDRA query instead of calling it."});
+                continue;
+            }
+            remainingLargePromptGhidraActions--;
         }
 
         ToolContext toolCtx{cb, confirm, harness_};

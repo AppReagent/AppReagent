@@ -629,11 +629,13 @@ TEST(GhidraTool, FormatsAddressDisassembly) {
     "signature": "void sub_10001620(void)",
     "requested_address": "010001656",
     "offset_from_entry": 54,
-    "instruction_count": 3,
+    "instruction_count": 5,
     "function_instruction_count": 87,
     "instructions": [
-      {"address": "010001650", "text": "MOV EAX,dword ptr [EBP + 0x8]", "flow_type": "FALL_THROUGH"},
-      {"address": "010001656", "text": "CALL Sleep", "flow_type": "CALL", "is_target": true},
+      {"address": "01000164f", "text": "PUSH 0x6", "flow_type": "FALL_THROUGH"},
+      {"address": "010001652", "text": "PUSH 0x1", "flow_type": "FALL_THROUGH"},
+      {"address": "010001654", "text": "PUSH 0x2", "flow_type": "FALL_THROUGH"},
+      {"address": "010001656", "text": "CALL socket", "flow_type": "CALL", "is_target": true},
       {"address": "01000165b", "text": "TEST EAX,EAX", "flow_type": "FALL_THROUGH"}
     ]
   }
@@ -646,8 +648,10 @@ TEST(GhidraTool, FormatsAddressDisassembly) {
     EXPECT_NE(result->observation.find("Ghidra Disassembly"), std::string::npos);
     EXPECT_NE(result->observation.find("Requested address: 010001656"), std::string::npos);
     EXPECT_NE(result->observation.find("Function: sub_10001620 @ 010001620"), std::string::npos);
-    EXPECT_NE(result->observation.find("Instructions shown: 3 / 87"), std::string::npos);
-    EXPECT_NE(result->observation.find("=> 010001656: CALL Sleep [CALL]"), std::string::npos);
+    EXPECT_NE(result->observation.find("Instructions shown: 5 / 87"), std::string::npos);
+    EXPECT_NE(result->observation.find("Immediate call arguments: 0x2, 0x1, 0x6"), std::string::npos);
+    EXPECT_NE(result->observation.find("Likely socket constants: AF_INET, SOCK_STREAM, IPPROTO_TCP"), std::string::npos);
+    EXPECT_NE(result->observation.find("=> 010001656: CALL socket [CALL]"), std::string::npos);
 
     std::error_code ec;
     fs::remove(path, ec);
@@ -676,6 +680,34 @@ TEST(GhidraTool, ReconstructsStackStringsInDecompileOutput) {
     ASSERT_TRUE(result.has_value());
     EXPECT_NE(result->observation.find("Likely stack string: \"cmd.exe\""), std::string::npos);
     EXPECT_NE(result->observation.find("local_10._0_4_ = 0x2e646d63;"), std::string::npos);
+
+    std::error_code ec;
+    fs::remove(path, ec);
+}
+
+TEST(GhidraTool, InfersSleepDurationFromDecompileOutput) {
+    FakeGhidraTool tool;
+    GhidraToolMessages msgs;
+    area::Harness h;
+    area::ToolContext ctx{msgs.cb(), nullptr, h};
+    std::string path = makeTempBinary();
+
+    tool.outputs["decompile"] = R"json({
+  "metadata": {"name": "sample.exe", "language": "x86:LE:32:default"},
+  "functions": [
+    {
+      "name": "sub_10001074",
+      "address": "010001074",
+      "size": 128,
+      "decompiled": "void sub_10001074(void)\n\n{\n  int iVar1;\n\n  iVar1 = atoi(PTR_s__This_is_CTI_30_10019020 + 0xd);\n  Sleep(iVar1 * 1000);\n}\n"
+    }
+  ]
+})json";
+
+    auto result = tool.tryExecute("GHIDRA: " + path + " | decompile | 0x10001074", ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NE(result->observation.find("Likely sleep duration: 30000 ms"), std::string::npos);
+    EXPECT_NE(result->observation.find("Sleep(iVar1 * 1000);"), std::string::npos);
 
     std::error_code ec;
     fs::remove(path, ec);

@@ -891,11 +891,49 @@ public class AreaAnalyze extends GhidraScript {
         return resolved != null ? resolved : name;
     }
 
+    private int stringMatchScore(String candidate, String filterLower) {
+        if (candidate == null || filterLower == null || filterLower.isEmpty()) return 0;
+        String lower = candidate.toLowerCase();
+        if (lower.equals(filterLower)) return 400;
+        if (lower.startsWith(filterLower) || lower.endsWith(filterLower)) return 300;
+        if (lower.contains(filterLower)) return 200;
+        return 0;
+    }
+
+    private Data resolveStringData(String filter) {
+        if (filter == null || filter.isEmpty()) return null;
+        String filterLower = filter.toLowerCase();
+        Data best = null;
+        int bestScore = 0;
+
+        DataIterator dataIter = currentProgram.getListing().getDefinedData(true);
+        while (dataIter.hasNext() && !monitor.isCancelled()) {
+            Data data = dataIter.next();
+            String typeName = data.getDataType().getName().toLowerCase();
+            if (!typeName.contains("string") && !typeName.contains("unicode")) continue;
+
+            Object value = data.getValue();
+            if (value == null) continue;
+            String strVal = value.toString();
+            if (strVal.length() < 2) continue;
+
+            int score = stringMatchScore(strVal, filterLower);
+            if (score > bestScore) {
+                best = data;
+                bestScore = score;
+            }
+        }
+
+        return best;
+    }
+
     private ImportRef resolveImportFunction(String filter) {
         if (filter == null || filter.isEmpty()) return null;
 
         Address requestedAddr = parseAddressMaybe(filter);
         String filterLower = filter.toLowerCase();
+        ImportRef best = null;
+        int bestScore = 0;
 
         FunctionIterator extFuncs = currentProgram.getListing().getExternalFunctions();
         while (extFuncs.hasNext()) {
@@ -906,16 +944,22 @@ public class AreaAnalyze extends GhidraScript {
             String originalName = f.getName();
             String resolvedName = resolveImportName(library, originalName);
 
-            boolean matches = false;
+            int score = 0;
             if (requestedAddr != null) {
-                matches = f.getEntryPoint().equals(requestedAddr);
+                if (f.getEntryPoint().equals(requestedAddr)) score = 500;
             } else {
-                matches = resolvedName.toLowerCase().contains(filterLower)
-                    || originalName.toLowerCase().contains(filterLower)
-                    || library.toLowerCase().contains(filterLower);
+                score = Math.max(score, stringMatchScore(resolvedName, filterLower));
+                score = Math.max(score, stringMatchScore(originalName, filterLower));
+                score = Math.max(score, stringMatchScore(library + "!" + resolvedName, filterLower));
+                score = Math.max(score, stringMatchScore(library + "!" + originalName, filterLower));
+                if (library.toLowerCase().equals(filterLower)) {
+                    score = Math.max(score, 150);
+                } else if (library.toLowerCase().contains(filterLower)) {
+                    score = Math.max(score, 100);
+                }
             }
 
-            if (!matches) continue;
+            if (score == 0 || score < bestScore) continue;
 
             ImportRef ref = new ImportRef();
             ref.function = f;
@@ -924,9 +968,10 @@ public class AreaAnalyze extends GhidraScript {
             ref.originalName = originalName;
             ref.resolvedName = resolvedName;
             ref.ordinal = extractOrdinal(originalName);
-            return ref;
+            best = ref;
+            bestScore = score;
         }
-        return null;
+        return best;
     }
 
     private void writeFunctionJson(Function f, Address requestedAddr, boolean includeDecompile) throws Exception {
@@ -1089,6 +1134,9 @@ public class AreaAnalyze extends GhidraScript {
         Function target = resolveFilterFunction(funcName);
         Data targetData = target == null ? resolveFilterData(funcName) : null;
         ImportRef targetImport = (target == null && targetData == null) ? resolveImportFunction(funcName) : null;
+        if (target == null && targetData == null && targetImport == null) {
+            targetData = resolveStringData(funcName);
+        }
 
         if (target == null && targetData == null && targetImport == null) {
             pw.println("    \"error\": \"symbol not found: " + escJson(funcName) + "\"");

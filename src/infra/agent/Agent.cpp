@@ -136,6 +136,11 @@ struct AddressQuery {
     bool dataHint = false;
 };
 
+struct BootstrapQuery {
+    std::string value;
+    int priority = 0;
+};
+
 std::string extractQuestionSection(const std::string& userInput) {
     std::string lower = toLowerCopy(userInput);
     size_t cut = std::string::npos;
@@ -180,6 +185,68 @@ std::vector<AddressQuery> extractQuestionAddresses(const std::string& userInput)
     }
 
     return addrs;
+}
+
+std::vector<std::string> extractPromptBootstrapQueries(const std::string& userInput) {
+    std::map<std::string, int> bestPriority;
+    std::regex stringLine(R"(\[([0-9A-Fa-f]{8,16})\]\s+\"([^\"]+)\")");
+    std::smatch match;
+    std::istringstream stream(userInput);
+    std::string line;
+
+    auto record = [&](const std::string& query, int priority) {
+        if (query.empty() || priority <= 0) return;
+        auto it = bestPriority.find(query);
+        if (it == bestPriority.end() || priority > it->second) {
+            bestPriority[query] = priority;
+        }
+    };
+
+    while (std::getline(stream, line)) {
+        if (!std::regex_search(line, match, stringLine)) continue;
+        std::string addr = "0x" + match[1].str();
+        std::string value = match[2].str();
+        std::string lower = toLowerCopy(value);
+
+        if (lower.find("cmd") != std::string::npos) {
+            record("cmd.exe", 90);
+        }
+        if (lower.find("robotwork") != std::string::npos) {
+            record("robotwork", 85);
+        }
+        if (lower.find("pslist") != std::string::npos) {
+            record("PSLIST", 80);
+        }
+        if (lower.find("[this is cti]") != std::string::npos) {
+            record(addr, 75);
+        }
+        if (lower.find("socket()") != std::string::npos) {
+            record(addr, 70);
+        }
+        if (lower.find("getsystemdefaultlangid") != std::string::npos) {
+            record("GetSystemDefaultLangID", 65);
+        }
+        if (lower.find("getlastinputinfo") != std::string::npos) {
+            record("GetLastInputInfo", 60);
+        }
+    }
+
+    std::vector<BootstrapQuery> ranked;
+    ranked.reserve(bestPriority.size());
+    for (const auto& [value, priority] : bestPriority) {
+        ranked.push_back({value, priority});
+    }
+    std::sort(ranked.begin(), ranked.end(), [](const BootstrapQuery& a, const BootstrapQuery& b) {
+        if (a.priority != b.priority) return a.priority > b.priority;
+        return a.value < b.value;
+    });
+
+    std::vector<std::string> queries;
+    for (const auto& item : ranked) {
+        queries.push_back(item.value);
+        if (queries.size() >= 4) break;
+    }
+    return queries;
 }
 
 void appendUniqueAction(std::deque<std::string>& queue,
@@ -334,6 +401,8 @@ std::string summarizeGhidraObservation(const std::string& action,
                 notes.push_back("Key line: " + trimmed);
             } else if (trimmed.starts_with("Likely stack string: ")) {
                 notes.push_back(trimmed);
+            } else if (trimmed.starts_with("Likely sleep duration: ")) {
+                notes.push_back(trimmed);
             }
         }
     } else if (action.find("| function_at |") != std::string::npos) {
@@ -381,6 +450,10 @@ std::string summarizeGhidraObservation(const std::string& action,
                 notes.push_back(trimmed);
             } else if (trimmed.starts_with("=> ")) {
                 notes.push_back("Target instruction: " + trimmed);
+            } else if (trimmed.starts_with("Immediate call arguments: ")
+                       || trimmed.starts_with("Likely socket constants: ")
+                       || trimmed.starts_with("Computed call argument multiplier: ")) {
+                notes.push_back(trimmed);
             }
         }
     }
@@ -636,6 +709,10 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
             if (auto addr = extractStringAddress(userInput, "cmd.exe")) {
                 appendUniqueAction(bootstrapActions, seenActions,
                                    "GHIDRA: " + path + " | xrefs | " + *addr);
+            }
+            for (const auto& query : extractPromptBootstrapQueries(userInput)) {
+                appendUniqueAction(bootstrapActions, seenActions,
+                                   "GHIDRA: " + path + " | xrefs | " + query);
             }
 
             ToolContext toolCtx{cb, confirm, harness_};

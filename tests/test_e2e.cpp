@@ -499,6 +499,64 @@ TEST(AgentPrompting, BenchStylePromptBootstrapsExplicitQuestionAddresses) {
     EXPECT_EQ(msgs.back().content, "done");
 }
 
+TEST(AgentPrompting, BenchStylePromptBootstrapsHighSignalStrings) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    auto* backendPtr = backend.get();
+    backend->setResponse("ANSWER: done");
+
+    area::ToolRegistry tools;
+    auto ghidraTool = std::make_unique<FakeGhidraActionTool>();
+    auto* ghidraPtr = ghidraTool.get();
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | decompile | 0x1000d02e"] =
+        "=== Ghidra Decompilation: sample.dll ===\n\n"
+        "--- FUN_1000d02e @ 1000d02e (32 bytes) ---\n\n"
+        "void FUN_1000d02e(void) {}\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | xrefs | 0x100192ac"] =
+        "=== Ghidra Cross-References: sample.dll ===\n\n"
+        "Requested address: 0100192AC\n"
+        "Data: 0100192AC .. 0100192B8\n"
+        "Type: string (13 bytes)\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | xrefs | cmd.exe"] =
+        "=== Ghidra Cross-References: sample.dll ===\n\n"
+        "Requested address: 010095B34\n"
+        "Data: 010095B34 .. 010095B40\n"
+        "Type: string (13 bytes)\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | xrefs | PSLIST"] =
+        "=== Ghidra Cross-References: sample.dll ===\n\n"
+        "Function: PSLIST @ 10007025\n";
+    tools.add(std::move(ghidraTool));
+
+    area::Agent agent(std::move(backend), tools);
+    std::vector<area::AgentMessage> msgs;
+    agent.process(
+        "Analyze /tmp/sample.dll.\n\n"
+        "Questions: interesting functions, suspicious strings, malware behavior.\n"
+        "========================= GHIDRA DATA =========================\n"
+        "========== GHIDRA: /tmp/sample.dll ==========\n"
+        "--- overview ---\n"
+        "Likely DllMain: FUN_1000d02e @ 1000d02e\n"
+        "--- strings ---\n"
+        "  [10017ff9] \"PSLIST\" (xrefs: 1)\n"
+        "  [100192ac] \"[This is CTI]30\" (xrefs: 1)\n"
+        "  [100934b0] \"startxcmd\"\n"
+        "===================== END GHIDRA DATA =========================\n",
+        [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    EXPECT_GE(backendPtr->callCount(), 1);
+    EXPECT_NE(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
+                        "GHIDRA: /tmp/sample.dll | xrefs | 0x100192ac"),
+              ghidraPtr->actions.end());
+    EXPECT_NE(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
+                        "GHIDRA: /tmp/sample.dll | xrefs | cmd.exe"),
+              ghidraPtr->actions.end());
+    EXPECT_NE(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
+                        "GHIDRA: /tmp/sample.dll | xrefs | PSLIST"),
+              ghidraPtr->actions.end());
+    EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
+    EXPECT_EQ(msgs.back().content, "done");
+}
+
 TEST(AgentPrompting, BootstrapEvidenceForcesAnswerRevision) {
     area::AiEndpoint ep{"test", "mock", "", "auto"};
     auto backend = std::make_unique<area::MockBackend>(ep);

@@ -5,6 +5,7 @@
 #include <array>
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -306,6 +307,129 @@ std::vector<std::string> extractStackStrings(const std::string& code) {
         }
     }
     return recovered;
+}
+
+int64_t parseIntegerLiteral(const std::string& text, bool& ok) {
+    ok = false;
+    if (text.empty()) return 0;
+    try {
+        size_t consumed = 0;
+        int base = 10;
+        if (text.starts_with("0x") || text.starts_with("0X")) base = 16;
+        int64_t value = std::stoll(text, &consumed, base);
+        if (consumed != text.size()) return 0;
+        ok = true;
+        return value;
+    } catch (...) {
+        return 0;
+    }
+}
+
+std::vector<std::string> extractSleepInsights(const std::string& code) {
+    std::vector<std::string> notes;
+    std::map<std::string, int64_t> atoiValues;
+    std::regex atoiPattern(R"((\w+)\s*=\s*atoi\(([^)]*)\);)");
+    std::regex embeddedNumber(R"(_([0-9]+)(?:_[0-9A-Fa-f]+)?(?:\s*\+\s*0x?[0-9A-Fa-f]+)?)");
+    std::regex sleepMulPattern(R"(Sleep\((\w+)\s*\*\s*(0x[0-9A-Fa-f]+|[0-9]+)\);)");
+    std::regex sleepConstPattern(R"(Sleep\((0x[0-9A-Fa-f]+|[0-9]+)\);)");
+    std::smatch match;
+    std::istringstream stream(code);
+    std::string line;
+
+    while (std::getline(stream, line)) {
+        if (std::regex_search(line, match, atoiPattern)) {
+            std::smatch numMatch;
+            std::string source = match[2].str();
+            if (std::regex_search(source, numMatch, embeddedNumber)) {
+                atoiValues[match[1].str()] = std::stoll(numMatch[1].str());
+            }
+        } else if (std::regex_search(line, match, sleepMulPattern)) {
+            auto it = atoiValues.find(match[1].str());
+            bool ok = false;
+            int64_t multiplier = parseIntegerLiteral(match[2].str(), ok);
+            if (it != atoiValues.end() && ok) {
+                notes.push_back("Likely sleep duration: "
+                    + std::to_string(it->second * multiplier) + " ms");
+            }
+        } else if (std::regex_search(line, match, sleepConstPattern)) {
+            bool ok = false;
+            int64_t value = parseIntegerLiteral(match[1].str(), ok);
+            if (ok) {
+                notes.push_back("Likely sleep duration: " + std::to_string(value) + " ms");
+            }
+        }
+    }
+
+    return notes;
+}
+
+std::vector<std::string> extractDisassemblyInsights(const json& instructions) {
+    std::vector<std::string> notes;
+    if (!instructions.is_array() || instructions.empty()) return notes;
+
+    int targetIndex = -1;
+    for (size_t i = 0; i < instructions.size(); i++) {
+        if (instructions[i].value("is_target", false)) {
+            targetIndex = static_cast<int>(i);
+            break;
+        }
+    }
+    if (targetIndex < 0) return notes;
+
+    std::regex pushPattern(R"(^PUSH (0x[0-9A-Fa-f]+|[0-9]+)$)");
+    std::regex imulPattern(R"(^IMUL ([A-Z]+),[A-Z]+,(0x[0-9A-Fa-f]+|[0-9]+)$)");
+    std::smatch match;
+    std::vector<int64_t> args;
+    std::string pushedRegister;
+
+    for (int i = targetIndex - 1; i >= 0 && targetIndex - i <= 8; i--) {
+        std::string text = instructions[i].value("text", "");
+        if (std::regex_match(text, match, pushPattern)) {
+            bool ok = false;
+            int64_t value = parseIntegerLiteral(match[1].str(), ok);
+            if (!ok) break;
+            args.push_back(value);
+            continue;
+        }
+        if (text.starts_with("PUSH ")) {
+            pushedRegister = text.substr(5);
+            break;
+        }
+        if (!args.empty()) break;
+    }
+
+    if (!args.empty()) {
+        std::ostringstream out;
+        out << "Immediate call arguments: ";
+        for (size_t i = 0; i < args.size(); i++) {
+            if (i > 0) out << ", ";
+            out << "0x" << std::hex << std::uppercase << args[i] << std::dec;
+        }
+        notes.push_back(out.str());
+        if (args.size() == 3 && args[0] == 2 && args[1] == 1 && args[2] == 6) {
+            notes.push_back("Likely socket constants: AF_INET, SOCK_STREAM, IPPROTO_TCP");
+        }
+    }
+
+    if (!pushedRegister.empty()) {
+        for (int i = targetIndex - 1; i >= 0 && targetIndex - i <= 6; i--) {
+            std::string text = instructions[i].value("text", "");
+            if (!std::regex_match(text, match, imulPattern)) continue;
+            if (match[1].str() != pushedRegister) continue;
+            bool ok = false;
+            int64_t value = parseIntegerLiteral(match[2].str(), ok);
+            if (!ok) continue;
+            notes.push_back("Computed call argument multiplier: 0x"
+                + [&]() {
+                    std::ostringstream out;
+                    out << std::hex << std::uppercase << value;
+                    return out.str();
+                }() + " (" + std::to_string(value) + ")");
+            break;
+        }
+    }
+
+    return notes;
 }
 }  // namespace
 
@@ -766,7 +890,11 @@ std::string GhidraTool::formatDecompile(const std::string& jsonPath) {
                 for (const auto& stackString : stackStrings) {
                     out << "Likely stack string: \"" << stackString << "\"\n";
                 }
-                if (!stackStrings.empty()) out << "\n";
+                auto sleepInsights = extractSleepInsights(code);
+                for (const auto& note : sleepInsights) {
+                    out << note << "\n";
+                }
+                if (!stackStrings.empty() || !sleepInsights.empty()) out << "\n";
                 out << code << "\n";
             }
             out << "\n";
@@ -816,6 +944,11 @@ std::string GhidraTool::formatDisasm(const std::string& jsonPath) {
         out << "Window: " << dis.value("window_start", "?")
             << " .. " << dis.value("window_end", "?") << "\n"
             << "Instructions shown: " << dis.value("instruction_count", 0) << "\n";
+    }
+
+    auto insights = extractDisassemblyInsights(dis.value("instructions", json::array()));
+    for (const auto& note : insights) {
+        out << note << "\n";
     }
 
     out << "\n";

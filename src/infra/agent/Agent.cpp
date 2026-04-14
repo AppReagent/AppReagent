@@ -1040,7 +1040,16 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
                 }
             }
 
-            ToolContext toolCtx{cb, confirm, harness_};
+            ToolContext toolCtx{
+                [&](const AgentMessage& msg) {
+                    if (msg.type == AgentMessage::ERROR) {
+                        cb(msg);
+                        emitEvent(msg);
+                    }
+                },
+                confirm,
+                harness_
+            };
             int bootstrapBudget = largeBinaryPrompt
                 ? std::min(9, std::max(7, static_cast<int>(paths.size())))
                 : 8;
@@ -1141,6 +1150,26 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
             rawResponse = backend_->chat(systemPrompt, history_);
         } catch (const std::exception& e) {
             AgentMessage msg{AgentMessage::ERROR, std::string("API error: ") + e.what()};
+            cb(msg);
+            emitEvent(msg);
+            return;
+        }
+
+        std::string trimmedResponse = rawResponse;
+        util::trimInPlace(trimmedResponse);
+        if (trimmedResponse.empty()) {
+            history_.push_back({"assistant", rawResponse});
+            if (iter < maxIterations - 1) {
+                history_.push_back({"user",
+                    "SYSTEM: Your last response was empty. Reply with either ANSWER: <final "
+                    "answer> or exactly one tool call."});
+                continue;
+            }
+
+            std::string fallback = bootstrapMemo.empty()
+                ? "(empty model response)"
+                : bootstrapMemo;
+            AgentMessage msg{AgentMessage::ANSWER, fallback};
             cb(msg);
             emitEvent(msg);
             return;

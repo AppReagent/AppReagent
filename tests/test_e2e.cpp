@@ -120,6 +120,26 @@ class FakeGhidraActionTool : public area::Tool {
     std::map<std::string, std::string> responses;
 };
 
+class EmittingFakeGhidraActionTool : public area::Tool {
+ public:
+    std::string name() const override { return "GHIDRA"; }
+
+    std::string description() const override {
+        return "<path> [| overview|imports|strings|xrefs|decompile]";
+    }
+
+    std::optional<area::ToolResult> tryExecute(const std::string& action,
+                                               area::ToolContext& ctx) override {
+        if (!action.starts_with("GHIDRA:")) return std::nullopt;
+        actions.push_back(action);
+        ctx.cb({area::AgentMessage::THINKING, "bootstrap " + action});
+        ctx.cb({area::AgentMessage::RESULT, "raw " + action});
+        return area::ToolResult{"Ghidra observation for " + action};
+    }
+
+    std::vector<std::string> actions;
+};
+
 // ---------------------------------------------------------------------------
 // Test fixture: sets up an Agent with ScriptedMockBackend + ToolRegistry
 // ---------------------------------------------------------------------------
@@ -624,6 +644,60 @@ TEST(AgentPrompting, BenchStylePromptAutoRunsGhidraBootstrap) {
     EXPECT_EQ(ghidraPtr->actions[5], "GHIDRA: /tmp/sample.dll | disasm | 0x10001358");
     EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
     EXPECT_EQ(msgs.back().content, "done");
+}
+
+TEST(AgentPrompting, BenchStyleBootstrapDoesNotEmitToolTranscriptNoise) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    backend->setResponse("ANSWER: done");
+
+    area::ToolRegistry tools;
+    auto ghidraTool = std::make_unique<EmittingFakeGhidraActionTool>();
+    auto* ghidraPtr = ghidraTool.get();
+    tools.add(std::move(ghidraTool));
+
+    area::Agent agent(std::move(backend), tools);
+    std::vector<area::AgentMessage> msgs;
+    agent.process(
+        "Analyze /tmp/sample.dll.\n\n"
+        "Questions: interesting functions, suspicious strings, malware behavior.\n"
+        "========================= GHIDRA DATA =========================\n"
+        "========== GHIDRA: /tmp/sample.dll ==========\n"
+        "--- overview ---\n"
+        "Likely DllMain: FUN_1000d02e @ 1000d02e\n"
+        "--- imports ---\n"
+        "  gethostbyname [WS2_32.DLL] (ordinal 52) @ EXTERNAL:00000016\n"
+        "===================== END GHIDRA DATA =========================\n",
+        [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    EXPECT_FALSE(ghidraPtr->actions.empty());
+    EXPECT_EQ(std::count_if(msgs.begin(), msgs.end(), [](const area::AgentMessage& msg) {
+        return msg.type == area::AgentMessage::RESULT;
+    }), 0);
+    EXPECT_EQ(std::count_if(msgs.begin(), msgs.end(), [](const area::AgentMessage& msg) {
+        return msg.type == area::AgentMessage::THINKING
+            && msg.content.starts_with("bootstrap GHIDRA:");
+    }), 0);
+    ASSERT_FALSE(msgs.empty());
+    EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
+    EXPECT_EQ(msgs.back().content, "done");
+}
+
+TEST(AgentPrompting, EmptyModelResponseRetriesInsteadOfReturningBlankAnswer) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    auto* backendPtr = backend.get();
+    backend->setResponses({"", "ANSWER: recovered"});
+
+    area::ToolRegistry tools;
+    area::Agent agent(std::move(backend), tools);
+    std::vector<area::AgentMessage> msgs;
+    agent.process("hello", [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    EXPECT_EQ(backendPtr->callCount(), 2);
+    ASSERT_FALSE(msgs.empty());
+    EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
+    EXPECT_EQ(msgs.back().content, "recovered");
 }
 
 TEST(AgentPrompting, LargeBenchPromptSkipsGenericStringBootstrapSweep) {

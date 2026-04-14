@@ -14,7 +14,7 @@ class GhidraTool : public Tool {
                "decompiler and program analysis. Works on ELF, PE, Mach-O, and raw "
                "object files. Provides decompiled C code, function signatures, imports, "
                "exports, strings with cross-references, and call graphs.\n"
-               "  Modes: overview (default), decompile, strings, imports, xrefs, "
+               "  Modes: overview (default), decompile, disasm, strings, imports, xrefs, "
                "function_at, data_at, all\n"
                "  Filter: function name substring OR hex address (0x1000D02E or 1000D02E).\n"
                "    When given an address, decompile and function_at resolve to the "
@@ -22,6 +22,7 @@ class GhidraTool : public Tool {
                "at that address. xrefs works for both code and data addresses.\n"
                "  Example: GHIDRA: /path/to/binary.elf\n"
                "  Example: GHIDRA: /path/to/binary.so | decompile | main\n"
+               "  Example: GHIDRA: /path/to/binary.so | disasm | 0x40123a\n"
                "  Example: GHIDRA: /path/to/binary.dll | decompile | 0x10001656\n"
                "  Example: GHIDRA: /path/to/binary.dll | function_at | 0x10001656\n"
                "  Example: GHIDRA: /path/to/binary.dll | data_at | 0x1001D988\n"
@@ -43,6 +44,7 @@ class GhidraTool : public Tool {
  private:
     std::string formatOverview(const std::string& jsonPath);
     std::string formatDecompile(const std::string& jsonPath);
+    std::string formatDisasm(const std::string& jsonPath);
     std::string formatStrings(const std::string& jsonPath);
     std::string formatImports(const std::string& jsonPath);
     std::string formatXrefs(const std::string& jsonPath);

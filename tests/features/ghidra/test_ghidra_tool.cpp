@@ -97,6 +97,7 @@ TEST(GhidraTool, DescriptionMentionsModes) {
     auto desc = tool.description();
     EXPECT_NE(desc.find("overview"), std::string::npos);
     EXPECT_NE(desc.find("decompile"), std::string::npos);
+    EXPECT_NE(desc.find("disasm"), std::string::npos);
     EXPECT_NE(desc.find("strings"), std::string::npos);
     EXPECT_NE(desc.find("xrefs"), std::string::npos);
     EXPECT_NE(desc.find("function_at"), std::string::npos);
@@ -259,6 +260,46 @@ TEST(GhidraTool, FormatsDataXrefs) {
     EXPECT_NE(result->observation.find("Data: 01001D980 .. 01001D99F"), std::string::npos);
     EXPECT_NE(result->observation.find("References (1)"), std::string::npos);
     EXPECT_NE(result->observation.find("sub_10001620 @ 010001656 [READ]"), std::string::npos);
+
+    std::error_code ec;
+    fs::remove(path, ec);
+}
+
+TEST(GhidraTool, FormatsAddressDisassembly) {
+    FakeGhidraTool tool;
+    GhidraToolMessages msgs;
+    area::Harness h;
+    area::ToolContext ctx{msgs.cb(), nullptr, h};
+    std::string path = makeTempBinary();
+
+    tool.outputs["disasm"] = R"json({
+  "metadata": {"name": "sample.exe"},
+  "disassembly": {
+    "kind": "function",
+    "function": "sub_10001620",
+    "address": "010001620",
+    "signature": "void sub_10001620(void)",
+    "requested_address": "010001656",
+    "offset_from_entry": 54,
+    "instruction_count": 3,
+    "function_instruction_count": 87,
+    "instructions": [
+      {"address": "010001650", "text": "MOV EAX,dword ptr [EBP + 0x8]", "flow_type": "FALL_THROUGH"},
+      {"address": "010001656", "text": "CALL Sleep", "flow_type": "CALL", "is_target": true},
+      {"address": "01000165b", "text": "TEST EAX,EAX", "flow_type": "FALL_THROUGH"}
+    ]
+  }
+})json";
+
+    auto result = tool.tryExecute("GHIDRA: " + path + " | disasm | 0x10001656", ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(tool.lastMode, "disasm");
+    EXPECT_EQ(tool.lastFilter, "0x10001656");
+    EXPECT_NE(result->observation.find("Ghidra Disassembly"), std::string::npos);
+    EXPECT_NE(result->observation.find("Requested address: 010001656"), std::string::npos);
+    EXPECT_NE(result->observation.find("Function: sub_10001620 @ 010001620"), std::string::npos);
+    EXPECT_NE(result->observation.find("Instructions shown: 3 / 87"), std::string::npos);
+    EXPECT_NE(result->observation.find("=> 010001656: CALL Sleep [CALL]"), std::string::npos);
 
     std::error_code ec;
     fs::remove(path, ec);

@@ -7,6 +7,7 @@
 // Modes:
 //   overview   — functions list + imports + exports + metadata
 //   decompile  — decompiled C for all or filtered functions
+//   disasm     — assembly listing for a function or exact address
 //   strings    — defined strings with xref info
 //   imports    — imports and exports detail
 //   xrefs      — cross-references for a specific function or data item (requires filter)
@@ -40,7 +41,7 @@ public class AreaAnalyze extends GhidraScript {
         String[] args = getScriptArgs();
         if (args.length < 2) {
             println("Usage: AreaAnalyze.java <output_path> <mode> [filter]");
-            println("Modes: overview, decompile, strings, imports, xrefs, function_at, data_at, all");
+            println("Modes: overview, decompile, disasm, strings, imports, xrefs, function_at, data_at, all");
             return;
         }
 
@@ -61,6 +62,9 @@ public class AreaAnalyze extends GhidraScript {
                 break;
             case "decompile":
                 writeFunctions(true, filter);
+                break;
+            case "disasm":
+                writeDisassembly(filter);
                 break;
             case "strings":
                 writeStrings(filter);
@@ -346,6 +350,116 @@ public class AreaAnalyze extends GhidraScript {
             count++;
         }
         pw.print("\n  ]");
+    }
+
+    private String formatInstruction(Instruction instr) {
+        return instr.toString();
+    }
+
+    private void writeDisassembly(String filter) {
+        sectionSep();
+        pw.println("  \"disassembly\": {");
+
+        Listing listing = currentProgram.getListing();
+        Address requestedAddr = parseAddressMaybe(filter);
+        Function target = (filter == null || filter.isEmpty()) ? null : resolveFilterFunction(filter);
+
+        if ((filter == null || filter.isEmpty()) && target == null) {
+            FunctionIterator iter = listing.getFunctions(true);
+            if (iter.hasNext()) target = iter.next();
+        }
+
+        Instruction requestedInstr = null;
+        if (requestedAddr != null) {
+            requestedInstr = listing.getInstructionContaining(requestedAddr);
+            if (requestedInstr == null) requestedInstr = listing.getInstructionAt(requestedAddr);
+        }
+
+        if (target == null && requestedInstr == null) {
+            pw.println("    \"error\": \"disasm mode requires a function name or code address filter\"");
+            pw.print("  }");
+            return;
+        }
+
+        List<Instruction> selected = new ArrayList<>();
+        if (target != null) {
+            List<Instruction> all = new ArrayList<>();
+            InstructionIterator iter = listing.getInstructions(target.getBody(), true);
+            while (iter.hasNext() && !monitor.isCancelled()) {
+                all.add(iter.next());
+            }
+
+            int start = 0;
+            int end = all.size();
+            if (requestedInstr != null) {
+                int hit = -1;
+                for (int i = 0; i < all.size(); i++) {
+                    if (all.get(i).getAddress().equals(requestedInstr.getAddress())) {
+                        hit = i;
+                        break;
+                    }
+                }
+                if (hit >= 0) {
+                    start = Math.max(0, hit - 20);
+                    end = Math.min(all.size(), hit + 21);
+                } else {
+                    end = Math.min(all.size(), 60);
+                }
+            } else {
+                end = Math.min(all.size(), 120);
+            }
+            for (int i = start; i < end; i++) selected.add(all.get(i));
+
+            pw.println("    \"kind\": \"function\",");
+            pw.println("    \"function\": \"" + escJson(target.getName()) + "\",");
+            pw.println("    \"address\": \"" + target.getEntryPoint() + "\",");
+            pw.println("    \"signature\": \"" + escJson(target.getPrototypeString(false, false)) + "\",");
+            pw.println("    \"function_instruction_count\": " + all.size() + ",");
+            if (requestedAddr != null) {
+                pw.println("    \"requested_address\": \"" + requestedAddr + "\",");
+                pw.println("    \"offset_from_entry\": " + requestedAddr.subtract(target.getEntryPoint()) + ",");
+            }
+            if (!all.isEmpty() && selected.size() < all.size()) {
+                pw.println("    \"window_start\": \"" + selected.get(0).getAddress() + "\",");
+                pw.println("    \"window_end\": \"" + selected.get(selected.size() - 1).getAddress() + "\",");
+            }
+        } else {
+            selected.add(requestedInstr);
+            Instruction before = requestedInstr;
+            for (int i = 0; i < 10; i++) {
+                before = listing.getInstructionBefore(before.getAddress());
+                if (before == null) break;
+                selected.add(0, before);
+            }
+            Instruction after = requestedInstr;
+            for (int i = 0; i < 10; i++) {
+                after = listing.getInstructionAfter(after.getAddress());
+                if (after == null) break;
+                selected.add(after);
+            }
+
+            pw.println("    \"kind\": \"window\",");
+            pw.println("    \"requested_address\": \"" + requestedAddr + "\",");
+            pw.println("    \"window_start\": \"" + selected.get(0).getAddress() + "\",");
+            pw.println("    \"window_end\": \"" + selected.get(selected.size() - 1).getAddress() + "\",");
+        }
+
+        pw.println("    \"instruction_count\": " + selected.size() + ",");
+        pw.println("    \"instructions\": [");
+        boolean first = true;
+        for (Instruction instr : selected) {
+            if (!first) pw.println(",");
+            first = false;
+            pw.print("      {\"address\": \"" + instr.getAddress() + "\"");
+            pw.print(", \"text\": \"" + escJson(formatInstruction(instr)) + "\"");
+            pw.print(", \"flow_type\": \"" + escJson(instr.getFlowType().toString()) + "\"");
+            if (requestedInstr != null && instr.getAddress().equals(requestedInstr.getAddress())) {
+                pw.print(", \"is_target\": true");
+            }
+            pw.print("}");
+        }
+        pw.println("\n    ]");
+        pw.print("  }");
     }
 
     private Data resolveFilterData(String filter) {

@@ -24,7 +24,7 @@ using json = nlohmann::json;
 namespace area {
 namespace {
 bool isValidMode(const std::string& mode) {
-    return mode == "overview" || mode == "decompile" || mode == "strings" ||
+    return mode == "overview" || mode == "decompile" || mode == "disasm" || mode == "strings" ||
            mode == "imports" || mode == "xrefs" || mode == "function_at" ||
            mode == "data_at" || mode == "all";
 }
@@ -119,7 +119,7 @@ std::optional<ToolResult> GhidraTool::tryExecute(const std::string& action, Tool
     if (args.empty()) {
         return ToolResult{"OBSERVATION: Error — provide a file path.\n"
                           "Usage: GHIDRA: <path> [| <mode> [| <filter>]]\n"
-                          "Modes: overview (default), decompile, strings, imports, xrefs, "
+                          "Modes: overview (default), decompile, disasm, strings, imports, xrefs, "
                           "function_at, data_at, all"};
     }
 
@@ -157,7 +157,7 @@ std::optional<ToolResult> GhidraTool::tryExecute(const std::string& action, Tool
 
     if (!isValidMode(mode)) {
         return ToolResult{"OBSERVATION: Error — unknown mode '" + mode + "'.\n"
-                          "Valid modes: overview, decompile, strings, imports, xrefs, "
+                          "Valid modes: overview, decompile, disasm, strings, imports, xrefs, "
                           "function_at, data_at, all"};
     }
 
@@ -190,6 +190,7 @@ std::optional<ToolResult> GhidraTool::tryExecute(const std::string& action, Tool
     std::string formatted;
     if (mode == "overview")        formatted = formatOverview(outputPath);
     else if (mode == "decompile")  formatted = formatDecompile(outputPath);
+    else if (mode == "disasm")     formatted = formatDisasm(outputPath);
     else if (mode == "strings")    formatted = formatStrings(outputPath);
     else if (mode == "imports")    formatted = formatImports(outputPath);
     else if (mode == "xrefs")      formatted = formatXrefs(outputPath);
@@ -237,6 +238,8 @@ std::string GhidraTool::runGhidra(const std::string& binaryPath,
         if (sd.empty()) return "Ghidra scripts not found (scripts/ghidra/AreaAnalyze.java)";
 
         cmd << "sudo docker run --rm"
+            << " --user " << getuid() << ":" << getgid()
+            << " -e HOME=/tmp"
             << " -v " << absInput << ":/input/" << fs::path(binaryPath).filename().string()
             << " -v " << sd << ":/scripts"
             << " -v " << absOutput << ":/output"
@@ -393,6 +396,7 @@ std::string GhidraTool::formatOverview(const std::string& jsonPath) {
 
     out << "\nUse GHIDRA: <path> | function_at | 0xADDR to resolve a code address.\n"
         << "Use GHIDRA: <path> | data_at | 0xADDR to resolve a data address.\n"
+        << "Use GHIDRA: <path> | disasm | 0xADDR for assembly around a code address.\n"
         << "Use GHIDRA: <path> | decompile [| funcname_or_0xADDR] for decompiled C code.\n";
     return out.str();
 }
@@ -418,6 +422,63 @@ std::string GhidraTool::formatDecompile(const std::string& jsonPath) {
             } else {
                 out << code << "\n";
             }
+            out << "\n";
+        }
+    }
+
+    return out.str();
+}
+
+std::string GhidraTool::formatDisasm(const std::string& jsonPath) {
+    auto data = loadJson(jsonPath);
+    if (data.empty()) return "Error: could not parse Ghidra output";
+
+    std::ostringstream out;
+    auto& meta = data["metadata"];
+    out << "=== Ghidra Disassembly: " << meta.value("name", "?") << " ===\n\n";
+
+    if (!data.contains("disassembly") || !data["disassembly"].is_object()) {
+        out << "Error: disassembly missing from Ghidra output\n";
+        return out.str();
+    }
+
+    auto& dis = data["disassembly"];
+    if (dis.contains("error")) {
+        out << "Error: " << dis["error"].get<std::string>() << "\n";
+        return out.str();
+    }
+
+    auto kind = dis.value("kind", "function");
+    if (dis.contains("requested_address")) {
+        out << "Requested address: " << dis.value("requested_address", "?") << "\n";
+    }
+    if (kind == "function") {
+        out << "Function: " << dis.value("function", "?")
+            << " @ " << dis.value("address", "?") << "\n";
+        auto sig = dis.value("signature", "");
+        if (!sig.empty()) out << "Signature: " << sig << "\n";
+        if (dis.contains("offset_from_entry")) {
+            out << "Offset from entry: " << dis.value("offset_from_entry", 0) << "\n";
+        }
+        out << "Instructions shown: " << dis.value("instruction_count", 0);
+        if (dis.contains("function_instruction_count")) {
+            out << " / " << dis.value("function_instruction_count", 0);
+        }
+        out << "\n";
+    } else {
+        out << "Window: " << dis.value("window_start", "?")
+            << " .. " << dis.value("window_end", "?") << "\n"
+            << "Instructions shown: " << dis.value("instruction_count", 0) << "\n";
+    }
+
+    out << "\n";
+    if (dis.contains("instructions") && dis["instructions"].is_array()) {
+        for (const auto& ins : dis["instructions"]) {
+            out << (ins.value("is_target", false) ? "=> " : "   ")
+                << ins.value("address", "?") << ": "
+                << ins.value("text", "");
+            auto flow = ins.value("flow_type", "");
+            if (!flow.empty()) out << " [" << flow << "]";
             out << "\n";
         }
     }

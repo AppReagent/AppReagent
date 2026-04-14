@@ -265,6 +265,47 @@ TEST(GhidraTool, FormatsDataXrefs) {
     fs::remove(path, ec);
 }
 
+TEST(GhidraTool, FormatsImportXrefs) {
+    FakeGhidraTool tool;
+    GhidraToolMessages msgs;
+    area::Harness h;
+    area::ToolContext ctx{msgs.cb(), nullptr, h};
+    std::string path = makeTempBinary();
+
+    tool.outputs["xrefs"] = R"json({
+  "metadata": {"name": "sample.exe"},
+  "xrefs": {
+    "kind": "import",
+    "function": "gethostbyname",
+    "address": "EXTERNAL:00000016",
+    "library": "WS2_32.DLL",
+    "caller_count": 2,
+    "callsite_count": 4,
+    "ordinal": 52,
+    "original_name": "Ordinal_52",
+    "callers": [
+      {"from": "010001074", "function": "FUN_10001074", "type": "UNCONDITIONAL_CALL"},
+      {"from": "01000208f", "function": "FUN_1000208f", "type": "UNCONDITIONAL_CALL"}
+    ],
+    "callees": []
+  }
+})json";
+
+    auto result = tool.tryExecute("GHIDRA: " + path + " | xrefs | gethostbyname", ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(tool.lastMode, "xrefs");
+    EXPECT_EQ(tool.lastFilter, "gethostbyname");
+    EXPECT_NE(result->observation.find("Import: gethostbyname [WS2_32.DLL] @ EXTERNAL:00000016"), std::string::npos);
+    EXPECT_NE(result->observation.find("Ordinal: 52"), std::string::npos);
+    EXPECT_NE(result->observation.find("Original name: Ordinal_52"), std::string::npos);
+    EXPECT_NE(result->observation.find("Functions calling: 2 | Call sites: 4"), std::string::npos);
+    EXPECT_NE(result->observation.find("--- Callers (2) ---"), std::string::npos);
+    EXPECT_NE(result->observation.find("FUN_10001074 @ 010001074 [UNCONDITIONAL_CALL]"), std::string::npos);
+
+    std::error_code ec;
+    fs::remove(path, ec);
+}
+
 TEST(GhidraTool, FormatsAddressDisassembly) {
     FakeGhidraTool tool;
     GhidraToolMessages msgs;
@@ -322,6 +363,7 @@ TEST(GhidraTool, FormatsResolvedImportOrdinalsAndCallers) {
       "original_name": "Ordinal_52",
       "ordinal": 52,
       "caller_count": 3,
+      "callsite_count": 8,
       "referenced_by": ["FUN_10001074", "FUN_1000208f", "FUN_10002cce"]
     }
   ],
@@ -333,7 +375,8 @@ TEST(GhidraTool, FormatsResolvedImportOrdinalsAndCallers) {
     EXPECT_EQ(tool.lastMode, "imports");
     EXPECT_NE(result->observation.find("gethostbyname [WS2_32.DLL] (ordinal 52) @ EXTERNAL:00000034"), std::string::npos);
     EXPECT_NE(result->observation.find("original: Ordinal_52"), std::string::npos);
-    EXPECT_NE(result->observation.find("callers: 3 — referenced by: FUN_10001074 FUN_1000208f FUN_10002cce"), std::string::npos);
+    EXPECT_NE(result->observation.find("callers: 3 | call sites: 8"), std::string::npos);
+    EXPECT_NE(result->observation.find("referenced by: FUN_10001074 FUN_1000208f FUN_10002cce"), std::string::npos);
 
     std::error_code ec;
     fs::remove(path, ec);

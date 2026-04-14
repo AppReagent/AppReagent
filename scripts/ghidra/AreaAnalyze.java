@@ -175,6 +175,15 @@ public class AreaAnalyze extends GhidraScript {
         }
     }
 
+    private static class ImportRef {
+        Function function;
+        ExternalLocation location;
+        String library;
+        String originalName;
+        String resolvedName;
+        Integer ordinal;
+    }
+
     private PeMetadata parsePeMetadata() {
         if (!currentProgram.getExecutableFormat().contains("Portable Executable")) return null;
         try {
@@ -406,11 +415,12 @@ public class AreaAnalyze extends GhidraScript {
             String resolvedName = resolveImportName(lib, originalName);
             Reference[] refsTo = getReferencesTo(f.getEntryPoint());
             Set<String> refFuncs = new LinkedHashSet<>();
-            int callerCount = 0;
+            int callsiteCount = 0;
             for (Reference ref : refsTo) {
+                if (!ref.getReferenceType().isCall()) continue;
+                callsiteCount++;
                 Function caller = getFunctionContaining(ref.getFromAddress());
                 if (caller != null) refFuncs.add(caller.getName());
-                if (ref.getReferenceType().isCall()) callerCount++;
             }
 
             pw.print("    {\"name\": \"" + escJson(resolvedName) + "\"");
@@ -422,7 +432,8 @@ public class AreaAnalyze extends GhidraScript {
             if (ordinal != null) {
                 pw.print(", \"ordinal\": " + ordinal);
             }
-            pw.print(", \"caller_count\": " + callerCount);
+            pw.print(", \"caller_count\": " + refFuncs.size());
+            pw.print(", \"callsite_count\": " + callsiteCount);
             if (!refFuncs.isEmpty()) {
                 pw.print(", \"referenced_by\": [");
                 boolean first = true;
@@ -685,6 +696,44 @@ public class AreaAnalyze extends GhidraScript {
         return resolved != null ? resolved : name;
     }
 
+    private ImportRef resolveImportFunction(String filter) {
+        if (filter == null || filter.isEmpty()) return null;
+
+        Address requestedAddr = parseAddressMaybe(filter);
+        String filterLower = filter.toLowerCase();
+
+        FunctionIterator extFuncs = currentProgram.getListing().getExternalFunctions();
+        while (extFuncs.hasNext()) {
+            Function f = extFuncs.next();
+            ExternalLocation extLoc = f.getExternalLocation();
+            String library = (extLoc != null && extLoc.getLibraryName() != null)
+                ? extLoc.getLibraryName() : "";
+            String originalName = f.getName();
+            String resolvedName = resolveImportName(library, originalName);
+
+            boolean matches = false;
+            if (requestedAddr != null) {
+                matches = f.getEntryPoint().equals(requestedAddr);
+            } else {
+                matches = resolvedName.toLowerCase().contains(filterLower)
+                    || originalName.toLowerCase().contains(filterLower)
+                    || library.toLowerCase().contains(filterLower);
+            }
+
+            if (!matches) continue;
+
+            ImportRef ref = new ImportRef();
+            ref.function = f;
+            ref.location = extLoc;
+            ref.library = library;
+            ref.originalName = originalName;
+            ref.resolvedName = resolvedName;
+            ref.ordinal = extractOrdinal(originalName);
+            return ref;
+        }
+        return null;
+    }
+
     private void writeFunctionJson(Function f, Address requestedAddr, boolean includeDecompile) throws Exception {
         pw.print("    \"name\": \"" + escJson(f.getName()) + "\"");
         pw.print(",\n    \"address\": \"" + f.getEntryPoint() + "\"");
@@ -849,8 +898,9 @@ public class AreaAnalyze extends GhidraScript {
         Address requestedAddr = parseAddressMaybe(funcName);
         Function target = resolveFilterFunction(funcName);
         Data targetData = target == null ? resolveFilterData(funcName) : null;
+        ImportRef targetImport = (target == null && targetData == null) ? resolveImportFunction(funcName) : null;
 
-        if (target == null && targetData == null) {
+        if (target == null && targetData == null && targetImport == null) {
             pw.println("    \"error\": \"symbol not found: " + escJson(funcName) + "\"");
             pw.print("  }");
             return;
@@ -860,7 +910,44 @@ public class AreaAnalyze extends GhidraScript {
             pw.println("    \"requested_address\": \"" + requestedAddr + "\",");
         }
 
-        if (target != null) {
+        if (targetImport != null) {
+            Reference[] refsTo = getReferencesTo(targetImport.function.getEntryPoint());
+            Set<String> callerFunctions = new LinkedHashSet<>();
+            List<Reference> callRefs = new ArrayList<>();
+            for (Reference ref : refsTo) {
+                if (!ref.getReferenceType().isCall()) continue;
+                callRefs.add(ref);
+                Function caller = getFunctionContaining(ref.getFromAddress());
+                if (caller != null) callerFunctions.add(caller.getName());
+            }
+
+            pw.println("    \"kind\": \"import\",");
+            pw.println("    \"function\": \"" + escJson(targetImport.resolvedName) + "\",");
+            pw.println("    \"address\": \"" + targetImport.function.getEntryPoint() + "\",");
+            pw.println("    \"library\": \"" + escJson(targetImport.library) + "\",");
+            pw.println("    \"caller_count\": " + callerFunctions.size() + ",");
+            pw.println("    \"callsite_count\": " + callRefs.size() + ",");
+            if (targetImport.ordinal != null) {
+                pw.println("    \"ordinal\": " + targetImport.ordinal + ",");
+            }
+            if (!targetImport.resolvedName.equals(targetImport.originalName)) {
+                pw.println("    \"original_name\": \"" + escJson(targetImport.originalName) + "\",");
+            }
+
+            pw.println("    \"callers\": [");
+            firstEntry = true;
+            for (Reference ref : callRefs) {
+                Function caller = getFunctionContaining(ref.getFromAddress());
+                if (!firstEntry) pw.println(",");
+                firstEntry = false;
+
+                pw.print("      {\"from\": \"" + ref.getFromAddress() + "\"");
+                pw.print(", \"function\": \"" + escJson(caller != null ? caller.getName() : "unknown") + "\"");
+                pw.print(", \"type\": \"" + escJson(ref.getReferenceType().getName()) + "\"}");
+            }
+            pw.println("\n    ],");
+            pw.println("    \"callees\": []");
+        } else if (target != null) {
             pw.println("    \"kind\": \"function\",");
             pw.println("    \"function\": \"" + escJson(target.getName()) + "\",");
             pw.println("    \"address\": \"" + target.getEntryPoint() + "\",");

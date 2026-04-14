@@ -621,6 +621,9 @@ std::string GhidraTool::formatImports(const std::string& jsonPath) {
                 out << "    original: " << imp.value("original_name", "") << "\n";
             }
             out << "    callers: " << imp.value("caller_count", 0);
+            if (imp.contains("callsite_count")) {
+                out << " | call sites: " << imp.value("callsite_count", 0);
+            }
             if (imp.contains("referenced_by") && imp["referenced_by"].is_array() &&
                 !imp["referenced_by"].empty()) {
                 out << " — referenced by:";
@@ -684,6 +687,36 @@ std::string GhidraTool::formatXrefs(const std::string& jsonPath) {
             }
             out << "\n--- References (" << xr.value("xref_count", 0) << ") ---\n"
                 << "  " << joinCallsites(xr.value("references", json::array())) << "\n";
+            return out.str();
+        }
+        if (kind == "import") {
+            out << "Import: " << xr.value("function", "?");
+            auto lib = xr.value("library", "");
+            if (!lib.empty()) out << " [" << lib << "]";
+            out << " @ " << xr.value("address", "?") << "\n";
+            if (xr.contains("ordinal")) {
+                out << "Ordinal: " << xr.value("ordinal", 0) << "\n";
+            }
+            if (xr.contains("original_name")) {
+                out << "Original name: " << xr.value("original_name", "") << "\n";
+            }
+            if (xr.contains("caller_count")) {
+                out << "Functions calling: " << xr.value("caller_count", 0);
+                if (xr.contains("callsite_count")) {
+                    out << " | Call sites: " << xr.value("callsite_count", 0);
+                }
+                out << "\n";
+            }
+            out << "\n";
+
+            if (xr.contains("callers") && xr["callers"].is_array()) {
+                out << "--- Callers (" << xr["callers"].size() << ") ---\n";
+                for (auto& c : xr["callers"]) {
+                    out << "  " << c.value("function", "?")
+                        << " @ " << c.value("from", "?")
+                        << " [" << c.value("type", "?") << "]\n";
+                }
+            }
             return out.str();
         }
 

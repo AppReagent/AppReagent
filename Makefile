@@ -101,7 +101,7 @@ lint-diff:
 	echo "Linting $$(echo $$FILES | wc -w) changed files..."; \
 	./scripts/lint-no-comments.sh . && \
 	echo $$FILES | xargs cpplint && \
-	cppcheck --enable=warning,performance,portability --error-exitcode=1 --suppress=missingIncludeSystem --inline-suppr -j$$(nproc) -I include $$FILES && \
+	cppcheck --language=c++ --enable=warning,performance,portability --error-exitcode=1 --suppress=missingIncludeSystem --inline-suppr -j$$(nproc) -I include $$FILES && \
 	CPPS=$$(echo $$FILES | tr ' ' '\n' | grep '\.cpp$$' || true); \
 	if [ -n "$$CPPS" ]; then ./scripts/lint-iwyu.sh $$CPPS; fi
 

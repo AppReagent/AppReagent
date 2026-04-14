@@ -152,15 +152,13 @@ std::shared_ptr<ChatSession> AreaServer::getOrCreateChat(const std::string& id,
             chatPool_ = std::make_unique<BackendPool>(config_.ai_endpoints, 2);
         }
 
-        session->sandbox = std::make_unique<Sandbox>(session->dataDir);
-
         session->tools = std::make_unique<ToolRegistry>();
         session->tools->add(std::make_unique<GenerateRunIdTool>());
         session->tools->add(std::make_unique<StateTool>(&scanState_));
         session->tools->add(std::make_unique<PauseScanTool>(&scanState_));
         session->tools->add(std::make_unique<ResumeScanTool>(&config_, db_, &scanState_, id));
         session->tools->add(std::make_unique<DeleteScanTool>(&config_, db_, &scanState_));
-        session->tools->add(std::make_unique<ShellTool>(session->sandbox.get()));
+        session->tools->add(std::make_unique<ShellTool>());
         session->tools->add(std::make_unique<FindFilesTool>());
         session->tools->add(std::make_unique<GrepTool>());
         session->tools->add(std::make_unique<ReadFileTool>());

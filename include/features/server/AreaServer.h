@@ -14,7 +14,6 @@
 #include "infra/llm/BackendPool.h"
 #include "infra/config/Config.h"
 #include "infra/db/Database.h"
-#include "infra/sandbox/Sandbox.h"
 #include "features/scan/ScanState.h"
 #include "infra/tools/ToolRegistry.h"
 #include "infra/events/EventBus.h"
@@ -27,7 +26,6 @@ struct ChatSession {
     std::string name;
 
     std::unique_ptr<Agent> agent;
-    std::unique_ptr<Sandbox> sandbox;
     std::unique_ptr<ToolRegistry> tools;
 
     struct DisplayMsg {

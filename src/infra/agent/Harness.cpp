@@ -253,9 +253,6 @@ Harness Harness::createDefault() {
     h.addSensor({"shell_error", "shell",
         [](const std::string&, const std::string& observation) -> std::string {
             if (observation.find("exit code: 0") != std::string::npos) return "";
-            if (observation.find("Sandbox not available") != std::string::npos) {
-                return "WARNING: Docker sandbox not available.";
-            }
             if (observation.find("exit code: 137") != std::string::npos) {
                 return "WARNING: OOM killed. Use less memory.";
             }

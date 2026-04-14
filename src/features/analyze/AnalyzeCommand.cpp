@@ -22,9 +22,7 @@ namespace fs = std::filesystem;
 
 namespace area {
 AnalyzeCommand::AnalyzeCommand(const Config& config, Database& db)
-    : config_(config), db_(db) {
-    rag_ = RagProvider::create(config, db);
-}
+    : config_(config), db_(db), rag_(RagProvider::create(config, db)) {}
 
 void AnalyzeCommand::emitLog(const std::string& msg) {
     if (logCb_) logCb_(msg);

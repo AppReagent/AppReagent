@@ -32,9 +32,7 @@ namespace fs = std::filesystem;
 
 namespace area {
 ScanCommand::ScanCommand(const Config& config, Database& db)
-    : config_(config), db_(db), log_(db) {
-    rag_ = RagProvider::create(config, db);
-}
+    : config_(config), db_(db), log_(db), rag_(RagProvider::create(config, db)) {}
 
 static bool fileHasElfMagic(const std::string& path) {
     std::ifstream f(path, std::ios::binary);

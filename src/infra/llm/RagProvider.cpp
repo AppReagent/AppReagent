@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <iostream>
 #include <memory>
@@ -21,19 +22,11 @@
 
 namespace area {
 
-// ---------------------------------------------------------------------------
-// CustomRagProvider: wraps the existing "bring your own embedding model +
-// pgvector" stack. The EmbeddingBackend and EmbeddingStore classes stay
-// unchanged — this provider just composes them behind the RagProvider
-// interface.
-// ---------------------------------------------------------------------------
-
 class CustomRagProvider : public RagProvider {
  public:
-    CustomRagProvider(const EmbeddingEndpoint& ep, Database& db) {
-        backend_ = EmbeddingBackend::create(ep);
-        store_ = std::make_unique<EmbeddingStore>(db, backend_.get());
-    }
+    CustomRagProvider(const EmbeddingEndpoint& ep, Database& db)
+        : backend_(EmbeddingBackend::create(ep)),
+          store_(std::make_unique<EmbeddingStore>(db, backend_.get())) {}
 
     void addDocument(const std::string& run_id,
                      const std::string& file_path,
@@ -78,13 +71,6 @@ class CustomRagProvider : public RagProvider {
     std::unique_ptr<EmbeddingStore> store_;
 };
 
-// ---------------------------------------------------------------------------
-// VultrRagProvider: managed RAG. Vultr handles the embedding model and the
-// vector index; we just POST/GET/DELETE via HTTPS and pack per-document
-// metadata into a JSON header line inside the stored content so that scan
-// ids and source paths can be recovered from search results.
-// ---------------------------------------------------------------------------
-
 namespace {
 
 struct VultrCurlHandle {
@@ -108,9 +94,8 @@ size_t vultrWriteCb(char* data, size_t size, size_t nmemb, std::string* out) {
     return total;
 }
 
-// verb = "GET" | "POST" | "DELETE". body can be empty for GET/DELETE.
 struct VultrResp {
-    long status = 0;
+    int64_t status = 0;
     std::string body;
 };
 
@@ -133,7 +118,8 @@ VultrResp vultrRequest(const std::string& verb,
     curl_easy_setopt(ch.curl, CURLOPT_CONNECTTIMEOUT, 5L);
     if (!body.empty()) {
         curl_easy_setopt(ch.curl, CURLOPT_POSTFIELDS, body.c_str());
-        curl_easy_setopt(ch.curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(body.size()));
+        curl_easy_setopt(ch.curl, CURLOPT_POSTFIELDSIZE_LARGE,
+                         static_cast<curl_off_t>(body.size()));
     }
 
     CURLcode res = curl_easy_perform(ch.curl);
@@ -141,13 +127,12 @@ VultrResp vultrRequest(const std::string& verb,
         throw std::runtime_error(std::string("vultr HTTP ") + verb + " failed: " +
                                  curl_easy_strerror(res));
     }
-    curl_easy_getinfo(ch.curl, CURLINFO_RESPONSE_CODE, &resp.status);
+    decltype(0L) response_code = 0;
+    curl_easy_getinfo(ch.curl, CURLINFO_RESPONSE_CODE, &response_code);
+    resp.status = response_code;
     return resp;
 }
 
-// Pack metadata as a single JSON-encoded line at the top of the stored
-// content so it survives the round trip through Vultr's vector store.
-// Parse back with splitRagHeader.
 std::string makeRagHeader(const std::string& run_id,
                           const std::string& file_path,
                           const std::string& file_hash,
@@ -192,7 +177,6 @@ RagHeader parseRagHeader(const std::string& stored) {
             return out;
         }
     } catch (...) {
-        // not our header, treat whole thing as body
     }
     out.body = stored;
     return out;
@@ -202,7 +186,7 @@ RagHeader parseRagHeader(const std::string& stored) {
 
 class VultrRagProvider : public RagProvider {
  public:
-    VultrRagProvider(const EmbeddingEndpoint& ep)
+    explicit VultrRagProvider(const EmbeddingEndpoint& ep)
         : base_url_(ep.url), api_key_(ep.api_key), collection_id_(ep.collection_id) {
         while (!base_url_.empty() && base_url_.back() == '/') base_url_.pop_back();
         if (collection_id_.empty()) {
@@ -248,7 +232,7 @@ class VultrRagProvider : public RagProvider {
 
         nlohmann::json body = {
             {"input", text},
-            {"top_k", top_k * 2},  // over-fetch so we can drop items matching exclude_run_id
+            {"top_k", top_k * 2},
         };
         VultrResp resp;
         try {
@@ -277,9 +261,6 @@ class VultrRagProvider : public RagProvider {
                 auto meta = parseRagHeader(stored);
                 if (!exclude_run_id.empty() && meta.run_id == exclude_run_id) continue;
 
-                // Rank-based similarity: Vultr doesn't return scores, so we
-                // synthesize a monotonic value 1.0..0 so display code still
-                // renders a meaningful number.
                 double rank_sim = 1.0 - (static_cast<double>(i) / std::max(1, top_k));
                 if (rank_sim < 0.0) rank_sim = 0.0;
 
@@ -348,10 +329,6 @@ class VultrRagProvider : public RagProvider {
     std::string api_key_;
     std::string collection_id_;
 };
-
-// ---------------------------------------------------------------------------
-// Factory
-// ---------------------------------------------------------------------------
 
 std::unique_ptr<RagProvider> RagProvider::create(const Config& config, Database& db) {
     if (!config.embedding.has_value()) return nullptr;

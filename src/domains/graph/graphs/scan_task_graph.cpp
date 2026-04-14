@@ -1,11 +1,9 @@
 #include "domains/graph/graphs/scan_task_graph.h"
 
-#include "infra/llm/RagProvider.h"
-
-#include <bits/std_abs.h>
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <bits/std_abs.h>
 #include <algorithm>
 #include <cctype>
 #include <cinttypes>
@@ -21,20 +19,21 @@
 #include "domains/elf/disassembler.h"
 #include "domains/graph/engine/task_context.h"
 #include "domains/graph/graphs/elf_analysis.h"
-#include "domains/graph/util/json_extract.h"
-#include "infra/llm/Embedding.h"
-#include "nlohmann/detail/iterators/iter_impl.hpp"
-#include "nlohmann/detail/json_ref.hpp"
-#include "nlohmann/json.hpp"
-#include "util/file_io.h"
-
-using area::graph::extractJson;
-namespace fs = std::filesystem;
 #include "domains/graph/nodes/code_node.h"
 #include "domains/graph/nodes/llm_call_node.h"
 #include "domains/graph/nodes/splitter_node.h"
 #include "domains/graph/nodes/supervised_llm_call_node.h"
+#include "domains/graph/util/json_extract.h"
+#include "infra/llm/Embedding.h"
+#include "infra/llm/RagProvider.h"
+#include "nlohmann/detail/iterators/iter_impl.hpp"
+#include "nlohmann/detail/json_ref.hpp"
+#include "nlohmann/json.hpp"
 #include "domains/smali/parser.h"
+#include "util/file_io.h"
+
+using area::graph::extractJson;
+namespace fs = std::filesystem;
 
 namespace area::graph {
 area::LLMBackend* TierBackends::at(int tier) const {

@@ -573,6 +573,7 @@ std::string summarizeGhidraObservation(const std::string& action,
                 || trimmed.starts_with("Data: ")) {
                 notes.push_back(trimmed);
             } else if (trimmed.starts_with("Functions calling:")
+                       || trimmed.starts_with("IAT slot")
                        || trimmed.starts_with("Type: ")
                        || trimmed.starts_with("Requested address:")) {
                 notes.push_back(trimmed);

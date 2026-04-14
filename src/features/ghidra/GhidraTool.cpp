@@ -1103,6 +1103,15 @@ std::string GhidraTool::formatImports(const std::string& jsonPath) {
             if (imp.contains("original_name")) {
                 out << "    original: " << imp.value("original_name", "") << "\n";
             }
+            if (imp.contains("iat_slots") && imp["iat_slots"].is_array() && !imp["iat_slots"].empty()) {
+                out << "    IAT slot";
+                if (imp["iat_slots"].size() > 1) out << "s";
+                out << ":";
+                for (const auto& slot : imp["iat_slots"]) {
+                    out << " " << slot.get<std::string>();
+                }
+                out << "\n";
+            }
             out << "    callers: " << imp.value("caller_count", 0);
             if (imp.contains("callsite_count")) {
                 out << " | call sites: " << imp.value("callsite_count", 0);
@@ -1190,6 +1199,15 @@ std::string GhidraTool::formatXrefs(const std::string& jsonPath) {
             }
             if (xr.contains("original_name")) {
                 out << "Original name: " << xr.value("original_name", "") << "\n";
+            }
+            if (xr.contains("iat_slots") && xr["iat_slots"].is_array() && !xr["iat_slots"].empty()) {
+                out << "IAT slot";
+                if (xr["iat_slots"].size() > 1) out << "s";
+                out << ":";
+                for (const auto& slot : xr["iat_slots"]) {
+                    out << " " << slot.get<std::string>();
+                }
+                out << "\n";
             }
             if (xr.contains("caller_count")) {
                 out << "Functions calling: " << xr.value("caller_count", 0);

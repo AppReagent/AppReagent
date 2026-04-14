@@ -462,12 +462,15 @@ public class AreaAnalyze extends GhidraScript {
             Reference[] refsTo = getReferencesTo(f.getEntryPoint());
             Set<String> refFuncs = new LinkedHashSet<>();
             int callsiteCount = 0;
+            List<Reference> callRefs = new ArrayList<>();
             for (Reference ref : refsTo) {
                 if (!ref.getReferenceType().isCall()) continue;
+                callRefs.add(ref);
                 callsiteCount++;
                 Function caller = getFunctionContaining(ref.getFromAddress());
                 if (caller != null) refFuncs.add(caller.getName());
             }
+            List<String> importSlots = collectImportSlotAddresses(callRefs.toArray(new Reference[0]));
 
             pw.print("    {\"name\": \"" + escJson(resolvedName) + "\"");
             pw.print(", \"library\": \"" + escJson(lib) + "\"");
@@ -480,6 +483,14 @@ public class AreaAnalyze extends GhidraScript {
             }
             pw.print(", \"caller_count\": " + refFuncs.size());
             pw.print(", \"callsite_count\": " + callsiteCount);
+            if (!importSlots.isEmpty()) {
+                pw.print(", \"iat_slots\": [");
+                for (int i = 0; i < importSlots.size(); i++) {
+                    if (i > 0) pw.print(", ");
+                    pw.print("\"" + escJson(importSlots.get(i)) + "\"");
+                }
+                pw.print("]");
+            }
             if (!refFuncs.isEmpty()) {
                 pw.print(", \"referenced_by\": [");
                 boolean first = true;
@@ -779,6 +790,29 @@ public class AreaAnalyze extends GhidraScript {
             refs.add(new FunctionRef(callee.getName(), callee.getEntryPoint().toString()));
         }
         return refs;
+    }
+
+    private List<String> collectImportSlotAddresses(Reference[] refs) {
+        LinkedHashSet<String> slots = new LinkedHashSet<>();
+        Listing listing = currentProgram.getListing();
+
+        for (Reference ref : refs) {
+            Instruction instr = listing.getInstructionContaining(ref.getFromAddress());
+            if (instr == null) continue;
+
+            for (int opIndex = 0; opIndex < instr.getNumOperands(); opIndex++) {
+                Reference[] opRefs = instr.getOperandReferences(opIndex);
+                for (Reference opRef : opRefs) {
+                    Address to = opRef.getToAddress();
+                    if (to == null || to.isExternalAddress()) continue;
+                    MemoryBlock block = currentProgram.getMemory().getBlock(to);
+                    if (block == null) continue;
+                    slots.add(to.toString());
+                }
+            }
+        }
+
+        return new ArrayList<>(slots);
     }
 
     private List<ReferenceFunctionSummary> summarizeReferences(Reference[] refs) {
@@ -1158,6 +1192,7 @@ public class AreaAnalyze extends GhidraScript {
                 Function caller = getFunctionContaining(ref.getFromAddress());
                 if (caller != null) callerFunctions.add(caller.getName());
             }
+            List<String> importSlots = collectImportSlotAddresses(callRefs.toArray(new Reference[0]));
 
             pw.println("    \"kind\": \"import\",");
             pw.println("    \"function\": \"" + escJson(targetImport.resolvedName) + "\",");
@@ -1170,6 +1205,14 @@ public class AreaAnalyze extends GhidraScript {
             }
             if (!targetImport.resolvedName.equals(targetImport.originalName)) {
                 pw.println("    \"original_name\": \"" + escJson(targetImport.originalName) + "\",");
+            }
+            if (!importSlots.isEmpty()) {
+                pw.print("    \"iat_slots\": [");
+                for (int i = 0; i < importSlots.size(); i++) {
+                    if (i > 0) pw.print(", ");
+                    pw.print("\"" + escJson(importSlots.get(i)) + "\"");
+                }
+                pw.println("],");
             }
 
             pw.println("    \"callers\": [");

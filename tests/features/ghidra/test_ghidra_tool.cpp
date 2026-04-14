@@ -512,6 +512,7 @@ TEST(GhidraTool, FormatsImportXrefs) {
     "callsite_count": 4,
     "ordinal": 52,
     "original_name": "Ordinal_52",
+    "iat_slots": ["0100163CC"],
     "callers": [
       {"from": "010001074", "function": "FUN_10001074", "type": "UNCONDITIONAL_CALL"},
       {"from": "01000208f", "function": "FUN_1000208f", "type": "UNCONDITIONAL_CALL"}
@@ -548,6 +549,7 @@ TEST(GhidraTool, FormatsImportXrefs) {
     EXPECT_NE(result->observation.find("Import: gethostbyname [WS2_32.DLL] @ EXTERNAL:00000016"), std::string::npos);
     EXPECT_NE(result->observation.find("Ordinal: 52"), std::string::npos);
     EXPECT_NE(result->observation.find("Original name: Ordinal_52"), std::string::npos);
+    EXPECT_NE(result->observation.find("IAT slot: 0100163CC"), std::string::npos);
     EXPECT_NE(result->observation.find("Functions calling: 2 | Call sites: 4"), std::string::npos);
     EXPECT_NE(result->observation.find("--- Callers (2) ---"), std::string::npos);
     EXPECT_NE(result->observation.find("FUN_10001074 @ 010001074 [UNCONDITIONAL_CALL]"), std::string::npos);
@@ -816,6 +818,7 @@ TEST(GhidraTool, FormatsResolvedImportOrdinalsAndCallers) {
       "ordinal": 52,
       "caller_count": 3,
       "callsite_count": 8,
+      "iat_slots": ["0100163CC"],
       "referenced_by": ["FUN_10001074", "FUN_1000208f", "FUN_10002cce"]
     }
   ],
@@ -827,6 +830,7 @@ TEST(GhidraTool, FormatsResolvedImportOrdinalsAndCallers) {
     EXPECT_EQ(tool.lastMode, "imports");
     EXPECT_NE(result->observation.find("gethostbyname [WS2_32.DLL] (ordinal 52) @ EXTERNAL:00000034"), std::string::npos);
     EXPECT_NE(result->observation.find("original: Ordinal_52"), std::string::npos);
+    EXPECT_NE(result->observation.find("IAT slot: 0100163CC"), std::string::npos);
     EXPECT_NE(result->observation.find("callers: 3 | call sites: 8"), std::string::npos);
     EXPECT_NE(result->observation.find("referenced by: FUN_10001074 FUN_1000208f FUN_10002cce"), std::string::npos);
 

@@ -332,6 +332,8 @@ std::string summarizeGhidraObservation(const std::string& action,
                 || trimmed.find("connect(") != std::string::npos
                 || trimmed.find("CreateProcess") != std::string::npos) {
                 notes.push_back("Key line: " + trimmed);
+            } else if (trimmed.starts_with("Likely stack string: ")) {
+                notes.push_back(trimmed);
             }
         }
     } else if (action.find("| function_at |") != std::string::npos) {

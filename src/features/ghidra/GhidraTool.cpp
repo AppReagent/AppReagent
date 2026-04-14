@@ -11,6 +11,8 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <regex>
+#include <set>
 #include <sstream>
 #include <system_error>
 #include <vector>
@@ -243,6 +245,67 @@ std::string detectSingleByteXor(const std::string& hex) {
     }
     out << std::dec << " -> \"" << best.preview << "\"";
     return out.str();
+}
+
+bool looksLikeRecoveredString(const std::string& text) {
+    if (text.size() < 4) return false;
+    int printable = 0;
+    int letters = 0;
+    for (unsigned char c : text) {
+        if (c >= 32 && c <= 126) printable++;
+        if (std::isalpha(c)) letters++;
+    }
+    if (printable != static_cast<int>(text.size())) return false;
+    if (letters < 3) return false;
+    return text.find('/') != std::string::npos
+        || text.find('\\') != std::string::npos
+        || text.find('.') != std::string::npos
+        || text.find(':') != std::string::npos
+        || text.find('_') != std::string::npos
+        || text.size() >= 6;
+}
+
+std::vector<std::string> extractStackStrings(const std::string& code) {
+    std::map<std::string, std::map<int, unsigned char>> fragments;
+    std::regex wideAssign(R"(([A-Za-z0-9_]+)(?:\._([0-9]+)_[0-9]+_)?\s*=\s*0x([0-9A-Fa-f]{2,16}))");
+    std::smatch match;
+    std::istringstream stream(code);
+    std::string line;
+
+    while (std::getline(stream, line)) {
+        if (!std::regex_search(line, match, wideAssign)) continue;
+        std::string name = match[1].str();
+        int offset = match[2].matched ? std::stoi(match[2].str()) : 0;
+        std::string hex = match[3].str();
+        if (hex.size() % 2 != 0) hex = "0" + hex;
+
+        for (size_t i = 0; i < hex.size() / 2; i++) {
+            size_t pos = hex.size() - ((i + 1) * 2);
+            unsigned int value = std::stoul(hex.substr(pos, 2), nullptr, 16);
+            fragments[name][offset + static_cast<int>(i)] = static_cast<unsigned char>(value);
+        }
+    }
+
+    std::vector<std::string> recovered;
+    std::set<std::string> seen;
+    for (const auto& [name, bytesByOffset] : fragments) {
+        if (bytesByOffset.empty()) continue;
+        int start = bytesByOffset.begin()->first;
+        int end = bytesByOffset.rbegin()->first;
+        std::string text;
+        for (int offset = start; offset <= end; offset++) {
+            auto it = bytesByOffset.find(offset);
+            if (it == bytesByOffset.end()) break;
+            unsigned char byte = it->second;
+            if (byte == 0) break;
+            text.push_back(static_cast<char>(byte));
+        }
+        if (!looksLikeRecoveredString(text)) continue;
+        if (seen.insert(text).second) {
+            recovered.push_back(text);
+        }
+    }
+    return recovered;
 }
 }  // namespace
 
@@ -699,6 +762,11 @@ std::string GhidraTool::formatDecompile(const std::string& jsonPath) {
             if (code.empty()) {
                 out << "  (decompilation unavailable)\n";
             } else {
+                auto stackStrings = extractStackStrings(code);
+                for (const auto& stackString : stackStrings) {
+                    out << "Likely stack string: \"" << stackString << "\"\n";
+                }
+                if (!stackStrings.empty()) out << "\n";
                 out << code << "\n";
             }
             out << "\n";

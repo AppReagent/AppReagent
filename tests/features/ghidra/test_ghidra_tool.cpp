@@ -653,6 +653,34 @@ TEST(GhidraTool, FormatsAddressDisassembly) {
     fs::remove(path, ec);
 }
 
+TEST(GhidraTool, ReconstructsStackStringsInDecompileOutput) {
+    FakeGhidraTool tool;
+    GhidraToolMessages msgs;
+    area::Harness h;
+    area::ToolContext ctx{msgs.cb(), nullptr, h};
+    std::string path = makeTempBinary();
+
+    tool.outputs["decompile"] = R"json({
+  "metadata": {"name": "sample.exe", "language": "x86:LE:32:default"},
+  "functions": [
+    {
+      "name": "sub_10001620",
+      "address": "010001620",
+      "size": 32,
+      "decompiled": "void sub_10001620(void)\n\n{\n  undefined8 local_10;\n\n  local_10._0_4_ = 0x2e646d63;\n  local_10._4_4_ = 0x657865;\n}\n"
+    }
+  ]
+})json";
+
+    auto result = tool.tryExecute("GHIDRA: " + path + " | decompile | 0x10001620", ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NE(result->observation.find("Likely stack string: \"cmd.exe\""), std::string::npos);
+    EXPECT_NE(result->observation.find("local_10._0_4_ = 0x2e646d63;"), std::string::npos);
+
+    std::error_code ec;
+    fs::remove(path, ec);
+}
+
 TEST(GhidraTool, FormatsResolvedImportOrdinalsAndCallers) {
     FakeGhidraTool tool;
     GhidraToolMessages msgs;

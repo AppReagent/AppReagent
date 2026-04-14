@@ -839,6 +839,75 @@ TEST(AgentPrompting, BootstrapEvidenceCapturesRepeatingKeyXorDecode) {
     EXPECT_EQ(msgs.back().content, "saw repeating xor");
 }
 
+TEST(AgentPrompting, BootstrapEvidenceCapturesStackStrings) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    auto* backendPtr = backend.get();
+    backend->setResponses({
+        "ANSWER: broad summary without exact evidence",
+        "ANSWER: missing stack string"
+    });
+
+    area::MockPromptEntry stackStringEvidence;
+    stackStringEvidence.id = "stack-string";
+    stackStringEvidence.match = {"Likely stack string: \"cmd.exe\""};
+    stackStringEvidence.response = "ANSWER: saw stack string";
+    backend->setPromptEntries({stackStringEvidence});
+
+    area::ToolRegistry tools;
+    auto ghidraTool = std::make_unique<FakeGhidraActionTool>();
+    auto* ghidraPtr = ghidraTool.get();
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | function_at | 0x10001656"] =
+        "=== Ghidra Function Lookup: sample.dll ===\n\n"
+        "Requested address: 010001656\n"
+        "Function: sub_10001620 @ 010001620\n"
+        "Signature: void sub_10001620(void)\n"
+        "Calling convention: __stdcall\n"
+        "Size: 64 bytes\n"
+        "Offset from entry: 54\n"
+        "Callers: 3 | Callees: 2\n"
+        "Thunk: no\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | decompile | 0x10001656"] =
+        "=== Ghidra Decompilation: sample.dll ===\n\n"
+        "--- sub_10001620 @ 010001620 (64 bytes) ---\n"
+        "Likely stack string: \"cmd.exe\"\n\n"
+        "void sub_10001620(void)\n\n"
+        "{\n"
+        "  undefined8 local_10;\n"
+        "  local_10._0_4_ = 0x2e646d63;\n"
+        "  local_10._4_4_ = 0x657865;\n"
+        "}\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | disasm | 0x10001656"] =
+        "=== Ghidra Disassembly: sample.dll ===\n\n"
+        "Requested address: 010001656\n"
+        "Function: sub_10001620 @ 010001620\n"
+        "Offset from entry: 54\n"
+        "Instructions shown: 1\n\n"
+        "=> 010001656: MOV EAX,0x2E646D63 [FALL_THROUGH]\n";
+    tools.add(std::move(ghidraTool));
+
+    area::Agent agent(std::move(backend), tools);
+    std::vector<area::AgentMessage> msgs;
+    agent.process(
+        "Analyze /tmp/sample.dll.\n\n"
+        "Questions:\n"
+        "1. What does the subroutine at 0x10001656 do?\n"
+        "========================= GHIDRA DATA =========================\n"
+        "========== GHIDRA: /tmp/sample.dll ==========\n"
+        "--- overview ---\n"
+        "Likely DllMain: FUN_1000d02e @ 1000d02e\n"
+        "===================== END GHIDRA DATA =========================\n",
+        [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    EXPECT_EQ(backendPtr->lastMatchedId(), "stack-string");
+    EXPECT_TRUE(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
+                          "GHIDRA: /tmp/sample.dll | decompile | 0x10001656")
+                != ghidraPtr->actions.end());
+    ASSERT_FALSE(msgs.empty());
+    EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
+    EXPECT_EQ(msgs.back().content, "saw stack string");
+}
+
 // ---------------------------------------------------------------------------
 // IPC tests
 // ---------------------------------------------------------------------------

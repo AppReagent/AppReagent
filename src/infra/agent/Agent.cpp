@@ -113,6 +113,28 @@ std::optional<std::string> extractLineHexAddress(const std::string& userInput,
     return std::nullopt;
 }
 
+std::optional<std::string> extractBinaryLineHexAddress(const std::string& userInput,
+                                                       const std::string& path,
+                                                       const std::string& marker) {
+    std::istringstream stream(userInput);
+    std::string line;
+    std::string currentPath;
+    const std::string prefix = "========== GHIDRA: ";
+    const std::string suffix = " ==========";
+
+    while (std::getline(stream, line)) {
+        if (line.starts_with(prefix) && line.ends_with(suffix)) {
+            currentPath = line.substr(prefix.size(), line.size() - prefix.size() - suffix.size());
+            util::trimInPlace(currentPath);
+            continue;
+        }
+        if (currentPath != path || line.find(marker) == std::string::npos) continue;
+        return extractLineHexAddress(line, marker);
+    }
+
+    return std::nullopt;
+}
+
 std::optional<std::string> extractStringAddress(const std::string& userInput,
                                                 const std::string& literal) {
     std::istringstream stream(userInput);
@@ -238,7 +260,6 @@ std::string compactLargeBinaryPromptForModel(const std::string& userInput) {
     Section section = Section::none;
     std::istringstream stream(userInput.substr(marker));
     std::string line;
-    bool emittedPath = false;
     bool keepImportDetail = false;
     int namedCount = 0;
     int functionCount = 0;
@@ -246,9 +267,14 @@ std::string compactLargeBinaryPromptForModel(const std::string& userInput) {
     int stringCount = 0;
 
     while (std::getline(stream, line)) {
-        if (!emittedPath && lineStartsWith(line, "========== GHIDRA:")) {
-            out << line << "\n";
-            emittedPath = true;
+        if (lineStartsWith(line, "========== GHIDRA:")) {
+            section = Section::none;
+            keepImportDetail = false;
+            namedCount = 0;
+            functionCount = 0;
+            importCount = 0;
+            stringCount = 0;
+            out << "\n" << line << "\n";
             continue;
         }
         if (line == "===================== END GHIDRA DATA =========================") {
@@ -720,6 +746,8 @@ std::string compactObservationForModel(const std::string& action,
 std::string buildRuntimeGuidance(const std::string& userInput) {
     if (!looksLikeBinaryInvestigation(userInput)) return "";
 
+    bool multiBinaryPrompt = extractGhidraBinaryPaths(userInput).size() > 1;
+
     std::string guidance =
         "BINARY ANALYSIS WITH GHIDRA — this request is asking for malware triage from binary data.\n"
         "- Do not stop at prefetched overview/imports/strings if they are already present.\n"
@@ -733,6 +761,12 @@ std::string buildRuntimeGuidance(const std::string& userInput) {
         "that address instead of guessing names.\n"
         "- Prefer concrete evidence such as import callers, decompiled loops, decoded "
         "data, mutex names, filenames, registry keys, and network indicators.\n";
+
+    if (multiBinaryPrompt) {
+        guidance +=
+            "- Multiple binaries are present. Cover each binary explicitly instead of "
+            "spending the entire writeup on the first file.\n";
+    }
 
     if (isLargePrefetchedBinaryPrompt(userInput)) {
         guidance +=
@@ -931,65 +965,85 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
     if (binaryInvestigation) {
         auto paths = extractGhidraBinaryPaths(userInput);
         if (!paths.empty()) {
-            const std::string& path = paths.front();
             std::deque<std::string> bootstrapActions;
             std::set<std::string> seenActions;
+            bool singleBinary = paths.size() == 1;
 
-            for (const auto& addr : extractQuestionAddresses(userInput)) {
-                if (addr.dataHint) {
-                    appendUniqueAction(bootstrapActions, seenActions,
-                                       "GHIDRA: " + path + " | data_at | " + addr.value);
-                    appendUniqueAction(bootstrapActions, seenActions,
-                                       "GHIDRA: " + path + " | xrefs | " + addr.value);
-                } else {
-                    appendUniqueAction(bootstrapActions, seenActions,
-                                       "GHIDRA: " + path + " | function_at | " + addr.value);
-                    appendUniqueAction(bootstrapActions, seenActions,
-                                       "GHIDRA: " + path + " | decompile | " + addr.value);
-                    appendUniqueAction(bootstrapActions, seenActions,
-                                       "GHIDRA: " + path + " | disasm | " + addr.value);
+            if (largeBinaryPrompt) {
+                for (const auto& path : paths) {
+                    if (auto dllMain = extractBinaryLineHexAddress(userInput, path, "Likely DllMain:")) {
+                        appendUniqueAction(bootstrapActions, seenActions,
+                                           "GHIDRA: " + path + " | decompile | " + *dllMain);
+                        continue;
+                    }
+                    if (auto entryPoint = extractBinaryLineHexAddress(userInput, path, "Entry point:")) {
+                        appendUniqueAction(bootstrapActions, seenActions,
+                                           "GHIDRA: " + path + " | decompile | " + *entryPoint);
+                    }
                 }
             }
-            if (auto dllMain = extractLineHexAddress(userInput, "Likely DllMain:")) {
-                appendUniqueAction(bootstrapActions, seenActions,
-                                   "GHIDRA: " + path + " | decompile | " + *dllMain);
+
+            const std::string& path = paths.front();
+
+            if (singleBinary) {
+                for (const auto& addr : extractQuestionAddresses(userInput)) {
+                    if (addr.dataHint) {
+                        appendUniqueAction(bootstrapActions, seenActions,
+                                           "GHIDRA: " + path + " | data_at | " + addr.value);
+                        appendUniqueAction(bootstrapActions, seenActions,
+                                           "GHIDRA: " + path + " | xrefs | " + addr.value);
+                    } else {
+                        appendUniqueAction(bootstrapActions, seenActions,
+                                           "GHIDRA: " + path + " | function_at | " + addr.value);
+                        appendUniqueAction(bootstrapActions, seenActions,
+                                           "GHIDRA: " + path + " | decompile | " + addr.value);
+                        appendUniqueAction(bootstrapActions, seenActions,
+                                           "GHIDRA: " + path + " | disasm | " + addr.value);
+                    }
+                }
             }
-            if (containsCaseInsensitive(userInput, "gethostbyname")) {
+            if (singleBinary && containsCaseInsensitive(userInput, "gethostbyname")) {
                 appendUniqueAction(bootstrapActions, seenActions,
                                    "GHIDRA: " + path + " | xrefs | gethostbyname");
             }
-            if (!largeBinaryPrompt
+            if (singleBinary && !largeBinaryPrompt
                 && (containsCaseInsensitive(userInput, "\"Sleep\"")
                     || containsCaseInsensitive(userInput, " Sleep "))) {
                 appendUniqueAction(bootstrapActions, seenActions,
                                    "GHIDRA: " + path + " | xrefs | Sleep");
             }
-            if (!largeBinaryPrompt && containsCaseInsensitive(userInput, "GetSystemDefaultLangID")) {
+            if (singleBinary && !largeBinaryPrompt
+                && containsCaseInsensitive(userInput, "GetSystemDefaultLangID")) {
                 appendUniqueAction(bootstrapActions, seenActions,
                                    "GHIDRA: " + path + " | xrefs | GetSystemDefaultLangID");
             }
-            if (!largeBinaryPrompt && containsCaseInsensitive(userInput, "GetLastInputInfo")) {
+            if (singleBinary && !largeBinaryPrompt
+                && containsCaseInsensitive(userInput, "GetLastInputInfo")) {
                 appendUniqueAction(bootstrapActions, seenActions,
                                    "GHIDRA: " + path + " | xrefs | GetLastInputInfo");
             }
-            if (auto addr = extractStringAddress(userInput, "cmd.exe")) {
-                appendUniqueAction(bootstrapActions, seenActions,
-                                   "GHIDRA: " + path + " | xrefs | " + *addr);
-            }
-            if (!largeBinaryPrompt) {
-                for (const auto& query : extractPromptBootstrapQueries(userInput)) {
+            if (singleBinary) {
+                if (auto addr = extractStringAddress(userInput, "cmd.exe")) {
                     appendUniqueAction(bootstrapActions, seenActions,
-                                       "GHIDRA: " + path + " | xrefs | " + query);
+                                       "GHIDRA: " + path + " | xrefs | " + *addr);
                 }
-            } else {
-                for (const auto& query : extractLargePromptBootstrapQueries(userInput)) {
-                    appendUniqueAction(bootstrapActions, seenActions,
-                                       "GHIDRA: " + path + " | xrefs | " + query);
+                if (!largeBinaryPrompt) {
+                    for (const auto& query : extractPromptBootstrapQueries(userInput)) {
+                        appendUniqueAction(bootstrapActions, seenActions,
+                                           "GHIDRA: " + path + " | xrefs | " + query);
+                    }
+                } else {
+                    for (const auto& query : extractLargePromptBootstrapQueries(userInput)) {
+                        appendUniqueAction(bootstrapActions, seenActions,
+                                           "GHIDRA: " + path + " | xrefs | " + query);
+                    }
                 }
             }
 
             ToolContext toolCtx{cb, confirm, harness_};
-            int bootstrapBudget = largeBinaryPrompt ? 7 : 8;
+            int bootstrapBudget = largeBinaryPrompt
+                ? std::min(9, std::max(7, static_cast<int>(paths.size())))
+                : 8;
             std::vector<std::string> bootstrapSummaries;
             while (!bootstrapActions.empty() && bootstrapBudget-- > 0) {
                 std::string action = bootstrapActions.front();

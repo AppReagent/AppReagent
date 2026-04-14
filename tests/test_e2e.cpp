@@ -343,6 +343,35 @@ TEST(AgentPrompting, LargeBenchPromptAddsWrapUpRuntimeGuidance) {
               std::string::npos);
 }
 
+TEST(AgentPrompting, MultiBinaryBenchPromptAddsCoverageRuntimeGuidance) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    auto* backendPtr = backend.get();
+
+    area::ToolRegistry tools;
+    tools.add(std::make_unique<FakeGhidraActionTool>());
+
+    area::Agent agent(std::move(backend), tools);
+    std::string prompt =
+        "Analyze these binaries.\n\n"
+        "========================= GHIDRA DATA =========================\n"
+        "========== GHIDRA: /tmp/one.dll ==========\n"
+        "--- overview ---\n"
+        "Likely DllMain: FUN_1000d02e @ 1000d02e\n"
+        "========== GHIDRA: /tmp/two.exe ==========\n"
+        "--- overview ---\n"
+        "Entry point: 140001000 -> entry\n"
+        "===================== END GHIDRA DATA =========================\n";
+    prompt += std::string(21000, 'M');
+
+    std::vector<area::AgentMessage> msgs;
+    agent.process(prompt, [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    std::string system = backendPtr->lastSystem();
+    EXPECT_NE(system.find("Multiple binaries are present."), std::string::npos);
+    EXPECT_NE(system.find("Cover each binary explicitly"), std::string::npos);
+}
+
 TEST(AgentPrompting, LargeBenchPromptCompactsUserMessageForModel) {
     area::AiEndpoint ep{"test", "mock", "", "auto"};
     auto backend = std::make_unique<area::MockBackend>(ep);
@@ -359,7 +388,8 @@ TEST(AgentPrompting, LargeBenchPromptCompactsUserMessageForModel) {
         "========================= GHIDRA DATA =========================\n"
         "========== GHIDRA: /tmp/sample.dll ==========\n"
         "--- overview ---\n"
-        "Entry point: 1001516d (DLL entry) -> entry\n"
+        "Format: Portable Executable (PE)\n"
+        "Architecture: x86:LE:32:default\n"
         "--- Named Functions / Exports (2) ---\n"
         "  StartEXS @ 10007ecb — undefined StartEXS(void)\n"
         "  ServiceMain @ 1000cf30 — undefined ServiceMain(void)\n"
@@ -384,9 +414,53 @@ TEST(AgentPrompting, LargeBenchPromptCompactsUserMessageForModel) {
     std::string sent = backendPtr->lastUserMessage().content;
     EXPECT_LT(sent.size(), prompt.size());
     EXPECT_NE(sent.find("GHIDRA DATA (COMPACTED)"), std::string::npos);
-    EXPECT_NE(sent.find("Entry point: 1001516d"), std::string::npos);
+    EXPECT_NE(sent.find("Format: Portable Executable (PE)"), std::string::npos);
     EXPECT_NE(sent.find("connect [WS2_32.DLL]"), std::string::npos);
     EXPECT_NE(sent.find("\"InstallSB\""), std::string::npos);
+}
+
+TEST(AgentPrompting, LargeBenchPromptCompactsAllBinarySectionsForModel) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    auto* backendPtr = backend.get();
+    backend->setResponse("ANSWER: done");
+
+    area::ToolRegistry tools;
+    tools.add(std::make_unique<FakeGhidraActionTool>());
+
+    area::Agent agent(std::move(backend), tools);
+    std::string prompt =
+        "Analyze these binaries.\n\n"
+        "Questions: suspicious strings and malware behavior.\n"
+        "========================= GHIDRA DATA =========================\n"
+        "========== GHIDRA: /tmp/one.dll ==========\n"
+        "--- overview ---\n"
+        "Format: Portable Executable (PE)\n"
+        "--- imports ---\n"
+        "  CreateMutexA [KERNEL32.DLL] @ EXTERNAL:00000011\n"
+        "    callers: 1 | call sites: 1 — referenced by: FUN_1000d02e\n"
+        "--- strings ---\n"
+        "  [10026038] \"SADFHUHF\" (xrefs: 1)\n"
+        "========== GHIDRA: /tmp/two.exe ==========\n"
+        "--- overview ---\n"
+        "Architecture: x86:LE:64:default\n"
+        "--- imports ---\n"
+        "  connect [WS2_32.DLL] @ EXTERNAL:0000001a\n"
+        "    callers: 2 | call sites: 3 — referenced by: FUN_140001000\n"
+        "--- strings ---\n"
+        "  [140030010] \"http://c2.example\" (xrefs: 1)\n"
+        "===================== END GHIDRA DATA =========================\n";
+    prompt += std::string(21000, 'B');
+
+    std::vector<area::AgentMessage> msgs;
+    agent.process(prompt, [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    std::string compacted = backendPtr->lastUserMessage().content;
+    EXPECT_NE(compacted.find("========== GHIDRA: /tmp/one.dll =========="), std::string::npos);
+    EXPECT_NE(compacted.find("========== GHIDRA: /tmp/two.exe =========="), std::string::npos);
+    EXPECT_NE(compacted.find("CreateMutexA [KERNEL32.DLL]"), std::string::npos);
+    EXPECT_NE(compacted.find("connect [WS2_32.DLL]"), std::string::npos);
+    EXPECT_NE(compacted.find("\"http://c2.example\""), std::string::npos);
 }
 
 TEST(AgentPrompting, GenericPromptDoesNotAddGhidraRuntimeGuidance) {
@@ -484,7 +558,7 @@ TEST(AgentPrompting, LargeBenchPromptCompactsGhidraObservationsForModel) {
         "========================= GHIDRA DATA =========================\n"
         "========== GHIDRA: /tmp/sample.dll ==========\n"
         "--- overview ---\n"
-        "Entry point: 1001516d (DLL entry) -> entry\n"
+        "Format: Portable Executable (PE)\n"
         "===================== END GHIDRA DATA =========================\n";
     prompt += std::string(21000, 'E');
 
@@ -541,14 +615,13 @@ TEST(AgentPrompting, BenchStylePromptAutoRunsGhidraBootstrap) {
         [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
 
     EXPECT_GE(backendPtr->callCount(), 1);
-    EXPECT_EQ(ghidraPtr->actions.size(), 7u);
-    EXPECT_EQ(ghidraPtr->actions[0], "GHIDRA: /tmp/sample.dll | decompile | 0x1000d02e");
-    EXPECT_EQ(ghidraPtr->actions[1], "GHIDRA: /tmp/sample.dll | xrefs | gethostbyname");
-    EXPECT_EQ(ghidraPtr->actions[2], "GHIDRA: /tmp/sample.dll | xrefs | Sleep");
-    EXPECT_EQ(ghidraPtr->actions[3], "GHIDRA: /tmp/sample.dll | decompile | 0x100011af");
-    EXPECT_EQ(ghidraPtr->actions[4], "GHIDRA: /tmp/sample.dll | disasm | 0x100011af");
-    EXPECT_EQ(ghidraPtr->actions[5], "GHIDRA: /tmp/sample.dll | decompile | 0x10001358");
-    EXPECT_EQ(ghidraPtr->actions[6], "GHIDRA: /tmp/sample.dll | disasm | 0x10001358");
+    EXPECT_EQ(ghidraPtr->actions.size(), 6u);
+    EXPECT_EQ(ghidraPtr->actions[0], "GHIDRA: /tmp/sample.dll | xrefs | gethostbyname");
+    EXPECT_EQ(ghidraPtr->actions[1], "GHIDRA: /tmp/sample.dll | xrefs | Sleep");
+    EXPECT_EQ(ghidraPtr->actions[2], "GHIDRA: /tmp/sample.dll | decompile | 0x100011af");
+    EXPECT_EQ(ghidraPtr->actions[3], "GHIDRA: /tmp/sample.dll | disasm | 0x100011af");
+    EXPECT_EQ(ghidraPtr->actions[4], "GHIDRA: /tmp/sample.dll | decompile | 0x10001358");
+    EXPECT_EQ(ghidraPtr->actions[5], "GHIDRA: /tmp/sample.dll | disasm | 0x10001358");
     EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
     EXPECT_EQ(msgs.back().content, "done");
 }
@@ -897,6 +970,52 @@ TEST(AgentPrompting, LargeBenchPromptBootstrapsDisasmForSocketCommandChannel) {
     EXPECT_EQ(msgs.back().content, "done");
 }
 
+TEST(AgentPrompting, LargeBenchPromptBootstrapsEntryPointsAcrossBinaries) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    backend->setResponse("ANSWER: done");
+
+    area::ToolRegistry tools;
+    auto ghidraTool = std::make_unique<FakeGhidraActionTool>();
+    auto* ghidraPtr = ghidraTool.get();
+    ghidraPtr->responses["GHIDRA: /tmp/one.dll | decompile | 0x1000d02e"] =
+        "=== Ghidra Decompilation: one.dll ===\n\n"
+        "--- FUN_1000d02e @ 01000D02E (16 bytes) ---\n\n"
+        "void FUN_1000d02e(void) {}\n";
+    ghidraPtr->responses["GHIDRA: /tmp/two.exe | decompile | 0x140001000"] =
+        "=== Ghidra Decompilation: two.exe ===\n\n"
+        "--- entry @ 140001000 (16 bytes) ---\n\n"
+        "void entry(void) {}\n";
+    tools.add(std::move(ghidraTool));
+
+    area::Agent agent(std::move(backend), tools);
+    std::string prompt =
+        "Analyze these binaries.\n\n"
+        "Questions: suspicious strings and malware behavior.\n"
+        "========================= GHIDRA DATA =========================\n"
+        "========== GHIDRA: /tmp/one.dll ==========\n"
+        "--- overview ---\n"
+        "Likely DllMain: FUN_1000d02e @ 1000d02e\n"
+        "========== GHIDRA: /tmp/two.exe ==========\n"
+        "--- overview ---\n"
+        "Entry point: 140001000 -> entry\n"
+        "===================== END GHIDRA DATA =========================\n";
+    prompt += std::string(21000, 'P');
+
+    std::vector<area::AgentMessage> msgs;
+    agent.process(prompt, [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    EXPECT_NE(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
+                        "GHIDRA: /tmp/one.dll | decompile | 0x1000d02e"),
+              ghidraPtr->actions.end());
+    EXPECT_NE(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
+                        "GHIDRA: /tmp/two.exe | decompile | 0x140001000"),
+              ghidraPtr->actions.end());
+    ASSERT_FALSE(msgs.empty());
+    EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
+    EXPECT_EQ(msgs.back().content, "done");
+}
+
 TEST(AgentPrompting, BenchStylePromptBootstrapsExplicitQuestionAddresses) {
     area::AiEndpoint ep{"test", "mock", "", "auto"};
     auto backend = std::make_unique<area::MockBackend>(ep);
@@ -963,7 +1082,7 @@ TEST(AgentPrompting, BenchStylePromptBootstrapsExplicitQuestionAddresses) {
         [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
 
     EXPECT_GE(backendPtr->callCount(), 1);
-    EXPECT_GE(ghidraPtr->actions.size(), 6u);
+    EXPECT_GE(ghidraPtr->actions.size(), 5u);
     EXPECT_EQ(ghidraPtr->actions[0], "GHIDRA: /tmp/sample.dll | function_at | 0x10001656");
     EXPECT_EQ(ghidraPtr->actions[1], "GHIDRA: /tmp/sample.dll | decompile | 0x10001656");
     EXPECT_EQ(ghidraPtr->actions[2], "GHIDRA: /tmp/sample.dll | disasm | 0x10001656");

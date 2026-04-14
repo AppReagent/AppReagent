@@ -144,12 +144,30 @@ public class AreaAnalyze extends GhidraScript {
                         + "\", \"address\": \"" + pe.likelyDllMain.address + "\"},");
                 }
             }
+            pw.println("    \"import_count\": " + pe.importCount + ",");
+            pw.println("    \"coff_timestamp\": " + pe.coffTimestamp + ",");
+            pw.println("    \"coff_timestamp_utc\": \"" + escJson(pe.coffTimestampUtc) + "\",");
             pw.print("    \"section_names\": [");
             for (int i = 0; i < pe.sectionNames.size(); i++) {
                 if (i > 0) pw.print(", ");
                 pw.print("\"" + escJson(pe.sectionNames.get(i)) + "\"");
             }
-            pw.println("]");
+            pw.println("],");
+            pw.print("    \"section_details\": [");
+            for (int i = 0; i < pe.sections.size(); i++) {
+                if (i > 0) pw.print(", ");
+                SectionInfo section = pe.sections.get(i);
+                pw.print("{\"name\": \"" + escJson(section.name) + "\"");
+                pw.print(", \"virtual_address\": \"0x" + Long.toHexString(section.virtualAddress).toUpperCase() + "\"");
+                pw.print(", \"virtual_size\": " + section.virtualSize);
+                pw.print(", \"raw_size\": " + section.rawSize);
+                pw.print(", \"characteristics\": \"0x" + Long.toHexString(section.characteristics).toUpperCase() + "\"");
+                pw.print(", \"executable\": " + section.executable);
+                pw.print(", \"entropy\": " + String.format(Locale.ROOT, "%.3f", section.entropy));
+                pw.print("}");
+            }
+            pw.println("],");
+            pw.println("    \"packer_hint\": \"" + escJson(pe.packerHint) + "\"");
         }
         pw.print("  }");
     }
@@ -162,7 +180,22 @@ public class AreaAnalyze extends GhidraScript {
         String entrySignature;
         List<FunctionRef> entryCallees = new ArrayList<>();
         FunctionRef likelyDllMain;
+        long coffTimestamp;
+        String coffTimestampUtc = "";
+        int importCount;
+        String packerHint = "unknown";
         List<String> sectionNames = new ArrayList<>();
+        List<SectionInfo> sections = new ArrayList<>();
+    }
+
+    private static class SectionInfo {
+        String name;
+        long virtualAddress;
+        long virtualSize;
+        long rawSize;
+        long characteristics;
+        double entropy;
+        boolean executable;
     }
 
     private static class FunctionRef {
@@ -201,6 +234,7 @@ public class AreaAnalyze extends GhidraScript {
             if (readU32(mem, base, peOffset) != 0x00004550L) return null;
 
             int numberOfSections = (int) readU16(mem, base, peOffset + 6);
+            long coffTimestamp = readU32(mem, base, peOffset + 8);
             int characteristics = (int) readU16(mem, base, peOffset + 22);
             long optionalOffset = peOffset + 24;
             long entryPointRva = readU32(mem, base, optionalOffset + 16);
@@ -210,6 +244,9 @@ public class AreaAnalyze extends GhidraScript {
             pe.isDll = (characteristics & IMAGE_FILE_DLL) != 0;
             pe.entryPoint = entryPoint.toString();
             pe.entryPointRva = entryPointRva;
+            pe.coffTimestamp = coffTimestamp;
+            pe.coffTimestampUtc = formatUnixTimestampUtc(coffTimestamp);
+            pe.importCount = countImports();
 
             Function entryFunction = getFunctionContaining(entryPoint);
             if (entryFunction == null) entryFunction = getFunctionAt(entryPoint);
@@ -227,9 +264,21 @@ public class AreaAnalyze extends GhidraScript {
             long sectionOffset = optionalOffset + optionalSize;
             int maxSections = Math.min(numberOfSections, 32);
             for (int i = 0; i < maxSections; i++) {
-                String name = readAscii(mem, base, sectionOffset + (long) i * 40, 8);
+                long headerOffset = sectionOffset + (long) i * 40;
+                String name = readAscii(mem, base, headerOffset, 8);
                 if (!name.isEmpty()) pe.sectionNames.add(name);
+                SectionInfo section = new SectionInfo();
+                section.name = name;
+                section.virtualSize = readU32(mem, base, headerOffset + 8);
+                section.virtualAddress = readU32(mem, base, headerOffset + 12);
+                section.rawSize = readU32(mem, base, headerOffset + 16);
+                section.characteristics = readU32(mem, base, headerOffset + 36);
+                section.executable = (section.characteristics & 0x20000000L) != 0;
+                section.entropy = computeSectionEntropy(mem, base, section.virtualAddress,
+                                                        Math.max(section.rawSize, section.virtualSize));
+                pe.sections.add(section);
             }
+            pe.packerHint = detectPackerHint(pe);
             return pe;
         } catch (Exception e) {
             return null;
@@ -260,6 +309,103 @@ public class AreaAnalyze extends GhidraScript {
             sb.append((char) b);
         }
         return sb.toString().trim();
+    }
+
+    private int countImports() {
+        int count = 0;
+        FunctionIterator extFuncs = currentProgram.getListing().getExternalFunctions();
+        while (extFuncs.hasNext()) {
+            extFuncs.next();
+            count++;
+        }
+        return count;
+    }
+
+    private String formatUnixTimestampUtc(long seconds) {
+        if (seconds <= 0) return "";
+        Date date = new Date(seconds * 1000L);
+        java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
+        fmt.setTimeZone(TimeZone.getTimeZone("UTC"));
+        return fmt.format(date);
+    }
+
+    private double computeSectionEntropy(Memory mem, Address base, long rva, long size) {
+        if (size <= 0) return 0.0;
+        long limited = Math.min(size, 1024L * 1024L);
+        if (limited <= 0 || limited > Integer.MAX_VALUE) return 0.0;
+        try {
+            byte[] bytes = new byte[(int) limited];
+            int read = mem.getBytes(base.add(rva), bytes);
+            if (read <= 0) return 0.0;
+            int[] counts = new int[256];
+            for (int i = 0; i < read; i++) {
+                counts[bytes[i] & 0xff]++;
+            }
+            double entropy = 0.0;
+            for (int count : counts) {
+                if (count == 0) continue;
+                double p = (double) count / (double) read;
+                entropy -= p * (Math.log(p) / Math.log(2.0));
+            }
+            return entropy;
+        } catch (Exception e) {
+            return 0.0;
+        }
+    }
+
+    private SectionInfo findEntrySection(PeMetadata pe) {
+        for (SectionInfo section : pe.sections) {
+            long span = Math.max(section.virtualSize, section.rawSize);
+            if (span <= 0) continue;
+            if (pe.entryPointRva >= section.virtualAddress &&
+                pe.entryPointRva < section.virtualAddress + span) {
+                return section;
+            }
+        }
+        return null;
+    }
+
+    private String formatEntropy(double entropy) {
+        return String.format(Locale.ROOT, "%.2f", entropy);
+    }
+
+    private String detectPackerHint(PeMetadata pe) {
+        List<String> lowerNames = new ArrayList<>();
+        for (String name : pe.sectionNames) {
+            lowerNames.add(name.toLowerCase(Locale.ROOT));
+        }
+
+        if (lowerNames.contains("upx0") || lowerNames.contains("upx1") || lowerNames.contains("upx2")) {
+            return "possible UPX (section names include UPX)";
+        }
+        for (String name : lowerNames) {
+            if (name.contains("aspack")) return "possible ASPack (section name " + name + ")";
+            if (name.contains("mpress")) return "possible MPRESS (section name " + name + ")";
+            if (name.contains("petite")) return "possible Petite (section name " + name + ")";
+        }
+
+        SectionInfo entrySection = findEntrySection(pe);
+        if (entrySection != null &&
+            !entrySection.name.equalsIgnoreCase(".text") &&
+            entrySection.executable &&
+            entrySection.entropy >= 7.0) {
+            return "possible packed/obfuscated (entry point in " + entrySection.name
+                + ", entropy " + formatEntropy(entrySection.entropy) + ")";
+        }
+
+        int highEntropyExecutable = 0;
+        SectionInfo highest = null;
+        for (SectionInfo section : pe.sections) {
+            if (section.executable && section.entropy >= 7.2) highEntropyExecutable++;
+            if (highest == null || section.entropy > highest.entropy) highest = section;
+        }
+        if (highEntropyExecutable > 0 && pe.importCount <= 20 && highest != null) {
+            return "possible packed/obfuscated (high-entropy executable section "
+                + highest.name + " entropy " + formatEntropy(highest.entropy)
+                + ", imports " + pe.importCount + ")";
+        }
+
+        return "none obvious";
     }
 
     private FunctionRef findLikelyDllMain(Address entryPoint, Set<Function> callees) {

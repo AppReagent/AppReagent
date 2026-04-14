@@ -846,6 +846,16 @@ std::string GhidraTool::formatOverview(const std::string& jsonPath) {
         << "Image base: " << meta.value("image_base", "?") << "\n"
         << "Functions: " << meta.value("function_count", 0) << "\n"
         << "Memory: " << meta.value("memory_size", 0) << " bytes\n";
+    if (meta.contains("coff_timestamp_utc") && !meta.value("coff_timestamp_utc", "").empty()) {
+        out << "PE timestamp: " << meta.value("coff_timestamp_utc", "?");
+        if (meta.contains("coff_timestamp")) {
+            out << " (" << meta.value("coff_timestamp", 0) << ")";
+        }
+        out << "\n";
+    }
+    if (meta.contains("packer_hint") && !meta.value("packer_hint", "").empty()) {
+        out << "Packer hint: " << meta.value("packer_hint", "?") << "\n";
+    }
     if (meta.contains("entry_point")) {
         out << "Entry point: " << meta.value("entry_point", "?");
         if (meta.value("is_dll", false)) out << " (DLL entry)";

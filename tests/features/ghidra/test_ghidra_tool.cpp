@@ -894,6 +894,9 @@ TEST(GhidraTool, FormatsOverviewWithEntryPointAndNamedFunctions) {
     "function_count": 4,
     "memory_size": 4096,
     "is_dll": true,
+    "coff_timestamp": 1294861807,
+    "coff_timestamp_utc": "2011-01-13T00:30:07Z",
+    "packer_hint": "possible UPX (section names include UPX)",
     "entry_point": "1000D02E",
     "entry_point_rva": "0xD02E",
     "entry_function": "DllMain",
@@ -903,7 +906,7 @@ TEST(GhidraTool, FormatsOverviewWithEntryPointAndNamedFunctions) {
       {"name": "PSLIST", "address": "10007025"}
     ],
     "likely_dllmain": {"name": "ServiceMain", "address": "1000CF30"},
-    "section_names": [".text", ".rdata", ".data"]
+    "section_names": ["UPX0", "UPX1", ".data"]
   },
   "functions": [
     {
@@ -945,11 +948,13 @@ TEST(GhidraTool, FormatsOverviewWithEntryPointAndNamedFunctions) {
     auto result = tool.tryExecute("GHIDRA: " + path, ctx);
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(tool.lastMode, "overview");
+    EXPECT_NE(result->observation.find("PE timestamp: 2011-01-13T00:30:07Z (1294861807)"), std::string::npos);
+    EXPECT_NE(result->observation.find("Packer hint: possible UPX (section names include UPX)"), std::string::npos);
     EXPECT_NE(result->observation.find("Entry point: 1000D02E (DLL entry) -> DllMain"), std::string::npos);
     EXPECT_NE(result->observation.find("Entry signature: BOOL DllMain"), std::string::npos);
     EXPECT_NE(result->observation.find("Entry direct callees: ServiceMain @ 1000CF30, PSLIST @ 10007025"), std::string::npos);
     EXPECT_NE(result->observation.find("Likely DllMain: ServiceMain @ 1000CF30 (direct callee of PE entry stub)"), std::string::npos);
-    EXPECT_NE(result->observation.find("Sections: .text, .rdata, .data"), std::string::npos);
+    EXPECT_NE(result->observation.find("Sections: UPX0, UPX1, .data"), std::string::npos);
     EXPECT_NE(result->observation.find("--- Named Functions / Exports (2) ---"), std::string::npos);
     EXPECT_NE(result->observation.find("PSLIST @ 10007025"), std::string::npos);
     EXPECT_NE(result->observation.find("StartEXS @ 10007ECB"), std::string::npos);

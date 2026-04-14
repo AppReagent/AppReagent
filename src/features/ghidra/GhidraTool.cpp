@@ -752,7 +752,7 @@ std::string GhidraTool::formatStrings(const std::string& jsonPath) {
             int xrefs = s.value("xref_count", 0);
             if (xrefs > 0) out << " (xrefs: " << xrefs << ")";
             if (s.contains("referenced_by") && s["referenced_by"].is_array()) {
-                out << " — used by:";
+                out << " - used by:";
                 for (auto& fn : s["referenced_by"]) {
                     out << " " << fn.get<std::string>();
                 }

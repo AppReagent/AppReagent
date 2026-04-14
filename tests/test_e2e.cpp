@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -410,12 +411,14 @@ TEST(AgentPrompting, BenchStylePromptAutoRunsGhidraBootstrap) {
         [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
 
     EXPECT_GE(backendPtr->callCount(), 1);
-    EXPECT_EQ(ghidraPtr->actions.size(), 5u);
+    EXPECT_EQ(ghidraPtr->actions.size(), 7u);
     EXPECT_EQ(ghidraPtr->actions[0], "GHIDRA: /tmp/sample.dll | decompile | 0x1000d02e");
     EXPECT_EQ(ghidraPtr->actions[1], "GHIDRA: /tmp/sample.dll | xrefs | gethostbyname");
     EXPECT_EQ(ghidraPtr->actions[2], "GHIDRA: /tmp/sample.dll | xrefs | Sleep");
     EXPECT_EQ(ghidraPtr->actions[3], "GHIDRA: /tmp/sample.dll | decompile | 0x100011af");
-    EXPECT_EQ(ghidraPtr->actions[4], "GHIDRA: /tmp/sample.dll | decompile | 0x10001358");
+    EXPECT_EQ(ghidraPtr->actions[4], "GHIDRA: /tmp/sample.dll | disasm | 0x100011af");
+    EXPECT_EQ(ghidraPtr->actions[5], "GHIDRA: /tmp/sample.dll | decompile | 0x10001358");
+    EXPECT_EQ(ghidraPtr->actions[6], "GHIDRA: /tmp/sample.dll | disasm | 0x10001358");
     EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
     EXPECT_EQ(msgs.back().content, "done");
 }
@@ -543,6 +546,72 @@ TEST(AgentPrompting, BootstrapEvidenceCapturesCallerSummaries) {
     ASSERT_FALSE(msgs.empty());
     EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
     EXPECT_EQ(msgs.back().content, "saw direct callees");
+}
+
+TEST(AgentPrompting, BootstrapEvidenceCapturesDisasmTargets) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    auto* backendPtr = backend.get();
+    backend->setResponses({
+        "ANSWER: broad summary without exact evidence",
+        "ANSWER: missing disasm evidence"
+    });
+
+    area::MockPromptEntry disasmEvidence;
+    disasmEvidence.id = "disasm-target";
+    disasmEvidence.match = {
+        "Target instruction: => 010001358: CALL Sleep [CALL]"
+    };
+    disasmEvidence.response = "ANSWER: saw disasm";
+    backend->setPromptEntries({disasmEvidence});
+
+    area::ToolRegistry tools;
+    auto ghidraTool = std::make_unique<FakeGhidraActionTool>();
+    auto* ghidraPtr = ghidraTool.get();
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | xrefs | Sleep"] =
+        "=== Ghidra Cross-References: sample.dll ===\n\n"
+        "Import: Sleep [KERNEL32.DLL] @ EXTERNAL:00000078\n"
+        "Functions calling: 1 | Call sites: 1\n\n"
+        "--- Callers (1) ---\n"
+        "  FUN_10001074 @ 10001358 [COMPUTED_CALL]\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | decompile | 0x10001358"] =
+        "=== Ghidra Decompilation: sample.dll ===\n\n"
+        "--- FUN_10001074 @ 10001074 (32 bytes) ---\n\n"
+        "undefined4 FUN_10001074(void)\n\n"
+        "{\n"
+        "  int iVar1;\n"
+        "  Sleep(iVar1 * 1000);\n"
+        "}\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | disasm | 0x10001358"] =
+        "=== Ghidra Disassembly: sample.dll ===\n\n"
+        "Requested address: 010001358\n"
+        "Function: FUN_10001074 @ 010001074\n"
+        "Offset from entry: 52\n"
+        "Instructions shown: 3\n\n"
+        "   010001352: MOV ECX,dword ptr [EBP + 0x8] [FALL_THROUGH]\n"
+        "=> 010001358: CALL Sleep [CALL]\n"
+        "   01000135d: TEST EAX,EAX [FALL_THROUGH]\n";
+    tools.add(std::move(ghidraTool));
+
+    area::Agent agent(std::move(backend), tools);
+    std::vector<area::AgentMessage> msgs;
+    agent.process(
+        "Analyze /tmp/sample.dll.\n\n"
+        "Questions: interesting functions and malware behavior.\n"
+        "========================= GHIDRA DATA =========================\n"
+        "========== GHIDRA: /tmp/sample.dll ==========\n"
+        "--- imports ---\n"
+        "  Sleep [KERNEL32.DLL] @ EXTERNAL:00000078\n"
+        "===================== END GHIDRA DATA =========================\n",
+        [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    EXPECT_EQ(backendPtr->lastMatchedId(), "disasm-target");
+    EXPECT_TRUE(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
+                          "GHIDRA: /tmp/sample.dll | disasm | 0x10001358")
+                != ghidraPtr->actions.end());
+    ASSERT_FALSE(msgs.empty());
+    EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
+    EXPECT_EQ(msgs.back().content, "saw disasm");
 }
 
 // ---------------------------------------------------------------------------

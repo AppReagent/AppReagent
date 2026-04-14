@@ -282,6 +282,19 @@ std::string summarizeGhidraObservation(const std::string& action,
                 notes.push_back("Key line: " + trimmed);
             }
         }
+    } else if (action.find("| disasm |") != std::string::npos) {
+        for (const auto& rawLine : lines) {
+            std::string trimmed = rawLine;
+            util::trimInPlace(trimmed);
+            if (trimmed.starts_with("Function: ")
+                || trimmed.starts_with("Requested address: ")
+                || trimmed.starts_with("Offset from entry: ")
+                || trimmed.starts_with("Instructions shown: ")) {
+                notes.push_back(trimmed);
+            } else if (trimmed.starts_with("=> ")) {
+                notes.push_back("Target instruction: " + trimmed);
+            }
+        }
     }
 
     if (notes.empty()) return "";
@@ -523,7 +536,7 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
             }
 
             ToolContext toolCtx{cb, confirm, harness_};
-            int bootstrapBudget = 6;
+            int bootstrapBudget = 8;
             std::vector<std::string> bootstrapSummaries;
             while (!bootstrapActions.empty() && bootstrapBudget-- > 0) {
                 std::string action = bootstrapActions.front();
@@ -548,6 +561,8 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
                 for (const auto& target : targets) {
                     appendUniqueAction(bootstrapActions, seenActions,
                                        "GHIDRA: " + path + " | decompile | " + target);
+                    appendUniqueAction(bootstrapActions, seenActions,
+                                       "GHIDRA: " + path + " | disasm | " + target);
                     if (++followups >= 2) break;
                 }
             }

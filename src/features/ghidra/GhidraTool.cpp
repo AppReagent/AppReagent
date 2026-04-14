@@ -13,6 +13,7 @@
 #include <map>
 #include <sstream>
 #include <system_error>
+#include <vector>
 
 #include "infra/agent/Agent.h"
 #include "infra/tools/ToolContext.h"
@@ -48,6 +49,122 @@ std::string joinCallsites(const json& refs) {
         auto type = ref.value("type", "");
         if (!type.empty()) out << " [" << type << "]";
     }
+    return out.str();
+}
+
+std::vector<unsigned char> parseHexBytes(const std::string& hex) {
+    std::vector<unsigned char> bytes;
+    std::istringstream stream(hex);
+    std::string token;
+    while (stream >> token) {
+        char* end = nullptr;
+        unsigned int value = std::strtoul(token.c_str(), &end, 16);
+        if (end == token.c_str() || *end != '\0' || value > 0xFF) continue;
+        bytes.push_back(static_cast<unsigned char>(value));
+    }
+    return bytes;
+}
+
+bool isMostlyPrintableByte(unsigned char c) {
+    return (c >= 32 && c <= 126) || c == '\n' || c == '\r' || c == '\t';
+}
+
+std::string printablePreview(const std::vector<unsigned char>& bytes) {
+    std::string out;
+    out.reserve(bytes.size());
+    for (unsigned char c : bytes) {
+        if (c >= 32 && c <= 126) out.push_back(static_cast<char>(c));
+        else if (c == '\n') out += "\\n";
+        else if (c == '\r') out += "\\r";
+        else if (c == '\t') out += "\\t";
+        else out.push_back('.');
+    }
+    return out;
+}
+
+std::string trimPreview(std::string s) {
+    while (!s.empty() && (s.back() == '.' || std::isspace(static_cast<unsigned char>(s.back())))) {
+        s.pop_back();
+    }
+    return s;
+}
+
+double xorCandidateScore(const std::vector<unsigned char>& decoded) {
+    if (decoded.size() < 6) return -1.0;
+
+    int printable = 0;
+    int letters = 0;
+    int spaces = 0;
+    int bad = 0;
+    for (unsigned char c : decoded) {
+        if (isMostlyPrintableByte(c)) {
+            printable++;
+            if (std::isalpha(c)) letters++;
+            if (c == ' ' || c == '_' || c == '-' || c == '/' || c == ':' || c == '.') spaces++;
+        } else {
+            bad++;
+        }
+    }
+
+    double printableRatio = static_cast<double>(printable) / decoded.size();
+    if (printableRatio < 0.85) return -1.0;
+
+    std::string lower = printablePreview(decoded);
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+
+    double score = printableRatio * 100.0;
+    score += static_cast<double>(letters) / decoded.size() * 20.0;
+    score += static_cast<double>(spaces) / decoded.size() * 10.0;
+    score -= bad * 5.0;
+
+    for (const std::string& needle : {
+             "http", "ftp", "cmd", ".dll", ".exe", "this is", "plug_", "host:",
+             "user-agent", "mutex", "service", "system"
+         }) {
+        if (lower.find(needle) != std::string::npos) score += 20.0;
+    }
+
+    return score;
+}
+
+std::string detectSingleByteXor(const std::string& hex) {
+    auto bytes = parseHexBytes(hex);
+    if (bytes.size() < 6) return "";
+
+    double bestScore = -1.0;
+    int bestKey = -1;
+    std::string bestPreview;
+
+    for (int key = 1; key < 256; key++) {
+        std::vector<unsigned char> decoded;
+        decoded.reserve(bytes.size());
+        for (unsigned char b : bytes) decoded.push_back(static_cast<unsigned char>(b ^ key));
+
+        double score = xorCandidateScore(decoded);
+        if (score <= bestScore) continue;
+
+        std::string preview = trimPreview(printablePreview(decoded));
+        if (preview.size() < 6) continue;
+
+        bestScore = score;
+        bestKey = key;
+        bestPreview = preview;
+    }
+
+    if (bestKey < 0) return "";
+
+    if (bestPreview.size() > 80) {
+        bestPreview.erase(80);
+        bestPreview += "...";
+    }
+
+    std::ostringstream out;
+    out << "Likely single-byte XOR decode: key 0x";
+    out << std::hex << std::uppercase;
+    if (bestKey < 0x10) out << '0';
+    out << bestKey << std::dec << " -> \"" << bestPreview << "\"";
     return out.str();
 }
 }  // namespace
@@ -686,6 +803,8 @@ std::string GhidraTool::formatXrefs(const std::string& jsonPath) {
             if (!hexBytes.empty()) out << "Bytes: " << hexBytes << "\n";
             auto ascii = xr.value("ascii_preview", "");
             if (!ascii.empty()) out << "ASCII: \"" << ascii << "\"\n";
+            auto xorDecode = detectSingleByteXor(hexBytes);
+            if (!xorDecode.empty()) out << xorDecode << "\n";
             if (xr.contains("offset_from_start")) {
                 out << "Offset from start: " << xr.value("offset_from_start", 0) << "\n";
             }
@@ -826,6 +945,8 @@ std::string GhidraTool::formatDataAt(const std::string& jsonPath) {
     if (!hexBytes.empty()) out << "Bytes: " << hexBytes << "\n";
     auto ascii = item.value("ascii_preview", "");
     if (!ascii.empty()) out << "ASCII: \"" << ascii << "\"\n";
+    auto xorDecode = detectSingleByteXor(hexBytes);
+    if (!xorDecode.empty()) out << xorDecode << "\n";
     if (item.contains("offset_from_start")) {
         out << "Offset from start: " << item.value("offset_from_start", 0) << "\n";
     }

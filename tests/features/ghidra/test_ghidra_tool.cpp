@@ -259,6 +259,38 @@ TEST(GhidraTool, FormatsRawDataAtLookup) {
     fs::remove(path, ec);
 }
 
+TEST(GhidraTool, DetectsLikelySingleByteXorInDataLookup) {
+    FakeGhidraTool tool;
+    GhidraToolMessages msgs;
+    area::Harness h;
+    area::ToolContext ctx{msgs.cb(), nullptr, h};
+    std::string path = makeTempBinary();
+
+    tool.outputs["data_at"] = R"json({
+  "metadata": {"name": "sample.exe"},
+  "data_at": {
+    "requested_address": "01001D988",
+    "address": "01001D988",
+    "max_address": "01001D998",
+    "data_type": "raw_bytes",
+    "length": 17,
+    "memory_block": ".data",
+    "offset_from_start": 0,
+    "hex_bytes": "3D 21 21 25 6F 7A 7A 36 67 7B 30 2D 34 38 25 39 30",
+    "ascii_preview": "=!!%ozz6g{0-48%90",
+    "xref_count": 0
+  }
+})json";
+
+    auto result = tool.tryExecute("GHIDRA: " + path + " | data_at | 0x1001D988", ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NE(result->observation.find("Likely single-byte XOR decode: key 0x55"), std::string::npos);
+    EXPECT_NE(result->observation.find("\"http://c2.example\""), std::string::npos);
+
+    std::error_code ec;
+    fs::remove(path, ec);
+}
+
 TEST(GhidraTool, FormatsDataXrefs) {
     FakeGhidraTool tool;
     GhidraToolMessages msgs;
@@ -333,6 +365,41 @@ TEST(GhidraTool, FormatsRawDataXrefs) {
     EXPECT_NE(result->observation.find("Type: raw_bytes (32 bytes)"), std::string::npos);
     EXPECT_NE(result->observation.find("Bytes: 2D 3F 33 20 00 11 22 44"), std::string::npos);
     EXPECT_NE(result->observation.find("ASCII: \"-?3 ..AD\""), std::string::npos);
+
+    std::error_code ec;
+    fs::remove(path, ec);
+}
+
+TEST(GhidraTool, DetectsLikelySingleByteXorInDataXrefs) {
+    FakeGhidraTool tool;
+    GhidraToolMessages msgs;
+    area::Harness h;
+    area::ToolContext ctx{msgs.cb(), nullptr, h};
+    std::string path = makeTempBinary();
+
+    tool.outputs["xrefs"] = R"json({
+  "metadata": {"name": "sample.exe"},
+  "xrefs": {
+    "requested_address": "01001D988",
+    "kind": "data",
+    "address": "01001D988",
+    "max_address": "01001D998",
+    "data_type": "raw_bytes",
+    "length": 17,
+    "memory_block": ".data",
+    "offset_from_start": 0,
+    "hex_bytes": "3D 21 21 25 6F 7A 7A 36 67 7B 30 2D 34 38 25 39 30",
+    "ascii_preview": "=!!%ozz6g{0-48%90",
+    "xref_count": 0,
+    "references": [],
+    "callees": []
+  }
+})json";
+
+    auto result = tool.tryExecute("GHIDRA: " + path + " | xrefs | 0x1001D988", ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NE(result->observation.find("Likely single-byte XOR decode: key 0x55"), std::string::npos);
+    EXPECT_NE(result->observation.find("\"http://c2.example\""), std::string::npos);
 
     std::error_code ec;
     fs::remove(path, ec);

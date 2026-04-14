@@ -31,6 +31,7 @@ import java.io.*;
 import java.util.*;
 
 public class AreaAnalyze extends GhidraScript {
+    private static final Map<String, Map<Integer, String>> IMPORT_ORDINAL_NAMES = createImportOrdinalNames();
 
     private PrintWriter pw;
     private boolean firstEntry;
@@ -261,10 +262,41 @@ public class AreaAnalyze extends GhidraScript {
 
             String lib = (extLoc != null && extLoc.getLibraryName() != null)
                 ? extLoc.getLibraryName() : "";
+            String originalName = f.getName();
+            Integer ordinal = extractOrdinal(originalName);
+            String resolvedName = resolveImportName(lib, originalName);
+            Reference[] refsTo = getReferencesTo(f.getEntryPoint());
+            Set<String> refFuncs = new LinkedHashSet<>();
+            int callerCount = 0;
+            for (Reference ref : refsTo) {
+                Function caller = getFunctionContaining(ref.getFromAddress());
+                if (caller != null) refFuncs.add(caller.getName());
+                if (ref.getReferenceType().isCall()) callerCount++;
+            }
 
-            pw.print("    {\"name\": \"" + escJson(f.getName()) + "\"");
+            pw.print("    {\"name\": \"" + escJson(resolvedName) + "\"");
             pw.print(", \"library\": \"" + escJson(lib) + "\"");
-            pw.print(", \"address\": \"" + f.getEntryPoint() + "\"}");
+            pw.print(", \"address\": \"" + f.getEntryPoint() + "\"");
+            if (!resolvedName.equals(originalName)) {
+                pw.print(", \"original_name\": \"" + escJson(originalName) + "\"");
+            }
+            if (ordinal != null) {
+                pw.print(", \"ordinal\": " + ordinal);
+            }
+            pw.print(", \"caller_count\": " + callerCount);
+            if (!refFuncs.isEmpty()) {
+                pw.print(", \"referenced_by\": [");
+                boolean first = true;
+                int shown = 0;
+                for (String fn : refFuncs) {
+                    if (shown++ >= 10) break;
+                    if (!first) pw.print(", ");
+                    first = false;
+                    pw.print("\"" + escJson(fn) + "\"");
+                }
+                pw.print("]");
+            }
+            pw.print("}");
             count++;
         }
         pw.print("\n  ]");
@@ -468,6 +500,50 @@ public class AreaAnalyze extends GhidraScript {
         Data data = currentProgram.getListing().getDefinedDataContaining(addr);
         if (data != null) return data;
         return currentProgram.getListing().getDataAt(addr);
+    }
+
+    private static Map<String, Map<Integer, String>> createImportOrdinalNames() {
+        Map<String, Map<Integer, String>> libs = new HashMap<>();
+
+        Map<Integer, String> ws2 = new HashMap<>();
+        ws2.put(3, "closesocket");
+        ws2.put(4, "connect");
+        ws2.put(9, "htons");
+        ws2.put(11, "inet_addr");
+        ws2.put(12, "inet_ntoa");
+        ws2.put(15, "ntohs");
+        ws2.put(16, "recv");
+        ws2.put(18, "select");
+        ws2.put(19, "send");
+        ws2.put(21, "setsockopt");
+        ws2.put(23, "socket");
+        ws2.put(52, "gethostbyname");
+        ws2.put(111, "WSAGetLastError");
+        ws2.put(115, "WSAStartup");
+        ws2.put(116, "WSACleanup");
+        libs.put("ws2_32.dll", ws2);
+
+        return libs;
+    }
+
+    private Integer extractOrdinal(String name) {
+        if (name == null) return null;
+        String prefix = "Ordinal_";
+        if (!name.startsWith(prefix)) return null;
+        try {
+            return Integer.parseInt(name.substring(prefix.length()));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private String resolveImportName(String library, String name) {
+        Integer ordinal = extractOrdinal(name);
+        if (ordinal == null || library == null) return name;
+        Map<Integer, String> byOrdinal = IMPORT_ORDINAL_NAMES.get(library.toLowerCase());
+        if (byOrdinal == null) return name;
+        String resolved = byOrdinal.get(ordinal);
+        return resolved != null ? resolved : name;
     }
 
     private void writeFunctionJson(Function f, Address requestedAddr, boolean includeDecompile) throws Exception {

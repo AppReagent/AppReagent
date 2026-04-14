@@ -305,6 +305,40 @@ TEST(GhidraTool, FormatsAddressDisassembly) {
     fs::remove(path, ec);
 }
 
+TEST(GhidraTool, FormatsResolvedImportOrdinalsAndCallers) {
+    FakeGhidraTool tool;
+    GhidraToolMessages msgs;
+    area::Harness h;
+    area::ToolContext ctx{msgs.cb(), nullptr, h};
+    std::string path = makeTempBinary();
+
+    tool.outputs["imports"] = R"json({
+  "metadata": {"name": "sample.dll"},
+  "imports": [
+    {
+      "name": "gethostbyname",
+      "library": "WS2_32.DLL",
+      "address": "EXTERNAL:00000034",
+      "original_name": "Ordinal_52",
+      "ordinal": 52,
+      "caller_count": 3,
+      "referenced_by": ["FUN_10001074", "FUN_1000208f", "FUN_10002cce"]
+    }
+  ],
+  "exports": []
+})json";
+
+    auto result = tool.tryExecute("GHIDRA: " + path + " | imports", ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(tool.lastMode, "imports");
+    EXPECT_NE(result->observation.find("gethostbyname [WS2_32.DLL] (ordinal 52) @ EXTERNAL:00000034"), std::string::npos);
+    EXPECT_NE(result->observation.find("original: Ordinal_52"), std::string::npos);
+    EXPECT_NE(result->observation.find("callers: 3 — referenced by: FUN_10001074 FUN_1000208f FUN_10002cce"), std::string::npos);
+
+    std::error_code ec;
+    fs::remove(path, ec);
+}
+
 // ── integration tests (require Ghidra installed) ───────────────────
 
 class GhidraIntegrationTest : public ::testing::Test {

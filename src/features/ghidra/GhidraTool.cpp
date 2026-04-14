@@ -530,7 +530,20 @@ std::string GhidraTool::formatImports(const std::string& jsonPath) {
             out << "  " << imp.value("name", "?");
             auto lib = imp.value("library", "");
             if (!lib.empty()) out << " [" << lib << "]";
+            if (imp.contains("ordinal")) out << " (ordinal " << imp.value("ordinal", 0) << ")";
             out << " @ " << imp.value("address", "?") << "\n";
+            if (imp.contains("original_name")) {
+                out << "    original: " << imp.value("original_name", "") << "\n";
+            }
+            out << "    callers: " << imp.value("caller_count", 0);
+            if (imp.contains("referenced_by") && imp["referenced_by"].is_array() &&
+                !imp["referenced_by"].empty()) {
+                out << " — referenced by:";
+                for (auto& fn : imp["referenced_by"]) {
+                    out << " " << fn.get<std::string>();
+                }
+            }
+            out << "\n";
         }
         out << "\n";
     }

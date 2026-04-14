@@ -163,6 +163,167 @@ std::string extractQuestionSection(const std::string& userInput) {
     return userInput.substr(0, cut);
 }
 
+bool lineStartsWith(const std::string& line, const std::string& prefix) {
+    return line.rfind(prefix, 0) == 0;
+}
+
+bool isInterestingImportLine(const std::string& lower) {
+    return containsAny(lower, {
+        "gethostbyname",
+        "inet_",
+        "socket",
+        "connect",
+        "recv",
+        "send",
+        "wsa",
+        "http",
+        "ftp",
+        "winexec",
+        "shellexecute",
+        "sleep",
+        "getlastinputinfo",
+        "getsystemdefaultlangid",
+        "createmutex",
+        "reg",
+        "service",
+        "process32",
+        "createtoolhelp32snapshot",
+        "writefile",
+        "copyfile",
+        "virtualalloc",
+        "loadlibrary",
+        "getprocaddress"
+    });
+}
+
+bool isInterestingStringLine(const std::string& lower) {
+    return lower.find("(xrefs:") != std::string::npos
+        || lower.find("used by:") != std::string::npos
+        || containsAny(lower, {
+            "[this is",
+            "http",
+            "ftp",
+            "cmd",
+            "rundll",
+            "plug_",
+            "keylog",
+            "proxy",
+            "flood",
+            "startx",
+            "uninstall",
+            "update",
+            "shutdown",
+            "reboot",
+            "virtual machine",
+            "socket()",
+            "host: ",
+            "user-agent:",
+            ".dll",
+            ".exe"
+        });
+}
+
+std::string compactLargeBinaryPromptForModel(const std::string& userInput) {
+    if (!isLargePrefetchedBinaryPrompt(userInput)) return userInput;
+
+    auto marker = userInput.find("========================= GHIDRA DATA");
+    if (marker == std::string::npos) return userInput;
+
+    std::ostringstream out;
+    out << extractQuestionSection(userInput);
+    if (out.tellp() > 0) out << "\n";
+    out << "========================= GHIDRA DATA (COMPACTED) =========================\n\n";
+
+    enum class Section { none, overview, named, functions, imports, strings };
+    Section section = Section::none;
+    std::istringstream stream(userInput.substr(marker));
+    std::string line;
+    bool emittedPath = false;
+    bool keepImportDetail = false;
+    int namedCount = 0;
+    int functionCount = 0;
+    int importCount = 0;
+    int stringCount = 0;
+
+    while (std::getline(stream, line)) {
+        if (!emittedPath && lineStartsWith(line, "========== GHIDRA:")) {
+            out << line << "\n";
+            emittedPath = true;
+            continue;
+        }
+        if (line == "===================== END GHIDRA DATA =========================") {
+            out << "\n" << line << "\n";
+            break;
+        }
+        if (line == "--- overview ---") {
+            section = Section::overview;
+            out << "\n" << line << "\n";
+            continue;
+        }
+        if (lineStartsWith(line, "--- Named Functions / Exports")) {
+            section = Section::named;
+            out << "\n" << line << "\n";
+            continue;
+        }
+        if (lineStartsWith(line, "--- Functions")) {
+            section = Section::functions;
+            out << "\n" << line << "\n";
+            continue;
+        }
+        if (line == "--- imports ---") {
+            section = Section::imports;
+            out << "\n" << line << "\n";
+            continue;
+        }
+        if (line == "--- strings ---") {
+            section = Section::strings;
+            out << "\n" << line << "\n";
+            continue;
+        }
+
+        std::string lower = toLowerCopy(line);
+        switch (section) {
+        case Section::overview:
+            if (!line.empty()) out << line << "\n";
+            break;
+        case Section::named:
+            if (lineStartsWith(line, "  ") && namedCount < 20) {
+                out << line << "\n";
+                namedCount++;
+            }
+            break;
+        case Section::functions:
+            if (lineStartsWith(line, "  ") && functionCount < 25) {
+                out << line << "\n";
+                functionCount++;
+            }
+            break;
+        case Section::imports:
+            if (lineStartsWith(line, "  ") && importCount < 28 && isInterestingImportLine(lower)) {
+                out << line << "\n";
+                keepImportDetail = true;
+                importCount++;
+            } else if (keepImportDetail && lineStartsWith(line, "    ")) {
+                out << line << "\n";
+                keepImportDetail = false;
+            } else {
+                keepImportDetail = false;
+            }
+            break;
+        case Section::strings:
+            if (lineStartsWith(line, "  ") && stringCount < 40 && isInterestingStringLine(lower)) {
+                out << line << "\n";
+                stringCount++;
+            }
+            break;
+        case Section::none:
+            break;
+        }
+    }
+
+    return out.str();
+}
+
 std::vector<AddressQuery> extractQuestionAddresses(const std::string& userInput) {
     std::vector<AddressQuery> addrs;
     std::set<std::string> seen;
@@ -474,6 +635,18 @@ std::string summarizeGhidraObservation(const std::string& action,
     return out.str();
 }
 
+std::string compactObservationForModel(const std::string& action,
+                                       const std::string& observation,
+                                       bool largeBinaryPrompt) {
+    if (!largeBinaryPrompt || !action.starts_with("GHIDRA:")) return observation;
+
+    std::string summary = summarizeGhidraObservation(action, observation);
+    if (!summary.empty()) return summary;
+
+    if (observation.size() <= 2000) return observation;
+    return observation.substr(0, 2000) + "\n... (truncated for model context)\n";
+}
+
 std::string buildRuntimeGuidance(const std::string& userInput) {
     if (!looksLikeBinaryInvestigation(userInput)) return "";
 
@@ -673,14 +846,17 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
     if (contextPercent() >= static_cast<int>((COMPRESS_THRESHOLD * 100))) {
         compressHistory(cb);
     }
+    bool binaryInvestigation = looksLikeBinaryInvestigation(userInput);
+    bool largeBinaryPrompt = binaryInvestigation && isLargePrefetchedBinaryPrompt(userInput);
+    std::string modelUserInput = largeBinaryPrompt
+        ? compactLargeBinaryPromptForModel(userInput)
+        : userInput;
 
-    history_.push_back({"user", userInput});
+    history_.push_back({"user", modelUserInput});
     interrupted_.store(false);
 
     std::string systemPrompt = buildSystemPrompt(userInput);
     std::string bootstrapMemo;
-    bool binaryInvestigation = looksLikeBinaryInvestigation(userInput);
-    bool largeBinaryPrompt = binaryInvestigation && isLargePrefetchedBinaryPrompt(userInput);
 
     if (binaryInvestigation) {
         auto paths = extractGhidraBinaryPaths(userInput);
@@ -752,7 +928,9 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
                 auto toolResult = tools_.dispatch(action, toolCtx);
                 if (!toolResult.has_value()) continue;
 
-                history_.push_back({"user", toolResult->observation});
+                history_.push_back({"user",
+                                    compactObservationForModel(action, toolResult->observation,
+                                                               largeBinaryPrompt)});
                 std::string summary = summarizeGhidraObservation(action, toolResult->observation);
                 if (!summary.empty()) {
                     bootstrapSummaries.push_back(summary);
@@ -920,7 +1098,8 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
                 }
             }
 
-            history_.push_back({"user", toolResult->observation});
+            history_.push_back({"user", compactObservationForModel(action, toolResult->observation,
+                                                                   largeBinaryPrompt)});
             continue;
         }
 

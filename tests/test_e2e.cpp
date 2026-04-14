@@ -343,6 +343,52 @@ TEST(AgentPrompting, LargeBenchPromptAddsWrapUpRuntimeGuidance) {
               std::string::npos);
 }
 
+TEST(AgentPrompting, LargeBenchPromptCompactsUserMessageForModel) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    auto* backendPtr = backend.get();
+    backend->setResponse("ANSWER: done");
+
+    area::ToolRegistry tools;
+    tools.add(std::make_unique<FakeGhidraActionTool>());
+
+    area::Agent agent(std::move(backend), tools);
+    std::string prompt =
+        "Analyze /tmp/sample.dll.\n\n"
+        "Questions: interesting functions, suspicious strings, malware behavior.\n"
+        "========================= GHIDRA DATA =========================\n"
+        "========== GHIDRA: /tmp/sample.dll ==========\n"
+        "--- overview ---\n"
+        "Likely DllMain: FUN_1000d02e @ 1000d02e\n"
+        "--- Named Functions / Exports (2) ---\n"
+        "  StartEXS @ 10007ecb — undefined StartEXS(void)\n"
+        "  ServiceMain @ 1000cf30 — undefined ServiceMain(void)\n"
+        "--- Functions (40 shown) ---\n";
+    for (int i = 0; i < 80; i++) {
+        prompt += "  FUN_1000" + std::to_string(1000 + i) + " @ 1000abcd — undefined4 FUN(void)\n";
+    }
+    prompt +=
+        "--- imports ---\n"
+        "  connect [WS2_32.DLL] @ EXTERNAL:0000001a\n"
+        "    callers: 11 | call sites: 12 — referenced by: StartEXS\n"
+        "--- strings ---\n"
+        "  [10017ff9] \"InstallSB\" (xrefs: 1)\n"
+        "  [10019194] \"configuration block\" (xrefs: 1)\n"
+        "  [10093654] \"version info\" (xrefs: 1) - used by: FUN_1000208f\n"
+        "===================== END GHIDRA DATA =========================\n";
+    prompt += std::string(21000, 'D');
+
+    std::vector<area::AgentMessage> msgs;
+    agent.process(prompt, [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    std::string sent = backendPtr->lastUserMessage().content;
+    EXPECT_LT(sent.size(), prompt.size());
+    EXPECT_NE(sent.find("GHIDRA DATA (COMPACTED)"), std::string::npos);
+    EXPECT_NE(sent.find("Likely DllMain: FUN_1000d02e"), std::string::npos);
+    EXPECT_NE(sent.find("connect [WS2_32.DLL]"), std::string::npos);
+    EXPECT_NE(sent.find("\"InstallSB\""), std::string::npos);
+}
+
 TEST(AgentPrompting, GenericPromptDoesNotAddGhidraRuntimeGuidance) {
     area::AiEndpoint ep{"test", "mock", "", "auto"};
     auto backend = std::make_unique<area::MockBackend>(ep);
@@ -399,6 +445,61 @@ TEST(AgentPrompting, RuntimeGuidanceCanDriveGhidraFollowup) {
     ASSERT_FALSE(msgs.empty());
     EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
     EXPECT_EQ(msgs.back().content, "verified");
+}
+
+TEST(AgentPrompting, LargeBenchPromptCompactsGhidraObservationsForModel) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    area::MockPromptEntry followup;
+    followup.id = "large-observation-followup";
+    followup.match = {"This prompt already contains prefetched Ghidra data."};
+    followup.user_match = {"interesting functions"};
+    followup.response = "THOUGHT: verify one import caller.\n"
+                        "GHIDRA: /tmp/sample.dll | xrefs | connect";
+
+    area::MockPromptEntry afterGhidra;
+    afterGhidra.id = "after-compact-ghidra";
+    afterGhidra.match = {"BOOTSTRAP EVIDENCE from GHIDRA: /tmp/sample.dll | xrefs | connect"};
+    afterGhidra.response = "ANSWER: compacted";
+
+    backend->setPromptEntries({followup, afterGhidra});
+    auto* backendPtr = backend.get();
+
+    area::ToolRegistry tools;
+    auto ghidraTool = std::make_unique<FakeGhidraActionTool>();
+    ghidraTool->responses["GHIDRA: /tmp/sample.dll | xrefs | connect"] =
+        "=== Ghidra Cross-References: sample.dll ===\n\n"
+        "Import: connect [WS2_32.DLL] @ EXTERNAL:0000001a\n"
+        "Functions calling: 2 | Call sites: 2\n\n"
+        "--- Callers (2) ---\n"
+        "  StartEXS @ 10007ecb [COMPUTED_CALL]\n"
+        "  FUN_1000208f @ 10002430 [COMPUTED_CALL]\n";
+    auto* ghidraPtr = ghidraTool.get();
+    tools.add(std::move(ghidraTool));
+
+    area::Agent agent(std::move(backend), tools);
+    std::string prompt =
+        "Analyze /tmp/sample.dll.\n\n"
+        "Questions: interesting functions, suspicious strings, malware behavior.\n"
+        "========================= GHIDRA DATA =========================\n"
+        "========== GHIDRA: /tmp/sample.dll ==========\n"
+        "--- overview ---\n"
+        "Likely DllMain: FUN_1000d02e @ 1000d02e\n"
+        "===================== END GHIDRA DATA =========================\n";
+    prompt += std::string(21000, 'E');
+
+    std::vector<area::AgentMessage> msgs;
+    agent.process(prompt, [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    EXPECT_EQ(backendPtr->lastMatchedId(), "after-compact-ghidra");
+    EXPECT_EQ(ghidraPtr->lastAction, "GHIDRA: /tmp/sample.dll | xrefs | connect");
+    EXPECT_EQ(backendPtr->lastUserMessage().content.find("=== Ghidra Cross-References"),
+              std::string::npos);
+    EXPECT_NE(backendPtr->lastUserMessage().content.find("BOOTSTRAP EVIDENCE from GHIDRA"),
+              std::string::npos);
+    ASSERT_FALSE(msgs.empty());
+    EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
+    EXPECT_EQ(msgs.back().content, "compacted");
 }
 
 TEST(AgentPrompting, BenchStylePromptAutoRunsGhidraBootstrap) {

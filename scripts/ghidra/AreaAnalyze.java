@@ -9,7 +9,9 @@
 //   decompile  — decompiled C for all or filtered functions
 //   strings    — defined strings with xref info
 //   imports    — imports and exports detail
-//   xrefs      — cross-references for a specific function (requires filter)
+//   xrefs      — cross-references for a specific function or data item (requires filter)
+//   function_at — resolve an address to its containing function (requires filter)
+//   data_at    — resolve an address to its containing defined data item (requires filter)
 //   all        — everything (overview + decompile + strings + imports)
 //
 // @category AppReagent
@@ -38,7 +40,7 @@ public class AreaAnalyze extends GhidraScript {
         String[] args = getScriptArgs();
         if (args.length < 2) {
             println("Usage: AreaAnalyze.java <output_path> <mode> [filter]");
-            println("Modes: overview, decompile, strings, imports, xrefs, all");
+            println("Modes: overview, decompile, strings, imports, xrefs, function_at, data_at, all");
             return;
         }
 
@@ -68,6 +70,12 @@ public class AreaAnalyze extends GhidraScript {
                 break;
             case "xrefs":
                 writeXrefs(filter);
+                break;
+            case "function_at":
+                writeFunctionAt(filter);
+                break;
+            case "data_at":
+                writeDataAt(filter);
                 break;
             case "all":
                 writeFunctions(true, filter);
@@ -340,7 +348,166 @@ public class AreaAnalyze extends GhidraScript {
         pw.print("\n  ]");
     }
 
-    private void writeXrefs(String funcName) {
+    private Data resolveFilterData(String filter) {
+        Address addr = parseAddressMaybe(filter);
+        if (addr == null) return null;
+        Data data = currentProgram.getListing().getDefinedDataContaining(addr);
+        if (data != null) return data;
+        return currentProgram.getListing().getDataAt(addr);
+    }
+
+    private void writeFunctionJson(Function f, Address requestedAddr, boolean includeDecompile) throws Exception {
+        pw.print("    \"name\": \"" + escJson(f.getName()) + "\"");
+        pw.print(",\n    \"address\": \"" + f.getEntryPoint() + "\"");
+        pw.print(",\n    \"signature\": \"" + escJson(f.getPrototypeString(false, false)) + "\"");
+        pw.print(",\n    \"size\": " + f.getBody().getNumAddresses());
+        pw.print(",\n    \"is_thunk\": " + f.isThunk());
+        pw.print(",\n    \"calling_convention\": \"" + escJson(f.getCallingConventionName()) + "\"");
+
+        Reference[] refsTo = getReferencesTo(f.getEntryPoint());
+        int callerCount = 0;
+        for (Reference r : refsTo) {
+            if (r.getReferenceType().isCall()) callerCount++;
+        }
+        pw.print(",\n    \"caller_count\": " + callerCount);
+
+        Set<Function> callees = f.getCalledFunctions(monitor);
+        pw.print(",\n    \"callee_count\": " + callees.size());
+
+        if (requestedAddr != null) {
+            long offset = requestedAddr.subtract(f.getEntryPoint());
+            pw.print(",\n    \"requested_address\": \"" + requestedAddr + "\"");
+            pw.print(",\n    \"offset_from_entry\": " + offset);
+        }
+
+        if (includeDecompile) {
+            DecompInterface decomp = new DecompInterface();
+            try {
+                decomp.openProgram(currentProgram);
+                DecompileResults results = decomp.decompileFunction(f, 30, monitor);
+                String code = "";
+                if (results.decompileCompleted()) {
+                    DecompiledFunction df = results.getDecompiledFunction();
+                    if (df != null) code = df.getC();
+                }
+                if (code.length() > 8000) {
+                    code = code.substring(0, 8000) + "\n/* ... truncated ... */";
+                }
+                pw.print(",\n    \"decompiled\": \"" + escJson(code) + "\"");
+            } finally {
+                decomp.dispose();
+            }
+        }
+    }
+
+    private void writeDataJson(Data data, Address requestedAddr) {
+        Address min = data.getAddress();
+        Address max = data.getMaxAddress();
+        pw.print("    \"address\": \"" + min + "\"");
+        pw.print(",\n    \"max_address\": \"" + max + "\"");
+        pw.print(",\n    \"data_type\": \"" + escJson(data.getDataType().getName()) + "\"");
+        pw.print(",\n    \"length\": " + data.getLength());
+
+        if (requestedAddr != null) {
+            long offset = requestedAddr.subtract(min);
+            pw.print(",\n    \"requested_address\": \"" + requestedAddr + "\"");
+            pw.print(",\n    \"offset_from_start\": " + offset);
+        }
+
+        Object value = data.getValue();
+        if (value != null) {
+            String strVal = value.toString();
+            if (strVal.length() > 2000) {
+                strVal = strVal.substring(0, 2000) + "... (truncated)";
+            }
+            pw.print(",\n    \"value\": \"" + escJson(strVal) + "\"");
+        }
+
+        MemoryBlock block = currentProgram.getMemory().getBlock(min);
+        if (block != null) {
+            pw.print(",\n    \"memory_block\": \"" + escJson(block.getName()) + "\"");
+        }
+
+        Reference[] refs = getReferencesTo(min);
+        pw.print(",\n    \"xref_count\": " + refs.length);
+        if (refs.length > 0) {
+            pw.print(",\n    \"references\": [");
+            boolean firstRef = true;
+            int shown = 0;
+            for (Reference ref : refs) {
+                if (shown++ >= 50) break;
+                if (!firstRef) pw.print(", ");
+                firstRef = false;
+                Function caller = getFunctionContaining(ref.getFromAddress());
+                pw.print("{\"from\": \"" + ref.getFromAddress() + "\"");
+                pw.print(", \"function\": \"" + escJson(caller != null ? caller.getName() : "unknown") + "\"");
+                pw.print(", \"type\": \"" + escJson(ref.getReferenceType().getName()) + "\"}");
+            }
+            pw.print("]");
+        }
+    }
+
+    private void writeFunctionAt(String filter) throws Exception {
+        sectionSep();
+        pw.println("  \"function_at\": {");
+
+        if (filter.isEmpty()) {
+            pw.println("    \"error\": \"function_at mode requires a hex address filter\"");
+            pw.print("  }");
+            return;
+        }
+
+        Address addr = parseAddressMaybe(filter);
+        if (addr == null) {
+            pw.println("    \"error\": \"invalid address: " + escJson(filter) + "\"");
+            pw.print("  }");
+            return;
+        }
+
+        Function target = getFunctionContaining(addr);
+        if (target == null) {
+            target = getFunctionAt(addr);
+        }
+
+        if (target == null) {
+            pw.println("    \"error\": \"no function contains address: " + escJson(filter) + "\"");
+            pw.print("  }");
+            return;
+        }
+
+        writeFunctionJson(target, addr, false);
+        pw.print("\n  }");
+    }
+
+    private void writeDataAt(String filter) {
+        sectionSep();
+        pw.println("  \"data_at\": {");
+
+        if (filter.isEmpty()) {
+            pw.println("    \"error\": \"data_at mode requires a hex address filter\"");
+            pw.print("  }");
+            return;
+        }
+
+        Address addr = parseAddressMaybe(filter);
+        if (addr == null) {
+            pw.println("    \"error\": \"invalid address: " + escJson(filter) + "\"");
+            pw.print("  }");
+            return;
+        }
+
+        Data data = resolveFilterData(filter);
+        if (data == null) {
+            pw.println("    \"error\": \"no defined data contains address: " + escJson(filter) + "\"");
+            pw.print("  }");
+            return;
+        }
+
+        writeDataJson(data, addr);
+        pw.print("\n  }");
+    }
+
+    private void writeXrefs(String funcName) throws Exception {
         sectionSep();
         pw.println("  \"xrefs\": {");
 
@@ -350,42 +517,59 @@ public class AreaAnalyze extends GhidraScript {
             return;
         }
 
+        Address requestedAddr = parseAddressMaybe(funcName);
         Function target = resolveFilterFunction(funcName);
+        Data targetData = target == null ? resolveFilterData(funcName) : null;
 
-        if (target == null) {
-            pw.println("    \"error\": \"function not found: " + escJson(funcName) + "\"");
+        if (target == null && targetData == null) {
+            pw.println("    \"error\": \"symbol not found: " + escJson(funcName) + "\"");
             pw.print("  }");
             return;
         }
 
-        pw.println("    \"function\": \"" + escJson(target.getName()) + "\",");
-        pw.println("    \"address\": \"" + target.getEntryPoint() + "\",");
-
-        pw.println("    \"callers\": [");
-        Reference[] refsTo = getReferencesTo(target.getEntryPoint());
-        firstEntry = true;
-        for (Reference ref : refsTo) {
-            Function caller = getFunctionContaining(ref.getFromAddress());
-            if (!firstEntry) pw.println(",");
-            firstEntry = false;
-
-            pw.print("      {\"from\": \"" + ref.getFromAddress() + "\"");
-            pw.print(", \"function\": \"" + escJson(caller != null ? caller.getName() : "unknown") + "\"");
-            pw.print(", \"type\": \"" + escJson(ref.getReferenceType().getName()) + "\"}");
+        if (requestedAddr != null) {
+            pw.println("    \"requested_address\": \"" + requestedAddr + "\",");
         }
-        pw.println("\n    ],");
 
-        pw.println("    \"callees\": [");
-        firstEntry = true;
-        Set<Function> callees = target.getCalledFunctions(monitor);
-        for (Function callee : callees) {
-            if (!firstEntry) pw.println(",");
-            firstEntry = false;
+        if (target != null) {
+            pw.println("    \"kind\": \"function\",");
+            pw.println("    \"function\": \"" + escJson(target.getName()) + "\",");
+            pw.println("    \"address\": \"" + target.getEntryPoint() + "\",");
+            if (requestedAddr != null) {
+                pw.println("    \"offset_from_entry\": " + requestedAddr.subtract(target.getEntryPoint()) + ",");
+            }
 
-            pw.print("      {\"name\": \"" + escJson(callee.getName()) + "\"");
-            pw.print(", \"address\": \"" + callee.getEntryPoint() + "\"}");
+            pw.println("    \"callers\": [");
+            Reference[] refsTo = getReferencesTo(target.getEntryPoint());
+            firstEntry = true;
+            for (Reference ref : refsTo) {
+                Function caller = getFunctionContaining(ref.getFromAddress());
+                if (!firstEntry) pw.println(",");
+                firstEntry = false;
+
+                pw.print("      {\"from\": \"" + ref.getFromAddress() + "\"");
+                pw.print(", \"function\": \"" + escJson(caller != null ? caller.getName() : "unknown") + "\"");
+                pw.print(", \"type\": \"" + escJson(ref.getReferenceType().getName()) + "\"}");
+            }
+            pw.println("\n    ],");
+
+            pw.println("    \"callees\": [");
+            firstEntry = true;
+            Set<Function> callees = target.getCalledFunctions(monitor);
+            for (Function callee : callees) {
+                if (!firstEntry) pw.println(",");
+                firstEntry = false;
+
+                pw.print("      {\"name\": \"" + escJson(callee.getName()) + "\"");
+                pw.print(", \"address\": \"" + callee.getEntryPoint() + "\"}");
+            }
+            pw.println("\n    ]");
+        } else {
+            pw.println("    \"kind\": \"data\",");
+            writeDataJson(targetData, requestedAddr);
+            pw.println(",");
+            pw.println("    \"callees\": []");
         }
-        pw.println("\n    ]");
 
         pw.print("  }");
     }

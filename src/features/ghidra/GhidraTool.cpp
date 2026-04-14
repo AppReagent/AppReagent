@@ -22,6 +22,29 @@ namespace fs = std::filesystem;
 using json = nlohmann::json;
 
 namespace area {
+namespace {
+bool isValidMode(const std::string& mode) {
+    return mode == "overview" || mode == "decompile" || mode == "strings" ||
+           mode == "imports" || mode == "xrefs" || mode == "function_at" ||
+           mode == "data_at" || mode == "all";
+}
+
+std::string joinCallsites(const json& refs) {
+    if (!refs.is_array() || refs.empty()) return "none";
+
+    std::ostringstream out;
+    bool first = true;
+    for (const auto& ref : refs) {
+        if (!first) out << ", ";
+        first = false;
+        out << ref.value("function", "?") << " @ " << ref.value("from", "?");
+        auto type = ref.value("type", "");
+        if (!type.empty()) out << " [" << type << "]";
+    }
+    return out.str();
+}
+}  // namespace
+
 static std::string ghidraHome() {
     if (auto env = std::getenv("GHIDRA_HOME")) return env;
 
@@ -96,7 +119,8 @@ std::optional<ToolResult> GhidraTool::tryExecute(const std::string& action, Tool
     if (args.empty()) {
         return ToolResult{"OBSERVATION: Error — provide a file path.\n"
                           "Usage: GHIDRA: <path> [| <mode> [| <filter>]]\n"
-                          "Modes: overview (default), decompile, strings, imports, xrefs, all"};
+                          "Modes: overview (default), decompile, strings, imports, xrefs, "
+                          "function_at, data_at, all"};
     }
 
     std::string path, mode = "overview", filter;
@@ -131,23 +155,14 @@ std::optional<ToolResult> GhidraTool::tryExecute(const std::string& action, Tool
         return ToolResult{"OBSERVATION: Error — file not found: " + path};
     }
 
-    if (mode != "overview" && mode != "decompile" && mode != "strings" &&
-        mode != "imports" && mode != "xrefs" && mode != "all") {
+    if (!isValidMode(mode)) {
         return ToolResult{"OBSERVATION: Error — unknown mode '" + mode + "'.\n"
-                          "Valid modes: overview, decompile, strings, imports, xrefs, all"};
+                          "Valid modes: overview, decompile, strings, imports, xrefs, "
+                          "function_at, data_at, all"};
     }
 
-    std::string gh = ghidraHome();
-    bool useDocker = gh.empty() || !fs::exists(gh + "/support/analyzeHeadless");
-    if (useDocker) {
-        int rc;
-        runCmd("sudo docker image inspect area-ghidra >/dev/null 2>&1", &rc);
-        if (rc != 0) {
-            return ToolResult{"OBSERVATION: Error — Ghidra not found locally and area-ghidra "
-                              "Docker image not available. Set GHIDRA_HOME, install Ghidra "
-                              "to ~/.local/opt/ghidra_*, or build the Docker image with: "
-                              "sudo docker build -t area-ghidra docker/ghidra/"};
-        }
+    if (auto envErr = checkEnvironment()) {
+        return ToolResult{"OBSERVATION: Error — " + *envErr};
     }
 
     ctx.cb({AgentMessage::THINKING, "Running Ghidra " + mode + " analysis on " +
@@ -178,6 +193,8 @@ std::optional<ToolResult> GhidraTool::tryExecute(const std::string& action, Tool
     else if (mode == "strings")    formatted = formatStrings(outputPath);
     else if (mode == "imports")    formatted = formatImports(outputPath);
     else if (mode == "xrefs")      formatted = formatXrefs(outputPath);
+    else if (mode == "function_at") formatted = formatFunctionAt(outputPath);
+    else if (mode == "data_at")    formatted = formatDataAt(outputPath);
     else if (mode == "all")        formatted = formatAll(outputPath);
 
     std::error_code ec;
@@ -288,6 +305,20 @@ std::string GhidraTool::runGhidra(const std::string& binaryPath,
     return "";
 }
 
+std::optional<std::string> GhidraTool::checkEnvironment() const {
+    std::string gh = ghidraHome();
+    bool useDocker = gh.empty() || !fs::exists(gh + "/support/analyzeHeadless");
+    if (!useDocker) return std::nullopt;
+
+    int rc;
+    runCmd("sudo docker image inspect area-ghidra >/dev/null 2>&1", &rc);
+    if (rc == 0) return std::nullopt;
+
+    return "Ghidra not found locally and area-ghidra Docker image not available. "
+           "Set GHIDRA_HOME, install Ghidra to ~/.local/opt/ghidra_*, or build "
+           "the Docker image with: sudo docker build -t area-ghidra docker/ghidra/";
+}
+
 static json loadJson(const std::string& path) {
     std::ifstream f(path);
     if (!f) return json::object();
@@ -360,7 +391,9 @@ std::string GhidraTool::formatOverview(const std::string& jsonPath) {
         }
     }
 
-    out << "\nUse GHIDRA: <path> | decompile [| funcname] for decompiled C code.\n";
+    out << "\nUse GHIDRA: <path> | function_at | 0xADDR to resolve a code address.\n"
+        << "Use GHIDRA: <path> | data_at | 0xADDR to resolve a data address.\n"
+        << "Use GHIDRA: <path> | decompile [| funcname_or_0xADDR] for decompiled C code.\n";
     return out.str();
 }
 
@@ -471,8 +504,36 @@ std::string GhidraTool::formatXrefs(const std::string& jsonPath) {
             return out.str();
         }
 
+        auto kind = xr.value("kind", "function");
+        if (xr.contains("requested_address")) {
+            out << "Requested address: " << xr.value("requested_address", "?") << "\n";
+        }
+        if (kind == "data") {
+            out << "Data: " << xr.value("address", "?");
+            if (xr.contains("max_address")) {
+                out << " .. " << xr.value("max_address", "?");
+            }
+            out << "\n"
+                << "Type: " << xr.value("data_type", "?")
+                << " (" << xr.value("length", 0) << " bytes)\n";
+            auto value = xr.value("value", "");
+            if (!value.empty()) out << "Value: \"" << value << "\"\n";
+            auto block = xr.value("memory_block", "");
+            if (!block.empty()) out << "Memory block: " << block << "\n";
+            if (xr.contains("offset_from_start")) {
+                out << "Offset from start: " << xr.value("offset_from_start", 0) << "\n";
+            }
+            out << "\n--- References (" << xr.value("xref_count", 0) << ") ---\n"
+                << "  " << joinCallsites(xr.value("references", json::array())) << "\n";
+            return out.str();
+        }
+
         out << "Function: " << xr.value("function", "?")
-            << " @ " << xr.value("address", "?") << "\n\n";
+            << " @ " << xr.value("address", "?") << "\n";
+        if (xr.contains("offset_from_entry")) {
+            out << "Offset from entry: " << xr.value("offset_from_entry", 0) << "\n";
+        }
+        out << "\n";
 
         if (xr.contains("callers") && xr["callers"].is_array()) {
             out << "--- Callers (" << xr["callers"].size() << ") ---\n";
@@ -493,6 +554,85 @@ std::string GhidraTool::formatXrefs(const std::string& jsonPath) {
         }
     }
 
+    return out.str();
+}
+
+std::string GhidraTool::formatFunctionAt(const std::string& jsonPath) {
+    auto data = loadJson(jsonPath);
+    if (data.empty()) return "Error: could not parse Ghidra output";
+
+    std::ostringstream out;
+    auto& meta = data["metadata"];
+    out << "=== Ghidra Function Lookup: " << meta.value("name", "?") << " ===\n\n";
+
+    if (!data.contains("function_at") || !data["function_at"].is_object()) {
+        out << "Error: function lookup missing from Ghidra output\n";
+        return out.str();
+    }
+
+    auto& fn = data["function_at"];
+    if (fn.contains("error")) {
+        out << "Error: " << fn["error"].get<std::string>() << "\n";
+        return out.str();
+    }
+
+    if (fn.contains("requested_address")) {
+        out << "Requested address: " << fn.value("requested_address", "?") << "\n";
+    }
+    out << "Function: " << fn.value("name", "?")
+        << " @ " << fn.value("address", "?") << "\n"
+        << "Signature: " << fn.value("signature", "") << "\n"
+        << "Calling convention: " << fn.value("calling_convention", "?") << "\n"
+        << "Size: " << fn.value("size", 0) << " bytes\n";
+    if (fn.contains("offset_from_entry")) {
+        out << "Offset from entry: " << fn.value("offset_from_entry", 0) << "\n";
+    }
+    out << "Callers: " << fn.value("caller_count", 0)
+        << " | Callees: " << fn.value("callee_count", 0) << "\n"
+        << "Thunk: " << (fn.value("is_thunk", false) ? "yes" : "no") << "\n";
+    return out.str();
+}
+
+std::string GhidraTool::formatDataAt(const std::string& jsonPath) {
+    auto data = loadJson(jsonPath);
+    if (data.empty()) return "Error: could not parse Ghidra output";
+
+    std::ostringstream out;
+    auto& meta = data["metadata"];
+    out << "=== Ghidra Data Lookup: " << meta.value("name", "?") << " ===\n\n";
+
+    if (!data.contains("data_at") || !data["data_at"].is_object()) {
+        out << "Error: data lookup missing from Ghidra output\n";
+        return out.str();
+    }
+
+    auto& item = data["data_at"];
+    if (item.contains("error")) {
+        out << "Error: " << item["error"].get<std::string>() << "\n";
+        return out.str();
+    }
+
+    if (item.contains("requested_address")) {
+        out << "Requested address: " << item.value("requested_address", "?") << "\n";
+    }
+    out << "Data: " << item.value("address", "?");
+    if (item.contains("max_address")) {
+        out << " .. " << item.value("max_address", "?");
+    }
+    out << "\n"
+        << "Type: " << item.value("data_type", "?")
+        << " (" << item.value("length", 0) << " bytes)\n";
+    auto value = item.value("value", "");
+    if (!value.empty()) out << "Value: \"" << value << "\"\n";
+    auto block = item.value("memory_block", "");
+    if (!block.empty()) out << "Memory block: " << block << "\n";
+    if (item.contains("offset_from_start")) {
+        out << "Offset from start: " << item.value("offset_from_start", 0) << "\n";
+    }
+    out << "References: " << item.value("xref_count", 0) << "\n";
+    if (item.contains("references")) {
+        out << "Referenced by: " << joinCallsites(item["references"]) << "\n";
+    }
     return out.str();
 }
 

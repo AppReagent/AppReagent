@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <filesystem>
 #include <fstream>
+#include <map>
 
 #include "features/ghidra/GhidraTool.h"
 #include "util/file_io.h"
@@ -23,6 +24,42 @@ struct GhidraToolMessages {
         return out;
     }
 };
+
+class FakeGhidraTool : public area::GhidraTool {
+public:
+    std::map<std::string, std::string> outputs;
+    std::string lastMode;
+    std::string lastFilter;
+
+protected:
+    std::optional<std::string> checkEnvironment() const override {
+        return std::nullopt;
+    }
+
+    std::string runGhidra(const std::string&,
+                          const std::string& mode,
+                          const std::string& filter,
+                          const std::string& outputPath,
+                          std::string& ghidraLog) override {
+        lastMode = mode;
+        lastFilter = filter;
+        ghidraLog = "Import succeeded\nProcessing succeeded\n";
+
+        auto it = outputs.find(mode);
+        if (it == outputs.end()) return "missing fake output for mode " + mode;
+
+        std::ofstream f(outputPath);
+        f << it->second;
+        return "";
+    }
+};
+
+static std::string makeTempBinary() {
+    std::string path = "/tmp/test_ghidra_" + std::to_string(getpid()) + ".bin";
+    std::ofstream f(path);
+    f << "dummy";
+    return path;
+}
 
 // ── prefix matching ────────────────────────────────────────────────
 
@@ -62,6 +99,8 @@ TEST(GhidraTool, DescriptionMentionsModes) {
     EXPECT_NE(desc.find("decompile"), std::string::npos);
     EXPECT_NE(desc.find("strings"), std::string::npos);
     EXPECT_NE(desc.find("xrefs"), std::string::npos);
+    EXPECT_NE(desc.find("function_at"), std::string::npos);
+    EXPECT_NE(desc.find("data_at"), std::string::npos);
     EXPECT_NE(desc.find("ELF"), std::string::npos);
 }
 
@@ -105,6 +144,121 @@ TEST(GhidraTool, HandlesInvalidMode) {
     auto result = tool.tryExecute("GHIDRA: " + path + " | badmode", ctx);
     ASSERT_TRUE(result.has_value());
     EXPECT_NE(result->observation.find("unknown mode"), std::string::npos);
+
+    std::error_code ec;
+    fs::remove(path, ec);
+}
+
+TEST(GhidraTool, FormatsFunctionAtLookup) {
+    FakeGhidraTool tool;
+    GhidraToolMessages msgs;
+    area::Harness h;
+    area::ToolContext ctx{msgs.cb(), nullptr, h};
+    std::string path = makeTempBinary();
+
+    tool.outputs["function_at"] = R"json({
+  "metadata": {"name": "sample.exe"},
+  "function_at": {
+    "requested_address": "010001656",
+    "name": "sub_10001620",
+    "address": "010001620",
+    "signature": "void sub_10001620(void)",
+    "calling_convention": "__stdcall",
+    "size": 64,
+    "offset_from_entry": 54,
+    "caller_count": 3,
+    "callee_count": 2,
+    "is_thunk": false
+  }
+})json";
+
+    auto result = tool.tryExecute("GHIDRA: " + path + " | function_at | 0x10001656", ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(tool.lastMode, "function_at");
+    EXPECT_EQ(tool.lastFilter, "0x10001656");
+    EXPECT_NE(result->observation.find("Function Lookup"), std::string::npos);
+    EXPECT_NE(result->observation.find("Requested address: 010001656"), std::string::npos);
+    EXPECT_NE(result->observation.find("sub_10001620"), std::string::npos);
+    EXPECT_NE(result->observation.find("Offset from entry: 54"), std::string::npos);
+
+    std::error_code ec;
+    fs::remove(path, ec);
+}
+
+TEST(GhidraTool, FormatsDataAtLookup) {
+    FakeGhidraTool tool;
+    GhidraToolMessages msgs;
+    area::Harness h;
+    area::ToolContext ctx{msgs.cb(), nullptr, h};
+    std::string path = makeTempBinary();
+
+    tool.outputs["data_at"] = R"json({
+  "metadata": {"name": "sample.exe"},
+  "data_at": {
+    "requested_address": "01001D988",
+    "address": "01001D980",
+    "max_address": "01001D99F",
+    "data_type": "string",
+    "length": 32,
+    "value": "Sleep",
+    "memory_block": ".rdata",
+    "offset_from_start": 8,
+    "xref_count": 2,
+    "references": [
+      {"from": "010001358", "function": "sub_10001320", "type": "DATA"},
+      {"from": "010001400", "function": "sub_100013F0", "type": "READ"}
+    ]
+  }
+})json";
+
+    auto result = tool.tryExecute("GHIDRA: " + path + " | data_at | 0x1001D988", ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(tool.lastMode, "data_at");
+    EXPECT_EQ(tool.lastFilter, "0x1001D988");
+    EXPECT_NE(result->observation.find("Data Lookup"), std::string::npos);
+    EXPECT_NE(result->observation.find("Type: string (32 bytes)"), std::string::npos);
+    EXPECT_NE(result->observation.find("Value: \"Sleep\""), std::string::npos);
+    EXPECT_NE(result->observation.find("Referenced by: sub_10001320 @ 010001358 [DATA], sub_100013F0 @ 010001400 [READ]"), std::string::npos);
+
+    std::error_code ec;
+    fs::remove(path, ec);
+}
+
+TEST(GhidraTool, FormatsDataXrefs) {
+    FakeGhidraTool tool;
+    GhidraToolMessages msgs;
+    area::Harness h;
+    area::ToolContext ctx{msgs.cb(), nullptr, h};
+    std::string path = makeTempBinary();
+
+    tool.outputs["xrefs"] = R"json({
+  "metadata": {"name": "sample.exe"},
+  "xrefs": {
+    "requested_address": "01001D988",
+    "kind": "data",
+    "address": "01001D980",
+    "max_address": "01001D99F",
+    "data_type": "unicode",
+    "length": 32,
+    "value": "mutex_name",
+    "memory_block": ".data",
+    "offset_from_start": 8,
+    "xref_count": 1,
+    "references": [
+      {"from": "010001656", "function": "sub_10001620", "type": "READ"}
+    ],
+    "callees": []
+  }
+})json";
+
+    auto result = tool.tryExecute("GHIDRA: " + path + " | xrefs | 0x1001D988", ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(tool.lastMode, "xrefs");
+    EXPECT_EQ(tool.lastFilter, "0x1001D988");
+    EXPECT_NE(result->observation.find("Requested address: 01001D988"), std::string::npos);
+    EXPECT_NE(result->observation.find("Data: 01001D980 .. 01001D99F"), std::string::npos);
+    EXPECT_NE(result->observation.find("References (1)"), std::string::npos);
+    EXPECT_NE(result->observation.find("sub_10001620 @ 010001656 [READ]"), std::string::npos);
 
     std::error_code ec;
     fs::remove(path, ec);

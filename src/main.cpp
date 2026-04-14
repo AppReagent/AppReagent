@@ -254,7 +254,7 @@ static int cmdGhidra(area::ArgParse& args) {
     auto path = args.getPositionalArg(2);
     if (!path) {
         std::cerr << "Usage: area ghidra <binary> [mode] [filter]" << std::endl;
-        std::cerr << "  modes: overview (default), decompile, strings, imports, xrefs, all" << std::endl;
+        std::cerr << "  modes: overview (default), decompile, strings, imports, xrefs, function_at, data_at, all" << std::endl;
         std::cerr << "  filter: function name substring or hex address (0x1000D02E)" << std::endl;
         return 1;
     }

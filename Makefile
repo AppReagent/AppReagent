@@ -105,7 +105,10 @@ lint-diff:
 	CPPS=$$(echo $$FILES | tr ' ' '\n' | grep '\.cpp$$' || true); \
 	if [ -n "$$CPPS" ]; then ./scripts/lint-iwyu.sh $$CPPS; fi
 
-install: all install-systemd
+hooks:
+	./scripts/setup-hooks.sh
+
+install: all hooks install-systemd
 
 install-systemd:
 	ln -sf $(CURDIR)/area /bin/area

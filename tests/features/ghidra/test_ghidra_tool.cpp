@@ -364,6 +364,7 @@ TEST(GhidraTool, FormatsOverviewWithEntryPointAndNamedFunctions) {
       {"name": "ServiceMain", "address": "1000CF30"},
       {"name": "PSLIST", "address": "10007025"}
     ],
+    "likely_dllmain": {"name": "ServiceMain", "address": "1000CF30"},
     "section_names": [".text", ".rdata", ".data"]
   },
   "functions": [
@@ -409,6 +410,7 @@ TEST(GhidraTool, FormatsOverviewWithEntryPointAndNamedFunctions) {
     EXPECT_NE(result->observation.find("Entry point: 1000D02E (DLL entry) -> DllMain"), std::string::npos);
     EXPECT_NE(result->observation.find("Entry signature: BOOL DllMain"), std::string::npos);
     EXPECT_NE(result->observation.find("Entry direct callees: ServiceMain @ 1000CF30, PSLIST @ 10007025"), std::string::npos);
+    EXPECT_NE(result->observation.find("Likely DllMain: ServiceMain @ 1000CF30 (direct callee of PE entry stub)"), std::string::npos);
     EXPECT_NE(result->observation.find("Sections: .text, .rdata, .data"), std::string::npos);
     EXPECT_NE(result->observation.find("--- Named Functions / Exports (2) ---"), std::string::npos);
     EXPECT_NE(result->observation.find("PSLIST @ 10007025"), std::string::npos);

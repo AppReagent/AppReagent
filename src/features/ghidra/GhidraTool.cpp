@@ -373,6 +373,12 @@ std::string GhidraTool::formatOverview(const std::string& jsonPath) {
             }
             out << "\n";
         }
+        if (meta.contains("likely_dllmain") && meta["likely_dllmain"].is_object()) {
+            const auto& dllMain = meta["likely_dllmain"];
+            out << "Likely DllMain: " << dllMain.value("name", "?")
+                << " @ " << dllMain.value("address", "?")
+                << " (direct callee of PE entry stub)\n";
+        }
     }
     if (meta.contains("section_names") && meta["section_names"].is_array() &&
         !meta["section_names"].empty()) {

@@ -139,6 +139,10 @@ public class AreaAnalyze extends GhidraScript {
                     pw.print("{\"name\": \"" + escJson(ref.name) + "\", \"address\": \"" + ref.address + "\"}");
                 }
                 pw.println("],");
+                if (pe.likelyDllMain != null) {
+                    pw.println("    \"likely_dllmain\": {\"name\": \"" + escJson(pe.likelyDllMain.name)
+                        + "\", \"address\": \"" + pe.likelyDllMain.address + "\"},");
+                }
             }
             pw.print("    \"section_names\": [");
             for (int i = 0; i < pe.sectionNames.size(); i++) {
@@ -157,6 +161,7 @@ public class AreaAnalyze extends GhidraScript {
         String entryFunction;
         String entrySignature;
         List<FunctionRef> entryCallees = new ArrayList<>();
+        FunctionRef likelyDllMain;
         List<String> sectionNames = new ArrayList<>();
     }
 
@@ -198,6 +203,7 @@ public class AreaAnalyze extends GhidraScript {
                 for (Function callee : entryCallees) {
                     pe.entryCallees.add(new FunctionRef(callee.getName(), callee.getEntryPoint().toString()));
                 }
+                pe.likelyDllMain = findLikelyDllMain(entryPoint, entryCallees);
             }
 
             int optionalSize = (int) readU16(mem, base, peOffset + 20);
@@ -237,6 +243,26 @@ public class AreaAnalyze extends GhidraScript {
             sb.append((char) b);
         }
         return sb.toString().trim();
+    }
+
+    private FunctionRef findLikelyDllMain(Address entryPoint, Set<Function> callees) {
+        if (callees == null || callees.isEmpty()) return null;
+        Function best = null;
+        long bestDistance = 0;
+        for (Function callee : callees) {
+            if (callee == null || callee.isThunk()) continue;
+            String name = callee.getName();
+            if (name == null) continue;
+            if (name.startsWith("__") || name.startsWith("Unwind@") || name.startsWith("Catch@")) continue;
+            long distance = Math.abs(callee.getEntryPoint().getOffset() - entryPoint.getOffset());
+            if (distance <= 0x100) continue;
+            if (best == null || distance > bestDistance) {
+                best = callee;
+                bestDistance = distance;
+            }
+        }
+        if (best == null) return null;
+        return new FunctionRef(best.getName(), best.getEntryPoint().toString());
     }
 
     // Resolve a filter string to a specific Function. Supports both name

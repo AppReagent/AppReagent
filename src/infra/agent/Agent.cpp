@@ -687,6 +687,7 @@ std::string summarizeGhidraObservation(const std::string& action,
             } else if (trimmed.starts_with("=> ")) {
                 notes.push_back("Target instruction: " + trimmed);
             } else if (trimmed.starts_with("Immediate call arguments: ")
+                       || trimmed.starts_with("Likely socket call @ ")
                        || trimmed.starts_with("Likely socket constants: ")
                        || trimmed.starts_with("Computed call argument multiplier: ")) {
                 notes.push_back(trimmed);
@@ -988,7 +989,7 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
             }
 
             ToolContext toolCtx{cb, confirm, harness_};
-            int bootstrapBudget = largeBinaryPrompt ? 6 : 8;
+            int bootstrapBudget = largeBinaryPrompt ? 7 : 8;
             std::vector<std::string> bootstrapSummaries;
             while (!bootstrapActions.empty() && bootstrapBudget-- > 0) {
                 std::string action = bootstrapActions.front();
@@ -1018,6 +1019,13 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
                         appendUniqueAction(bootstrapActions, seenActions,
                                            "GHIDRA: " + path + " | decompile | " + target);
                         if (++threadTargets >= (largeBinaryPrompt ? 1 : 2)) break;
+                    }
+                    if (largeBinaryPrompt
+                        && toolResult->observation.find("Likely socket command channel:") != std::string::npos) {
+                        std::string target = action.substr(action.rfind('|') + 1);
+                        util::trimInPlace(target);
+                        appendUniqueAction(bootstrapActions, seenActions,
+                                           "GHIDRA: " + path + " | disasm | " + target);
                     }
                 }
 

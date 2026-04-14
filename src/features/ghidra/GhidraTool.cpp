@@ -456,57 +456,88 @@ std::vector<std::string> extractDisassemblyInsights(const json& instructions) {
             break;
         }
     }
-    if (targetIndex < 0) return notes;
 
     std::regex pushPattern(R"(^PUSH (0x[0-9A-Fa-f]+|[0-9]+)$)");
     std::regex imulPattern(R"(^IMUL ([A-Z]+),[A-Z]+,(0x[0-9A-Fa-f]+|[0-9]+)$)");
     std::smatch match;
-    std::vector<int64_t> args;
-    std::string pushedRegister;
+    auto appendImmediateArgs = [&](int callIndex) {
+        std::vector<int64_t> args;
+        std::string pushedRegister;
 
-    for (int i = targetIndex - 1; i >= 0 && targetIndex - i <= 8; i--) {
-        std::string text = instructions[i].value("text", "");
-        if (std::regex_match(text, match, pushPattern)) {
-            bool ok = false;
-            int64_t value = parseIntegerLiteral(match[1].str(), ok);
-            if (!ok) break;
-            args.push_back(value);
-            continue;
-        }
-        if (text.starts_with("PUSH ")) {
-            pushedRegister = text.substr(5);
-            break;
-        }
-        if (!args.empty()) break;
-    }
-
-    if (!args.empty()) {
-        std::ostringstream out;
-        out << "Immediate call arguments: ";
-        for (size_t i = 0; i < args.size(); i++) {
-            if (i > 0) out << ", ";
-            out << "0x" << std::hex << std::uppercase << args[i] << std::dec;
-        }
-        notes.push_back(out.str());
-        if (args.size() == 3 && args[0] == 2 && args[1] == 1 && args[2] == 6) {
-            notes.push_back("Likely socket constants: AF_INET, SOCK_STREAM, IPPROTO_TCP");
-        }
-    }
-
-    if (!pushedRegister.empty()) {
-        for (int i = targetIndex - 1; i >= 0 && targetIndex - i <= 6; i--) {
+        for (int i = callIndex - 1; i >= 0 && callIndex - i <= 8; i--) {
             std::string text = instructions[i].value("text", "");
-            if (!std::regex_match(text, match, imulPattern)) continue;
-            if (match[1].str() != pushedRegister) continue;
-            bool ok = false;
-            int64_t value = parseIntegerLiteral(match[2].str(), ok);
-            if (!ok) continue;
-            notes.push_back("Computed call argument multiplier: 0x"
-                + [&]() {
-                    std::ostringstream out;
-                    out << std::hex << std::uppercase << value;
-                    return out.str();
-                }() + " (" + std::to_string(value) + ")");
+            if (std::regex_match(text, match, pushPattern)) {
+                bool ok = false;
+                int64_t value = parseIntegerLiteral(match[1].str(), ok);
+                if (!ok) break;
+                args.push_back(value);
+                continue;
+            }
+            if (text.starts_with("PUSH ")) {
+                pushedRegister = text.substr(5);
+                break;
+            }
+            if (!args.empty()) break;
+        }
+
+        if (!args.empty()) {
+            std::ostringstream out;
+            out << "Immediate call arguments: ";
+            for (size_t i = 0; i < args.size(); i++) {
+                if (i > 0) out << ", ";
+                out << "0x" << std::hex << std::uppercase << args[i] << std::dec;
+            }
+            notes.push_back(out.str());
+            if (args.size() == 3 && args[0] == 2 && args[1] == 1 && args[2] == 6) {
+                notes.push_back("Likely socket constants: AF_INET, SOCK_STREAM, IPPROTO_TCP");
+            }
+        }
+
+        if (!pushedRegister.empty()) {
+            for (int i = callIndex - 1; i >= 0 && callIndex - i <= 6; i--) {
+                std::string text = instructions[i].value("text", "");
+                if (!std::regex_match(text, match, imulPattern)) continue;
+                if (match[1].str() != pushedRegister) continue;
+                bool ok = false;
+                int64_t value = parseIntegerLiteral(match[2].str(), ok);
+                if (!ok) continue;
+                notes.push_back("Computed call argument multiplier: 0x"
+                    + [&]() {
+                        std::ostringstream out;
+                        out << std::hex << std::uppercase << value;
+                        return out.str();
+                    }() + " (" + std::to_string(value) + ")");
+                break;
+            }
+        }
+    };
+
+    if (targetIndex >= 0) {
+        appendImmediateArgs(targetIndex);
+    }
+
+    for (size_t i = 0; i < instructions.size(); i++) {
+        if (static_cast<int>(i) == targetIndex) continue;
+        std::string text = instructions[i].value("text", "");
+        if (!text.starts_with("CALL ")) continue;
+
+        std::vector<int64_t> args;
+        for (int j = static_cast<int>(i) - 1; j >= 0 && static_cast<int>(i) - j <= 8; j--) {
+            std::string prev = instructions[j].value("text", "");
+            if (std::regex_match(prev, match, pushPattern)) {
+                bool ok = false;
+                int64_t value = parseIntegerLiteral(match[1].str(), ok);
+                if (!ok) break;
+                args.push_back(value);
+                continue;
+            }
+            if (!args.empty()) break;
+        }
+
+        if (args.size() == 3 && args[0] == 2 && args[1] == 1 && args[2] == 6) {
+            notes.push_back("Likely socket call @ "
+                + instructions[i].value("address", "?")
+                + ": AF_INET, SOCK_STREAM, IPPROTO_TCP");
             break;
         }
     }

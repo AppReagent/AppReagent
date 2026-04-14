@@ -635,8 +635,12 @@ public class AreaAnalyze extends GhidraScript {
                     }
                 }
                 if (hit >= 0) {
-                    start = Math.max(0, hit - 20);
-                    end = Math.min(all.size(), hit + 21);
+                    if (hit == 0) {
+                        end = Math.min(all.size(), 60);
+                    } else {
+                        start = Math.max(0, hit - 20);
+                        end = Math.min(all.size(), hit + 21);
+                    }
                 } else {
                     end = Math.min(all.size(), 60);
                 }

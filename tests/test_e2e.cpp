@@ -840,6 +840,63 @@ TEST(AgentPrompting, LargeBenchPromptBootstrapsThreadStartFromDllMain) {
     EXPECT_EQ(msgs.back().content, "done");
 }
 
+TEST(AgentPrompting, LargeBenchPromptBootstrapsDisasmForSocketCommandChannel) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    backend->setResponse("ANSWER: done");
+
+    area::ToolRegistry tools;
+    auto ghidraTool = std::make_unique<FakeGhidraActionTool>();
+    auto* ghidraPtr = ghidraTool.get();
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | decompile | 0x1000d02e"] =
+        "=== Ghidra Decompilation: sample.dll ===\n\n"
+        "--- FUN_1000d02e @ 01000D02E (64 bytes) ---\n\n"
+        "int FUN_1000d02e(void)\n"
+        "{\n"
+        "  CreateThread((LPSECURITY_ATTRIBUTES)0x0,0,(LPTHREAD_START_ROUTINE)&DAT_10001656,\n"
+        "               (LPVOID)0x0,0,(LPDWORD)0x0);\n"
+        "  return 1;\n"
+        "}\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | decompile | 0x10001656"] =
+        "=== Ghidra Decompilation: sample.dll ===\n\n"
+        "--- FUN_10001656 @ 010001656 (128 bytes) ---\n"
+        "Likely socket command channel: socket creation path with command recv/send loop\n\n"
+        "void FUN_10001656(void)\n"
+        "{\n"
+        "  Ordinal_23();\n"
+        "}\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | disasm | 0x10001656"] =
+        "=== Ghidra Disassembly: sample.dll ===\n\n"
+        "Requested address: 010001656\n"
+        "Function: FUN_10001656 @ 010001656\n"
+        "Offset from entry: 0\n"
+        "Instructions shown: 8 / 200\n"
+        "Likely socket call @ 010001701: AF_INET, SOCK_STREAM, IPPROTO_TCP\n\n"
+        "=> 010001656: SUB ESP,0x678 [FALL_THROUGH]\n";
+    tools.add(std::move(ghidraTool));
+
+    area::Agent agent(std::move(backend), tools);
+    std::string prompt =
+        "Analyze /tmp/sample.dll.\n\n"
+        "Questions: interesting functions, suspicious strings, malware behavior.\n"
+        "========================= GHIDRA DATA =========================\n"
+        "========== GHIDRA: /tmp/sample.dll ==========\n"
+        "--- overview ---\n"
+        "Likely DllMain: FUN_1000d02e @ 1000d02e\n"
+        "===================== END GHIDRA DATA =========================\n";
+    prompt += std::string(21000, 'S');
+
+    std::vector<area::AgentMessage> msgs;
+    agent.process(prompt, [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    EXPECT_NE(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
+                        "GHIDRA: /tmp/sample.dll | disasm | 0x10001656"),
+              ghidraPtr->actions.end());
+    ASSERT_FALSE(msgs.empty());
+    EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
+    EXPECT_EQ(msgs.back().content, "done");
+}
+
 TEST(AgentPrompting, BenchStylePromptBootstrapsExplicitQuestionAddresses) {
     area::AiEndpoint ep{"test", "mock", "", "auto"};
     auto backend = std::make_unique<area::MockBackend>(ep);

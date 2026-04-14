@@ -659,6 +659,45 @@ TEST(GhidraTool, FormatsAddressDisassembly) {
     fs::remove(path, ec);
 }
 
+TEST(GhidraTool, FindsSocketCallInFunctionEntryDisassemblyWindow) {
+    FakeGhidraTool tool;
+    GhidraToolMessages msgs;
+    area::Harness h;
+    area::ToolContext ctx{msgs.cb(), nullptr, h};
+    std::string path = makeTempBinary();
+
+    tool.outputs["disasm"] = R"json({
+  "metadata": {"name": "sample.exe"},
+  "disassembly": {
+    "kind": "function",
+    "function": "FUN_10001656",
+    "address": "010001656",
+    "signature": "void FUN_10001656(void)",
+    "requested_address": "010001656",
+    "offset_from_entry": 0,
+    "instruction_count": 8,
+    "function_instruction_count": 200,
+    "instructions": [
+      {"address": "010001656", "text": "SUB ESP,0x678", "flow_type": "FALL_THROUGH", "is_target": true},
+      {"address": "0100016fb", "text": "PUSH 0x6", "flow_type": "FALL_THROUGH"},
+      {"address": "0100016fd", "text": "PUSH 0x1", "flow_type": "FALL_THROUGH"},
+      {"address": "0100016ff", "text": "PUSH 0x2", "flow_type": "FALL_THROUGH"},
+      {"address": "010001701", "text": "CALL dword ptr [0x100163f8]", "flow_type": "COMPUTED_CALL"},
+      {"address": "010001707", "text": "MOV EDI,EAX", "flow_type": "FALL_THROUGH"},
+      {"address": "010001709", "text": "CMP EDI,-0x1", "flow_type": "FALL_THROUGH"},
+      {"address": "01000170c", "text": "JNZ 0x10001722", "flow_type": "CONDITIONAL_JUMP"}
+    ]
+  }
+})json";
+
+    auto result = tool.tryExecute("GHIDRA: " + path + " | disasm | 0x10001656", ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NE(result->observation.find("Likely socket call @ 010001701: AF_INET, SOCK_STREAM, IPPROTO_TCP"), std::string::npos);
+
+    std::error_code ec;
+    fs::remove(path, ec);
+}
+
 TEST(GhidraTool, ReconstructsStackStringsInDecompileOutput) {
     FakeGhidraTool tool;
     GhidraToolMessages msgs;

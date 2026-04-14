@@ -3,8 +3,11 @@
 #include <stddef.h>
 #include <algorithm>
 #include <cctype>
+#include <deque>
 #include <exception>
 #include <optional>
+#include <set>
+#include <sstream>
 #include <utility>
 
 #include "infra/events/EventBus.h"
@@ -15,6 +18,295 @@
 #include "infra/tools/Tool.h"
 
 namespace area {
+namespace {
+std::string toLowerCopy(std::string text) {
+    std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return text;
+}
+
+bool containsAny(const std::string& haystack, std::initializer_list<const char*> needles) {
+    for (const char* needle : needles) {
+        if (haystack.find(needle) != std::string::npos) return true;
+    }
+    return false;
+}
+
+bool looksLikeBinaryInvestigation(const std::string& userInput) {
+    std::string lower = toLowerCopy(userInput);
+
+    bool hasGhidraData = containsAny(lower, {"ghidra data", "ghidra:", "ghidra output"});
+    bool hasBinaryPath = containsAny(lower, {".dll", ".exe", ".elf", ".so", ".bin", ".o"});
+    bool hasBinaryQuestion = containsAny(lower, {
+        "interesting functions",
+        "suspicious strings",
+        "entry point",
+        "imports",
+        "exports",
+        "obfus",
+        "xor",
+        "network ioc",
+        "host ioc",
+        "dllmain",
+        "malware"
+    });
+
+    return (hasGhidraData || hasBinaryPath) && hasBinaryQuestion;
+}
+
+std::vector<std::string> extractGhidraBinaryPaths(const std::string& userInput) {
+    std::vector<std::string> paths;
+    std::set<std::string> seen;
+    std::istringstream stream(userInput);
+    std::string line;
+    const std::string prefix = "========== GHIDRA: ";
+    const std::string suffix = " ==========";
+
+    while (std::getline(stream, line)) {
+        if (!line.starts_with(prefix) || !line.ends_with(suffix)) continue;
+        std::string path = line.substr(prefix.size(), line.size() - prefix.size() - suffix.size());
+        util::trimInPlace(path);
+        if (!path.empty() && seen.insert(path).second) {
+            paths.push_back(path);
+        }
+    }
+
+    return paths;
+}
+
+std::optional<std::string> extractLineHexAddress(const std::string& userInput,
+                                                 const std::string& marker) {
+    std::istringstream stream(userInput);
+    std::string line;
+
+    while (std::getline(stream, line)) {
+        if (line.find(marker) == std::string::npos) continue;
+
+        auto atPos = line.find('@');
+        if (atPos != std::string::npos) {
+            std::string tail = line.substr(atPos + 1);
+            util::trimInPlace(tail);
+            std::string value;
+            for (char c : tail) {
+                if (!std::isxdigit(static_cast<unsigned char>(c))) break;
+                value += c;
+            }
+            if (!value.empty()) return "0x" + value;
+        }
+
+        for (size_t i = 0; i < line.size(); i++) {
+            if (!std::isxdigit(static_cast<unsigned char>(line[i]))) continue;
+            size_t j = i;
+            while (j < line.size() && std::isxdigit(static_cast<unsigned char>(line[j]))) j++;
+            if (j - i >= 8) return "0x" + line.substr(i, j - i);
+            i = j;
+        }
+    }
+
+    return std::nullopt;
+}
+
+std::optional<std::string> extractStringAddress(const std::string& userInput,
+                                                const std::string& literal) {
+    std::istringstream stream(userInput);
+    std::string line;
+    std::string needle = "\"" + literal + "\"";
+
+    while (std::getline(stream, line)) {
+        if (line.find(needle) == std::string::npos) continue;
+        auto lbr = line.find('[');
+        auto rbr = line.find(']', lbr == std::string::npos ? 0 : lbr + 1);
+        if (lbr == std::string::npos || rbr == std::string::npos || rbr <= lbr + 1) continue;
+        std::string addr = line.substr(lbr + 1, rbr - lbr - 1);
+        util::trimInPlace(addr);
+        if (!addr.empty()) return "0x" + addr;
+    }
+
+    return std::nullopt;
+}
+
+bool containsCaseInsensitive(const std::string& haystack, const std::string& needle) {
+    return toLowerCopy(haystack).find(toLowerCopy(needle)) != std::string::npos;
+}
+
+void appendUniqueAction(std::deque<std::string>& queue,
+                        std::set<std::string>& seen,
+                        const std::string& action) {
+    if (action.empty()) return;
+    if (seen.insert(action).second) {
+        queue.push_back(action);
+    }
+}
+
+std::vector<std::string> extractDecompileTargets(const std::string& observation) {
+    std::vector<std::string> addrs;
+    std::set<std::string> seen;
+    std::istringstream stream(observation);
+    std::string line;
+
+    while (std::getline(stream, line)) {
+        auto atPos = line.find(" @ ");
+        if (atPos == std::string::npos) continue;
+        std::string tail = line.substr(atPos + 3);
+        util::trimInPlace(tail);
+        if (tail.starts_with("EXTERNAL:")) continue;
+
+        std::string value;
+        for (char c : tail) {
+            if (!std::isxdigit(static_cast<unsigned char>(c))) break;
+            value += c;
+        }
+        if (value.size() < 8) continue;
+
+        std::string addr = "0x" + value;
+        if (seen.insert(addr).second) {
+            addrs.push_back(addr);
+        }
+    }
+
+    std::sort(addrs.begin(), addrs.end());
+    return addrs;
+}
+
+int countParamsInSignature(const std::string& signature) {
+    auto lpar = signature.find('(');
+    auto rpar = signature.rfind(')');
+    if (lpar == std::string::npos || rpar == std::string::npos || rpar <= lpar) return -1;
+
+    std::string params = signature.substr(lpar + 1, rpar - lpar - 1);
+    util::trimInPlace(params);
+    if (params.empty() || params == "void") return 0;
+
+    int count = 1;
+    for (char c : params) {
+        if (c == ',') count++;
+    }
+    return count;
+}
+
+int countLocalDeclarations(const std::vector<std::string>& lines) {
+    bool inBody = false;
+    int count = 0;
+
+    for (const auto& rawLine : lines) {
+        std::string line = rawLine;
+        util::trimInPlace(line);
+        if (line.empty()) continue;
+        if (!inBody) {
+            if (line == "{") inBody = true;
+            continue;
+        }
+        if (!line.ends_with(";")) break;
+        if (line.find('=') != std::string::npos) break;
+        if (line.starts_with("if") || line.starts_with("for") || line.starts_with("do")
+            || line.starts_with("while") || line.starts_with("return")) {
+            break;
+        }
+        count++;
+    }
+
+    return count;
+}
+
+std::string summarizeGhidraObservation(const std::string& action,
+                                       const std::string& observation) {
+    std::istringstream stream(observation);
+    std::string line;
+    std::vector<std::string> lines;
+    while (std::getline(stream, line)) lines.push_back(line);
+
+    std::vector<std::string> notes;
+    if (action.find("| xrefs |") != std::string::npos) {
+        for (const auto& rawLine : lines) {
+            std::string trimmed = rawLine;
+            util::trimInPlace(trimmed);
+            if (trimmed.starts_with("Import: ")
+                || trimmed.starts_with("Function: ")
+                || trimmed.starts_with("Data: ")) {
+                notes.push_back(trimmed);
+            } else if (trimmed.starts_with("Functions calling:")
+                       || trimmed.starts_with("Type: ")
+                       || trimmed.starts_with("Requested address:")) {
+                notes.push_back(trimmed);
+            } else if (trimmed.starts_with("Value: ")
+                       || trimmed.starts_with("Offset from start:")) {
+                notes.push_back(trimmed);
+            } else if (trimmed.starts_with("FUN_") || trimmed.starts_with("unknown @")) {
+                notes.push_back("Callsite: " + trimmed);
+                if (notes.size() >= 6) break;
+            }
+        }
+    } else if (action.find("| decompile |") != std::string::npos) {
+        std::string banner;
+        std::string signature;
+        for (const auto& rawLine : lines) {
+            std::string trimmed = rawLine;
+            util::trimInPlace(trimmed);
+            if (trimmed.starts_with("--- ") && banner.empty()) {
+                banner = trimmed;
+            } else if (trimmed.ends_with(")") && signature.empty()) {
+                signature = trimmed;
+            }
+        }
+        if (!banner.empty()) notes.push_back(banner);
+        if (!signature.empty()) {
+            notes.push_back("Signature: " + signature);
+            int params = countParamsInSignature(signature);
+            if (params >= 0) {
+                notes.push_back("Parameter count: " + std::to_string(params));
+            }
+        }
+
+        int locals = countLocalDeclarations(lines);
+        if (locals > 0) {
+            notes.push_back("Local declaration count: " + std::to_string(locals));
+        }
+
+        for (const auto& rawLine : lines) {
+            std::string trimmed = rawLine;
+            util::trimInPlace(trimmed);
+            if (trimmed.find("Sleep(") != std::string::npos
+                || trimmed.find("GetSystemDefaultLangID(") != std::string::npos
+                || trimmed.find("GetLastInputInfo(") != std::string::npos
+                || trimmed.find("WinExec(") != std::string::npos
+                || trimmed.find("socket(") != std::string::npos
+                || trimmed.find("connect(") != std::string::npos
+                || trimmed.find("CreateProcess") != std::string::npos) {
+                notes.push_back("Key line: " + trimmed);
+            }
+        }
+    }
+
+    if (notes.empty()) return "";
+
+    std::ostringstream out;
+    out << "BOOTSTRAP EVIDENCE from " << action << ":\n";
+    for (const auto& note : notes) {
+        out << "- " << note << "\n";
+    }
+    return out.str();
+}
+
+std::string buildRuntimeGuidance(const std::string& userInput) {
+    if (!looksLikeBinaryInvestigation(userInput)) return "";
+
+    return
+        "BINARY ANALYSIS WITH GHIDRA — this request is asking for malware triage from binary data.\n"
+        "- Do not stop at prefetched overview/imports/strings if they are already present.\n"
+        "- Pick 3-6 GHIDRA follow-up calls before answering.\n"
+        "- Start from entry point, likely DllMain, exports, suspicious imports, and high-signal strings.\n"
+        "- Use GHIDRA xrefs on imports, strings, symbols, and addresses to find wrapper "
+        "functions that implement behavior.\n"
+        "- Then use GHIDRA decompile on the most suspicious functions or exact addresses "
+        "to read the real logic.\n"
+        "- When a prompt or observation contains a hex address, call GHIDRA directly on "
+        "that address instead of guessing names.\n"
+        "- Prefer concrete evidence such as import callers, decompiled loops, decoded "
+        "data, mutex names, filenames, registry keys, and network indicators.\n";
+}
+}  // namespace
+
 Agent::Agent(std::unique_ptr<LLMBackend> backend, ToolRegistry& tools, Harness harness)
     : ownedBackend_(std::move(backend)), backend_(ownedBackend_.get()),
       tools_(tools), harness_(std::move(harness)) {
@@ -152,7 +444,7 @@ static std::string templateReplace(const std::string& s, const std::string& key,
     return result;
 }
 
-std::string Agent::buildSystemPrompt() const {
+std::string Agent::buildSystemPrompt(const std::string& userInput) const {
     std::string prompt;
     if (!promptsDir_.empty()) {
         try {
@@ -171,6 +463,11 @@ std::string Agent::buildSystemPrompt() const {
     prompt = templateReplace(prompt, "system_context", systemContext_);
     prompt = templateReplace(prompt, "guides", harness_.guideText());
 
+    std::string runtimeGuidance = buildRuntimeGuidance(userInput);
+    if (!runtimeGuidance.empty()) {
+        prompt += "\n\n" + runtimeGuidance;
+    }
+
     return prompt;
 }
 
@@ -183,7 +480,83 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
     history_.push_back({"user", userInput});
     interrupted_.store(false);
 
-    std::string systemPrompt = buildSystemPrompt();
+    std::string systemPrompt = buildSystemPrompt(userInput);
+    std::string bootstrapMemo;
+
+    if (looksLikeBinaryInvestigation(userInput)) {
+        auto paths = extractGhidraBinaryPaths(userInput);
+        if (!paths.empty()) {
+            const std::string& path = paths.front();
+            std::deque<std::string> bootstrapActions;
+            std::set<std::string> seenActions;
+
+            if (auto dllMain = extractLineHexAddress(userInput, "Likely DllMain:")) {
+                appendUniqueAction(bootstrapActions, seenActions,
+                                   "GHIDRA: " + path + " | decompile | " + *dllMain);
+            }
+            if (containsCaseInsensitive(userInput, "gethostbyname")) {
+                appendUniqueAction(bootstrapActions, seenActions,
+                                   "GHIDRA: " + path + " | xrefs | gethostbyname");
+            }
+            if (containsCaseInsensitive(userInput, "\"Sleep\"")
+                || containsCaseInsensitive(userInput, " Sleep ")) {
+                appendUniqueAction(bootstrapActions, seenActions,
+                                   "GHIDRA: " + path + " | xrefs | Sleep");
+            }
+            if (containsCaseInsensitive(userInput, "GetSystemDefaultLangID")) {
+                appendUniqueAction(bootstrapActions, seenActions,
+                                   "GHIDRA: " + path + " | xrefs | GetSystemDefaultLangID");
+            }
+            if (containsCaseInsensitive(userInput, "GetLastInputInfo")) {
+                appendUniqueAction(bootstrapActions, seenActions,
+                                   "GHIDRA: " + path + " | xrefs | GetLastInputInfo");
+            }
+            if (auto addr = extractStringAddress(userInput, "cmd.exe")) {
+                appendUniqueAction(bootstrapActions, seenActions,
+                                   "GHIDRA: " + path + " | xrefs | " + *addr);
+            }
+
+            ToolContext toolCtx{cb, confirm, harness_};
+            int bootstrapBudget = 6;
+            std::vector<std::string> bootstrapSummaries;
+            while (!bootstrapActions.empty() && bootstrapBudget-- > 0) {
+                std::string action = bootstrapActions.front();
+                bootstrapActions.pop_front();
+
+                history_.push_back({"assistant",
+                    "THOUGHT: I should gather concrete binary evidence before answering.\n" + action});
+
+                auto toolResult = tools_.dispatch(action, toolCtx);
+                if (!toolResult.has_value()) continue;
+
+                history_.push_back({"user", toolResult->observation});
+                std::string summary = summarizeGhidraObservation(action, toolResult->observation);
+                if (!summary.empty()) {
+                    bootstrapSummaries.push_back(summary);
+                }
+
+                if (action.find("| xrefs |") == std::string::npos) continue;
+
+                auto targets = extractDecompileTargets(toolResult->observation);
+                int followups = 0;
+                for (const auto& target : targets) {
+                    appendUniqueAction(bootstrapActions, seenActions,
+                                       "GHIDRA: " + path + " | decompile | " + target);
+                    if (++followups >= 2) break;
+                }
+            }
+
+            if (!bootstrapSummaries.empty()) {
+                std::ostringstream memo;
+                memo << "BOOTSTRAP SUMMARY — use these exact findings when relevant:\n";
+                for (const auto& summary : bootstrapSummaries) {
+                    memo << summary << "\n";
+                }
+                bootstrapMemo = memo.str();
+                history_.push_back({"user", bootstrapMemo});
+            }
+        }
+    }
 
     for (int iter = 0; iter < MAX_ITERATIONS; iter++) {
         if (interrupted_.load()) {
@@ -237,6 +610,28 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
         if (action.starts_with("ANSWER:")) {
             std::string answer = action.substr(7);
             util::ltrimInPlace(answer);
+
+            if (!bootstrapMemo.empty() && iter < MAX_ITERATIONS - 1) {
+                std::string lowerAnswer = toLowerCopy(answer);
+                bool citesImportAddr = answer.find("EXTERNAL:") != std::string::npos;
+                bool citesCallCounts = lowerAnswer.find("functions calling") != std::string::npos
+                    || lowerAnswer.find("call sites") != std::string::npos;
+                bool citesParamCount = lowerAnswer.find("parameter count") != std::string::npos
+                    || lowerAnswer.find("0 parameter") != std::string::npos
+                    || lowerAnswer.find("1 parameter") != std::string::npos;
+                bool citesKeyLine = lowerAnswer.find("sleep(") != std::string::npos
+                    || lowerAnswer.find("getsystemdefaultlangid") != std::string::npos
+                    || lowerAnswer.find("winexec(") != std::string::npos;
+                if (!citesImportAddr || !citesCallCounts || !citesParamCount || !citesKeyLine) {
+                    history_.push_back({"assistant", rawResponse});
+                    history_.push_back({"user",
+                        "SYSTEM: Revise the answer and explicitly cite the exact bootstrap "
+                        "evidence already gathered, including import addresses, xref counts, "
+                        "parameter counts, and key decompiled lines when relevant.\n\n"
+                        + bootstrapMemo});
+                    continue;
+                }
+            }
 
             std::string sensorFeedback = harness_.runSensors("answer", answer, "");
             if (!sensorFeedback.empty() && iter < MAX_ITERATIONS - 1) {

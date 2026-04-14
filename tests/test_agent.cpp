@@ -47,3 +47,11 @@ TEST(AgentConstruction, MockSequenceSimulatesMultiTurn) {
     EXPECT_EQ(r2.substr(0, 7), "ANSWER:");
     EXPECT_EQ(mock.callCount(), 2);
 }
+
+TEST(HarnessDefaults, IncludesGhidraWorkflowGuide) {
+    area::Harness harness = area::Harness::createDefault();
+    std::string guides = harness.guideText();
+    EXPECT_NE(guides.find("GHIDRA WORKFLOW"), std::string::npos);
+    EXPECT_NE(guides.find("GHIDRA xrefs on high-signal imports"), std::string::npos);
+    EXPECT_NE(guides.find("Exact subroutine address"), std::string::npos);
+}

@@ -225,6 +225,40 @@ TEST(GhidraTool, FormatsDataAtLookup) {
     fs::remove(path, ec);
 }
 
+TEST(GhidraTool, FormatsRawDataAtLookup) {
+    FakeGhidraTool tool;
+    GhidraToolMessages msgs;
+    area::Harness h;
+    area::ToolContext ctx{msgs.cb(), nullptr, h};
+    std::string path = makeTempBinary();
+
+    tool.outputs["data_at"] = R"json({
+  "metadata": {"name": "sample.exe"},
+  "data_at": {
+    "requested_address": "01001D988",
+    "address": "01001D988",
+    "max_address": "01001D9A7",
+    "data_type": "raw_bytes",
+    "length": 32,
+    "memory_block": ".data",
+    "offset_from_start": 0,
+    "hex_bytes": "2D 3F 33 20 00 11 22 44",
+    "ascii_preview": "-?3 ..AD",
+    "xref_count": 0
+  }
+})json";
+
+    auto result = tool.tryExecute("GHIDRA: " + path + " | data_at | 0x1001D988", ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(tool.lastMode, "data_at");
+    EXPECT_NE(result->observation.find("Type: raw_bytes (32 bytes)"), std::string::npos);
+    EXPECT_NE(result->observation.find("Bytes: 2D 3F 33 20 00 11 22 44"), std::string::npos);
+    EXPECT_NE(result->observation.find("ASCII: \"-?3 ..AD\""), std::string::npos);
+
+    std::error_code ec;
+    fs::remove(path, ec);
+}
+
 TEST(GhidraTool, FormatsDataXrefs) {
     FakeGhidraTool tool;
     GhidraToolMessages msgs;
@@ -260,6 +294,45 @@ TEST(GhidraTool, FormatsDataXrefs) {
     EXPECT_NE(result->observation.find("Data: 01001D980 .. 01001D99F"), std::string::npos);
     EXPECT_NE(result->observation.find("References (1)"), std::string::npos);
     EXPECT_NE(result->observation.find("sub_10001620 @ 010001656 [READ]"), std::string::npos);
+
+    std::error_code ec;
+    fs::remove(path, ec);
+}
+
+TEST(GhidraTool, FormatsRawDataXrefs) {
+    FakeGhidraTool tool;
+    GhidraToolMessages msgs;
+    area::Harness h;
+    area::ToolContext ctx{msgs.cb(), nullptr, h};
+    std::string path = makeTempBinary();
+
+    tool.outputs["xrefs"] = R"json({
+  "metadata": {"name": "sample.exe"},
+  "xrefs": {
+    "requested_address": "01001D988",
+    "kind": "data",
+    "address": "01001D988",
+    "max_address": "01001D9A7",
+    "data_type": "raw_bytes",
+    "length": 32,
+    "memory_block": ".data",
+    "offset_from_start": 0,
+    "hex_bytes": "2D 3F 33 20 00 11 22 44",
+    "ascii_preview": "-?3 ..AD",
+    "xref_count": 0,
+    "references": [],
+    "callees": []
+  }
+})json";
+
+    auto result = tool.tryExecute("GHIDRA: " + path + " | xrefs | 0x1001D988", ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(tool.lastMode, "xrefs");
+    EXPECT_EQ(tool.lastFilter, "0x1001D988");
+    EXPECT_NE(result->observation.find("Data: 01001D988 .. 01001D9A7"), std::string::npos);
+    EXPECT_NE(result->observation.find("Type: raw_bytes (32 bytes)"), std::string::npos);
+    EXPECT_NE(result->observation.find("Bytes: 2D 3F 33 20 00 11 22 44"), std::string::npos);
+    EXPECT_NE(result->observation.find("ASCII: \"-?3 ..AD\""), std::string::npos);
 
     std::error_code ec;
     fs::remove(path, ec);

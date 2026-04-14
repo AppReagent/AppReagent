@@ -682,6 +682,10 @@ std::string GhidraTool::formatXrefs(const std::string& jsonPath) {
             if (!value.empty()) out << "Value: \"" << value << "\"\n";
             auto block = xr.value("memory_block", "");
             if (!block.empty()) out << "Memory block: " << block << "\n";
+            auto hexBytes = xr.value("hex_bytes", "");
+            if (!hexBytes.empty()) out << "Bytes: " << hexBytes << "\n";
+            auto ascii = xr.value("ascii_preview", "");
+            if (!ascii.empty()) out << "ASCII: \"" << ascii << "\"\n";
             if (xr.contains("offset_from_start")) {
                 out << "Offset from start: " << xr.value("offset_from_start", 0) << "\n";
             }
@@ -818,6 +822,10 @@ std::string GhidraTool::formatDataAt(const std::string& jsonPath) {
     if (!value.empty()) out << "Value: \"" << value << "\"\n";
     auto block = item.value("memory_block", "");
     if (!block.empty()) out << "Memory block: " << block << "\n";
+    auto hexBytes = item.value("hex_bytes", "");
+    if (!hexBytes.empty()) out << "Bytes: " << hexBytes << "\n";
+    auto ascii = item.value("ascii_preview", "");
+    if (!ascii.empty()) out << "ASCII: \"" << ascii << "\"\n";
     if (item.contains("offset_from_start")) {
         out << "Offset from start: " << item.value("offset_from_start", 0) << "\n";
     }

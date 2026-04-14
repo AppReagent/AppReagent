@@ -282,10 +282,7 @@ public class AreaAnalyze extends GhidraScript {
         if (filter == null || filter.isEmpty()) return null;
         Address addr = parseAddressMaybe(filter);
         if (addr != null) {
-            Function f = getFunctionContaining(addr);
-            if (f != null) return f;
-            f = getFunctionAt(addr);
-            return f;
+            return ensureFunctionAt(addr);
         }
         String nameLower = filter.toLowerCase();
         FunctionIterator iter = currentProgram.getListing().getFunctions(true);
@@ -317,6 +314,47 @@ public class AreaAnalyze extends GhidraScript {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private boolean isExecutableAddress(Address addr) {
+        MemoryBlock block = currentProgram.getMemory().getBlock(addr);
+        return block != null && block.isExecute();
+    }
+
+    private Instruction ensureInstructionAt(Address addr) {
+        if (!isExecutableAddress(addr)) return null;
+        Listing listing = currentProgram.getListing();
+        Instruction instr = listing.getInstructionContaining(addr);
+        if (instr != null) return instr;
+        instr = listing.getInstructionAt(addr);
+        if (instr != null) return instr;
+        try {
+            disassemble(addr);
+        } catch (Exception e) {
+        }
+        instr = listing.getInstructionContaining(addr);
+        if (instr != null) return instr;
+        return listing.getInstructionAt(addr);
+    }
+
+    private Function ensureFunctionAt(Address addr) {
+        Function f = getFunctionContaining(addr);
+        if (f != null) return f;
+        f = getFunctionAt(addr);
+        if (f != null) return f;
+        if (!isExecutableAddress(addr)) return null;
+
+        Instruction instr = ensureInstructionAt(addr);
+        if (instr == null) return null;
+
+        try {
+            createFunction(instr.getAddress(), null);
+        } catch (Exception e) {
+        }
+
+        f = getFunctionContaining(addr);
+        if (f != null) return f;
+        return getFunctionAt(instr.getAddress());
     }
 
     private void writeFunctions(boolean decompile, String filter) throws Exception {
@@ -551,11 +589,7 @@ public class AreaAnalyze extends GhidraScript {
             if (iter.hasNext()) target = iter.next();
         }
 
-        Instruction requestedInstr = null;
-        if (requestedAddr != null) {
-            requestedInstr = listing.getInstructionContaining(requestedAddr);
-            if (requestedInstr == null) requestedInstr = listing.getInstructionAt(requestedAddr);
-        }
+        Instruction requestedInstr = requestedAddr != null ? ensureInstructionAt(requestedAddr) : null;
 
         if (target == null && requestedInstr == null) {
             pw.println("    \"error\": \"disasm mode requires a function name or code address filter\"");
@@ -650,6 +684,79 @@ public class AreaAnalyze extends GhidraScript {
         Data data = currentProgram.getListing().getDefinedDataContaining(addr);
         if (data != null) return data;
         return currentProgram.getListing().getDataAt(addr);
+    }
+
+    private boolean isTrivialUndefined(Data data) {
+        if (data == null) return true;
+        String typeName = data.getDataType().getName().toLowerCase();
+        return typeName.startsWith("undefined") && data.getLength() <= 1;
+    }
+
+    private int readByteSafe(Address addr) throws Exception {
+        return currentProgram.getMemory().getByte(addr) & 0xff;
+    }
+
+    private String asciiPreview(List<Integer> bytes) {
+        StringBuilder sb = new StringBuilder();
+        for (int b : bytes) {
+            if (b >= 32 && b <= 126) sb.append((char) b);
+            else sb.append('.');
+        }
+        return sb.toString();
+    }
+
+    private void writeRawDataJson(Address requestedAddr) {
+        MemoryBlock block = currentProgram.getMemory().getBlock(requestedAddr);
+        if (block == null) {
+            pw.println("    \"error\": \"no memory block contains address: " + escJson(requestedAddr.toString()) + "\"");
+            return;
+        }
+
+        List<Integer> bytes = new ArrayList<>();
+        StringBuilder hex = new StringBuilder();
+        Address cur = requestedAddr;
+        for (int i = 0; i < 64 && cur != null && block.contains(cur); i++) {
+            try {
+                int b = readByteSafe(cur);
+                bytes.add(b);
+                if (i > 0) hex.append(' ');
+                String hx = Integer.toHexString(b).toUpperCase();
+                if (hx.length() < 2) hex.append('0');
+                hex.append(hx);
+                cur = cur.next();
+            } catch (Exception e) {
+                break;
+            }
+        }
+
+        Address end = bytes.isEmpty() ? requestedAddr : requestedAddr.add(bytes.size() - 1L);
+        pw.print("    \"address\": \"" + requestedAddr + "\"");
+        pw.print(",\n    \"max_address\": \"" + end + "\"");
+        pw.print(",\n    \"data_type\": \"raw_bytes\"");
+        pw.print(",\n    \"length\": " + bytes.size());
+        pw.print(",\n    \"requested_address\": \"" + requestedAddr + "\"");
+        pw.print(",\n    \"offset_from_start\": 0");
+        pw.print(",\n    \"memory_block\": \"" + escJson(block.getName()) + "\"");
+        pw.print(",\n    \"hex_bytes\": \"" + hex + "\"");
+        pw.print(",\n    \"ascii_preview\": \"" + escJson(asciiPreview(bytes)) + "\"");
+
+        Reference[] refs = getReferencesTo(requestedAddr);
+        pw.print(",\n    \"xref_count\": " + refs.length);
+        if (refs.length > 0) {
+            pw.print(",\n    \"references\": [");
+            boolean firstRef = true;
+            int shown = 0;
+            for (Reference ref : refs) {
+                if (shown++ >= 50) break;
+                if (!firstRef) pw.print(", ");
+                firstRef = false;
+                Function caller = getFunctionContaining(ref.getFromAddress());
+                pw.print("{\"from\": \"" + ref.getFromAddress() + "\"");
+                pw.print(", \"function\": \"" + escJson(caller != null ? caller.getName() : "unknown") + "\"");
+                pw.print(", \"type\": \"" + escJson(ref.getReferenceType().getName()) + "\"}");
+            }
+            pw.print("]");
+        }
     }
 
     private static Map<String, Map<Integer, String>> createImportOrdinalNames() {
@@ -842,10 +949,7 @@ public class AreaAnalyze extends GhidraScript {
             return;
         }
 
-        Function target = getFunctionContaining(addr);
-        if (target == null) {
-            target = getFunctionAt(addr);
-        }
+        Function target = ensureFunctionAt(addr);
 
         if (target == null) {
             pw.println("    \"error\": \"no function contains address: " + escJson(filter) + "\"");
@@ -875,13 +979,11 @@ public class AreaAnalyze extends GhidraScript {
         }
 
         Data data = resolveFilterData(filter);
-        if (data == null) {
-            pw.println("    \"error\": \"no defined data contains address: " + escJson(filter) + "\"");
-            pw.print("  }");
-            return;
+        if (isTrivialUndefined(data)) {
+            writeRawDataJson(addr);
+        } else {
+            writeDataJson(data, addr);
         }
-
-        writeDataJson(data, addr);
         pw.print("\n  }");
     }
 
@@ -982,7 +1084,11 @@ public class AreaAnalyze extends GhidraScript {
             pw.println("\n    ]");
         } else {
             pw.println("    \"kind\": \"data\",");
-            writeDataJson(targetData, requestedAddr);
+            if (isTrivialUndefined(targetData)) {
+                writeRawDataJson(requestedAddr);
+            } else {
+                writeDataJson(targetData, requestedAddr);
+            }
             pw.println(",");
             pw.println("    \"callees\": []");
         }

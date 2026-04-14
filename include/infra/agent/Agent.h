@@ -52,7 +52,7 @@ class Agent {
     void setEventBus(EventBus* bus, const std::string& chatId = "");
 
  private:
-    std::string buildSystemPrompt() const;
+    std::string buildSystemPrompt(const std::string& userInput) const;
     std::string extractThought(const std::string& response, std::string& thought);
     void compressHistory(MessageCallback cb);
     void emitEvent(const AgentMessage& msg);

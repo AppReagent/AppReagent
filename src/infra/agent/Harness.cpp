@@ -112,6 +112,31 @@ Harness Harness::createDefault() {
         "  No results: try different search terms, broader patterns, or a different tool\n"
     });
 
+    h.addGuide({"ghidra_binary_workflow",
+        "GHIDRA WORKFLOW — use this for PE, ELF, Mach-O, and object-file investigations.\n"
+        "\n"
+        "When the user asks what a binary does, identify suspicious behavior, or explain "
+        "a malware sample:\n"
+        "1. Start with GHIDRA overview, imports, and strings to identify entry points, "
+        "exports, suspicious APIs, and notable constants.\n"
+        "2. Use GHIDRA xrefs on high-signal imports such as networking, process "
+        "injection, persistence, crypto, and anti-analysis APIs.\n"
+        "3. Decompile the wrapper functions returned by those xrefs to see the actual behavior.\n"
+        "4. If you see a hex address in the prompt or in GHIDRA output, use GHIDRA "
+        "decompile or xrefs directly on that address.\n"
+        "5. If decompiled output is unclear, use GHIDRA disasm around the same function or address.\n"
+        "\n"
+        "Binary-analysis playbooks:\n"
+        "  Entry point or DllMain question → GHIDRA overview → xrefs/decompile on entry callee candidates\n"
+        "  'What does Sleep/connect/CreateMutex/import X do here?' → GHIDRA xrefs on "
+        "the import → decompile each caller\n"
+        "  Suspicious string or URL → GHIDRA xrefs on that string/data address → "
+        "decompile the referencing function\n"
+        "  Exact subroutine address → GHIDRA decompile | 0xADDR, then GHIDRA xrefs | 0xADDR\n"
+        "\n"
+        "Do not answer from overview text alone when GHIDRA follow-up calls can verify the behavior.\n"
+    });
+
     h.addGuide({"investigation_depth",
         "DEEP INVESTIGATION — avoid shallow answers.\n"
         "\n"

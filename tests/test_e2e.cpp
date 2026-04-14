@@ -3,6 +3,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <poll.h>
 #include <sys/socket.h>
 #include <thread>
@@ -12,6 +13,8 @@
 #include "features/server/AreaServer.h"
 #include "infra/ipc/IPC.h"
 #include "infra/llm/LLMBackend.h"
+#include "infra/tools/Tool.h"
+#include "infra/tools/ToolContext.h"
 #include "features/scan/ScanLog.h"
 #include "infra/tools/ToolRegistry.h"
 #include "features/runid/GenerateRunIdTool.h"
@@ -89,6 +92,31 @@ public:
 
 private:
     std::atomic<int> callCount_{0};
+};
+
+class FakeGhidraActionTool : public area::Tool {
+ public:
+    std::string name() const override { return "GHIDRA"; }
+
+    std::string description() const override {
+        return "<path> [| overview|imports|strings|xrefs|decompile]";
+    }
+
+    std::optional<area::ToolResult> tryExecute(const std::string& action,
+                                               area::ToolContext&) override {
+        if (!action.starts_with("GHIDRA:")) return std::nullopt;
+        lastAction = action;
+        actions.push_back(action);
+        auto it = responses.find(action);
+        if (it != responses.end()) {
+            return area::ToolResult{it->second};
+        }
+        return area::ToolResult{"Ghidra observation for " + action};
+    }
+
+    std::string lastAction;
+    std::vector<std::string> actions;
+    std::map<std::string, std::string> responses;
 };
 
 // ---------------------------------------------------------------------------
@@ -268,6 +296,186 @@ TEST_F(AgentE2E, MaxIterationsReached) {
         }
     }
     EXPECT_TRUE(gotAnswer);
+}
+
+TEST(AgentPrompting, BenchStylePromptAddsGhidraRuntimeGuidance) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    auto* backendPtr = backend.get();
+
+    area::ToolRegistry tools;
+    tools.add(std::make_unique<FakeGhidraActionTool>());
+
+    area::Agent agent(std::move(backend), tools);
+    std::vector<area::AgentMessage> msgs;
+    agent.process(
+        "Analyze /tmp/sample.dll.\n\nGHIDRA DATA:\nOverview, imports, strings.\n"
+        "Answer with entry point, interesting functions, suspicious strings, network IOCs, and malware behavior.",
+        [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    std::string system = backendPtr->lastSystem();
+    EXPECT_NE(system.find("BINARY ANALYSIS WITH GHIDRA"), std::string::npos);
+    EXPECT_NE(system.find("Pick 3-6 GHIDRA follow-up calls before answering."), std::string::npos);
+    EXPECT_NE(system.find("GHIDRA xrefs on imports, strings, symbols, and addresses"), std::string::npos);
+}
+
+TEST(AgentPrompting, GenericPromptDoesNotAddGhidraRuntimeGuidance) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    auto* backendPtr = backend.get();
+
+    area::ToolRegistry tools;
+    tools.add(std::make_unique<FakeGhidraActionTool>());
+
+    area::Agent agent(std::move(backend), tools);
+    std::vector<area::AgentMessage> msgs;
+    agent.process("hello", [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    EXPECT_EQ(backendPtr->lastSystem().find("BINARY ANALYSIS WITH GHIDRA"), std::string::npos);
+}
+
+TEST(AgentPrompting, RuntimeGuidanceCanDriveGhidraFollowup) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    area::MockPromptEntry followup;
+    followup.id = "bench-ghidra-followup";
+    followup.match = {"BINARY ANALYSIS WITH GHIDRA"};
+    followup.user_match = {"GHIDRA DATA", "interesting functions"};
+    followup.response = "THOUGHT: I should verify an import caller first.\n"
+                        "GHIDRA: /tmp/sample.dll | xrefs | Sleep";
+
+    area::MockPromptEntry afterGhidra;
+    afterGhidra.id = "after-ghidra";
+    afterGhidra.match = {"Ghidra observation for GHIDRA: /tmp/sample.dll | xrefs | Sleep"};
+    afterGhidra.response = "ANSWER: verified";
+
+    backend->setPromptEntries({followup, afterGhidra});
+
+    auto* backendPtr = backend.get();
+    area::ToolRegistry tools;
+    auto ghidraTool = std::make_unique<FakeGhidraActionTool>();
+    auto* ghidraPtr = ghidraTool.get();
+    tools.add(std::move(ghidraTool));
+
+    area::Agent agent(std::move(backend), tools);
+    std::vector<area::AgentMessage> msgs;
+    agent.process(
+        "Analyze /tmp/sample.dll.\n\nGHIDRA DATA:\nOverview, imports, strings.\n"
+        "Describe interesting functions and suspicious strings.",
+        [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    EXPECT_EQ(backendPtr->lastMatchedId(), "after-ghidra");
+    EXPECT_EQ(ghidraPtr->lastAction, "GHIDRA: /tmp/sample.dll | xrefs | Sleep");
+    ASSERT_FALSE(msgs.empty());
+    EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
+    EXPECT_EQ(msgs.back().content, "verified");
+}
+
+TEST(AgentPrompting, BenchStylePromptAutoRunsGhidraBootstrap) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    auto* backendPtr = backend.get();
+    backend->setResponse("ANSWER: done");
+
+    area::ToolRegistry tools;
+    auto ghidraTool = std::make_unique<FakeGhidraActionTool>();
+    auto* ghidraPtr = ghidraTool.get();
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | xrefs | gethostbyname"] =
+        "=== Ghidra Cross-References: sample.dll ===\n\n"
+        "Import: gethostbyname [WS2_32.DLL] @ EXTERNAL:00000016\n"
+        "Functions calling: 1 | Call sites: 1\n\n"
+        "--- Callers (1) ---\n"
+        "  FUN_10001074 @ 100011af [COMPUTED_CALL]\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | xrefs | Sleep"] =
+        "=== Ghidra Cross-References: sample.dll ===\n\n"
+        "Import: Sleep [KERNEL32.DLL] @ EXTERNAL:00000078\n"
+        "Functions calling: 1 | Call sites: 1\n\n"
+        "--- Callers (1) ---\n"
+        "  FUN_10001074 @ 10001358 [COMPUTED_CALL]\n";
+    tools.add(std::move(ghidraTool));
+
+    area::Agent agent(std::move(backend), tools);
+    std::vector<area::AgentMessage> msgs;
+    agent.process(
+        "Analyze /tmp/sample.dll.\n\n"
+        "Questions: interesting functions, suspicious strings, malware behavior.\n"
+        "========================= GHIDRA DATA =========================\n"
+        "========== GHIDRA: /tmp/sample.dll ==========\n"
+        "--- overview ---\n"
+        "Likely DllMain: FUN_1000d02e @ 1000d02e\n"
+        "--- imports ---\n"
+        "  gethostbyname [WS2_32.DLL] (ordinal 52) @ EXTERNAL:00000016\n"
+        "  Sleep [KERNEL32.DLL] @ EXTERNAL:00000078\n"
+        "===================== END GHIDRA DATA =========================\n",
+        [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    EXPECT_GE(backendPtr->callCount(), 1);
+    EXPECT_EQ(ghidraPtr->actions.size(), 5u);
+    EXPECT_EQ(ghidraPtr->actions[0], "GHIDRA: /tmp/sample.dll | decompile | 0x1000d02e");
+    EXPECT_EQ(ghidraPtr->actions[1], "GHIDRA: /tmp/sample.dll | xrefs | gethostbyname");
+    EXPECT_EQ(ghidraPtr->actions[2], "GHIDRA: /tmp/sample.dll | xrefs | Sleep");
+    EXPECT_EQ(ghidraPtr->actions[3], "GHIDRA: /tmp/sample.dll | decompile | 0x100011af");
+    EXPECT_EQ(ghidraPtr->actions[4], "GHIDRA: /tmp/sample.dll | decompile | 0x10001358");
+    EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
+    EXPECT_EQ(msgs.back().content, "done");
+}
+
+TEST(AgentPrompting, BootstrapEvidenceForcesAnswerRevision) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    auto* backendPtr = backend.get();
+    backend->setResponses({
+        "ANSWER: broad summary without exact evidence",
+        "ANSWER: Import gethostbyname @ EXTERNAL:00000016. Functions calling: 1. "
+        "Parameter count: 0. Sleep(iVar1 * 1000)."
+    });
+
+    area::ToolRegistry tools;
+    auto ghidraTool = std::make_unique<FakeGhidraActionTool>();
+    auto* ghidraPtr = ghidraTool.get();
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | xrefs | gethostbyname"] =
+        "=== Ghidra Cross-References: sample.dll ===\n\n"
+        "Import: gethostbyname [WS2_32.DLL] @ EXTERNAL:00000016\n"
+        "Functions calling: 1 | Call sites: 1\n\n"
+        "--- Callers (1) ---\n"
+        "  FUN_10001074 @ 100011af [COMPUTED_CALL]\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | xrefs | Sleep"] =
+        "=== Ghidra Cross-References: sample.dll ===\n\n"
+        "Import: Sleep [KERNEL32.DLL] @ EXTERNAL:00000078\n"
+        "Functions calling: 1 | Call sites: 1\n\n"
+        "--- Callers (1) ---\n"
+        "  FUN_10001074 @ 10001358 [COMPUTED_CALL]\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | decompile | 0x100011af"] =
+        "=== Ghidra Decompilation: sample.dll ===\n\n"
+        "--- FUN_10001074 @ 10001074 (32 bytes) ---\n\n"
+        "undefined4 FUN_10001074(void)\n\n"
+        "{\n"
+        "  int iVar1;\n"
+        "  Sleep(iVar1 * 1000);\n"
+        "}\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | decompile | 0x10001358"] =
+        ghidraPtr->responses["GHIDRA: /tmp/sample.dll | decompile | 0x100011af"];
+    tools.add(std::move(ghidraTool));
+
+    area::Agent agent(std::move(backend), tools);
+    std::vector<area::AgentMessage> msgs;
+    agent.process(
+        "Analyze /tmp/sample.dll.\n\n"
+        "Questions: interesting functions, suspicious strings, malware behavior.\n"
+        "========================= GHIDRA DATA =========================\n"
+        "========== GHIDRA: /tmp/sample.dll ==========\n"
+        "--- imports ---\n"
+        "  gethostbyname [WS2_32.DLL] (ordinal 52) @ EXTERNAL:00000016\n"
+        "  Sleep [KERNEL32.DLL] @ EXTERNAL:00000078\n"
+        "===================== END GHIDRA DATA =========================\n",
+        [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    EXPECT_EQ(backendPtr->callCount(), 2);
+    ASSERT_FALSE(msgs.empty());
+    EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
+    EXPECT_EQ(msgs.back().content,
+              "Import gethostbyname @ EXTERNAL:00000016. Functions calling: 1. "
+              "Parameter count: 0. Sleep(iVar1 * 1000).");
 }
 
 // ---------------------------------------------------------------------------

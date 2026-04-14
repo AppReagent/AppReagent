@@ -339,6 +339,86 @@ TEST(GhidraTool, FormatsResolvedImportOrdinalsAndCallers) {
     fs::remove(path, ec);
 }
 
+TEST(GhidraTool, FormatsOverviewWithEntryPointAndNamedFunctions) {
+    FakeGhidraTool tool;
+    GhidraToolMessages msgs;
+    area::Harness h;
+    area::ToolContext ctx{msgs.cb(), nullptr, h};
+    std::string path = makeTempBinary();
+
+    tool.outputs["overview"] = R"json({
+  "metadata": {
+    "name": "sample.dll",
+    "language": "x86:LE:32:default",
+    "compiler": "windows",
+    "image_base": "10000000",
+    "executable_format": "Portable Executable (PE)",
+    "function_count": 4,
+    "memory_size": 4096,
+    "is_dll": true,
+    "entry_point": "1000D02E",
+    "entry_point_rva": "0xD02E",
+    "entry_function": "DllMain",
+    "entry_signature": "BOOL DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)",
+    "entry_callees": [
+      {"name": "ServiceMain", "address": "1000CF30"},
+      {"name": "PSLIST", "address": "10007025"}
+    ],
+    "section_names": [".text", ".rdata", ".data"]
+  },
+  "functions": [
+    {
+      "name": "FUN_10001000",
+      "address": "10001000",
+      "signature": "void FUN_10001000(void)",
+      "size": 32,
+      "caller_count": 0,
+      "callee_count": 1
+    },
+    {
+      "name": "PSLIST",
+      "address": "10007025",
+      "signature": "void PSLIST(char * arg)",
+      "size": 64,
+      "caller_count": 0,
+      "callee_count": 4
+    },
+    {
+      "name": "StartEXS",
+      "address": "10007ECB",
+      "signature": "void StartEXS(void)",
+      "size": 128,
+      "caller_count": 0,
+      "callee_count": 37
+    }
+  ],
+  "imports": [
+    {
+      "name": "gethostbyname",
+      "library": "WS2_32.DLL",
+      "address": "EXTERNAL:00000016",
+      "caller_count": 8
+    }
+  ],
+  "exports": []
+})json";
+
+    auto result = tool.tryExecute("GHIDRA: " + path, ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(tool.lastMode, "overview");
+    EXPECT_NE(result->observation.find("Entry point: 1000D02E (DLL entry) -> DllMain"), std::string::npos);
+    EXPECT_NE(result->observation.find("Entry signature: BOOL DllMain"), std::string::npos);
+    EXPECT_NE(result->observation.find("Entry direct callees: ServiceMain @ 1000CF30, PSLIST @ 10007025"), std::string::npos);
+    EXPECT_NE(result->observation.find("Sections: .text, .rdata, .data"), std::string::npos);
+    EXPECT_NE(result->observation.find("--- Named Functions / Exports (2) ---"), std::string::npos);
+    EXPECT_NE(result->observation.find("PSLIST @ 10007025"), std::string::npos);
+    EXPECT_NE(result->observation.find("StartEXS @ 10007ECB"), std::string::npos);
+    EXPECT_NE(result->observation.find("gethostbyname [WS2_32.DLL] @ EXTERNAL:00000016 [callers:8]"), std::string::npos);
+
+    std::error_code ec;
+    fs::remove(path, ec);
+}
+
 // ── integration tests (require Ghidra installed) ───────────────────
 
 class GhidraIntegrationTest : public ::testing::Test {

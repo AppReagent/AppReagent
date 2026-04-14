@@ -3,6 +3,7 @@
 #include <unistd.h>
 
 #include <array>
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -27,6 +28,12 @@ bool isValidMode(const std::string& mode) {
     return mode == "overview" || mode == "decompile" || mode == "disasm" || mode == "strings" ||
            mode == "imports" || mode == "xrefs" || mode == "function_at" ||
            mode == "data_at" || mode == "all";
+}
+
+bool isNamedFunction(const json& f) {
+    auto name = f.value("name", "");
+    return !name.empty() && !name.starts_with("FUN_") && !name.starts_with("thunk_") &&
+           !name.starts_with("Ordinal_");
 }
 
 std::string joinCallsites(const json& refs) {
@@ -344,7 +351,70 @@ std::string GhidraTool::formatOverview(const std::string& jsonPath) {
         << "Compiler: " << meta.value("compiler", "?") << "\n"
         << "Image base: " << meta.value("image_base", "?") << "\n"
         << "Functions: " << meta.value("function_count", 0) << "\n"
-        << "Memory: " << meta.value("memory_size", 0) << " bytes\n\n";
+        << "Memory: " << meta.value("memory_size", 0) << " bytes\n";
+    if (meta.contains("entry_point")) {
+        out << "Entry point: " << meta.value("entry_point", "?");
+        if (meta.value("is_dll", false)) out << " (DLL entry)";
+        if (meta.contains("entry_function")) {
+            out << " -> " << meta.value("entry_function", "?");
+        }
+        out << "\n";
+        if (meta.contains("entry_signature")) {
+            out << "Entry signature: " << meta.value("entry_signature", "") << "\n";
+        }
+        if (meta.contains("entry_callees") && meta["entry_callees"].is_array() &&
+            !meta["entry_callees"].empty()) {
+            out << "Entry direct callees:";
+            bool first = true;
+            for (const auto& callee : meta["entry_callees"]) {
+                out << (first ? " " : ", ")
+                    << callee.value("name", "?") << " @ " << callee.value("address", "?");
+                first = false;
+            }
+            out << "\n";
+        }
+    }
+    if (meta.contains("section_names") && meta["section_names"].is_array() &&
+        !meta["section_names"].empty()) {
+        out << "Sections:";
+        bool first = true;
+        for (const auto& section : meta["section_names"]) {
+            out << (first ? " " : ", ") << section.get<std::string>();
+            first = false;
+        }
+        out << "\n";
+    }
+    out << "\n";
+
+    if (data.contains("functions") && data["functions"].is_array()) {
+        std::vector<json> namedFuncs;
+        for (const auto& f : data["functions"]) {
+            if (isNamedFunction(f)) namedFuncs.push_back(f);
+        }
+        std::sort(namedFuncs.begin(), namedFuncs.end(), [](const json& a, const json& b) {
+            auto scoreA = a.value("caller_count", 0) + a.value("callee_count", 0);
+            auto scoreB = b.value("caller_count", 0) + b.value("callee_count", 0);
+            if (scoreA != scoreB) return scoreA > scoreB;
+            return a.value("name", "") < b.value("name", "");
+        });
+
+        if (!namedFuncs.empty()) {
+            out << "--- Named Functions / Exports (" << namedFuncs.size() << ") ---\n";
+            int shown = 0;
+            for (const auto& f : namedFuncs) {
+                if (shown++ >= 20) {
+                    out << "  ... and " << (namedFuncs.size() - 20) << " more\n";
+                    break;
+                }
+                out << "  " << f.value("name", "?")
+                    << " @ " << f.value("address", "?")
+                    << " — " << f.value("signature", "")
+                    << " [callers:" << f.value("caller_count", 0)
+                    << " callees:" << f.value("callee_count", 0) << "]\n";
+            }
+            out << "\n";
+        }
+    }
 
     if (data.contains("functions") && data["functions"].is_array()) {
         auto& funcs = data["functions"];
@@ -361,10 +431,18 @@ std::string GhidraTool::formatOverview(const std::string& jsonPath) {
     }
 
     if (data.contains("imports") && data["imports"].is_array() && !data["imports"].empty()) {
-        auto& imps = data["imports"];
+        std::vector<json> imps;
+        for (const auto& imp : data["imports"]) imps.push_back(imp);
+        std::sort(imps.begin(), imps.end(), [](const json& a, const json& b) {
+            if (a.value("caller_count", 0) != b.value("caller_count", 0)) {
+                return a.value("caller_count", 0) > b.value("caller_count", 0);
+            }
+            return a.value("name", "") < b.value("name", "");
+        });
+
         out << "--- Imports (" << imps.size() << ") ---\n";
         int shown = 0;
-        for (auto& imp : imps) {
+        for (const auto& imp : imps) {
             if (shown++ >= 50) {
                 out << "  ... and " << (imps.size() - 50) << " more\n";
                 break;
@@ -372,7 +450,8 @@ std::string GhidraTool::formatOverview(const std::string& jsonPath) {
             out << "  " << imp.value("name", "?");
             auto lib = imp.value("library", "");
             if (!lib.empty()) out << " [" << lib << "]";
-            out << "\n";
+            out << " @ " << imp.value("address", "?")
+                << " [callers:" << imp.value("caller_count", 0) << "]\n";
         }
         out << "\n";
     }

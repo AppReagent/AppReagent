@@ -32,6 +32,7 @@ import java.util.*;
 
 public class AreaAnalyze extends GhidraScript {
     private static final Map<String, Map<Integer, String>> IMPORT_ORDINAL_NAMES = createImportOrdinalNames();
+    private static final int IMAGE_FILE_DLL = 0x2000;
 
     private PrintWriter pw;
     private boolean firstEntry;
@@ -105,6 +106,7 @@ public class AreaAnalyze extends GhidraScript {
 
     private void writeMetadata() {
         sectionSep();
+        PeMetadata pe = parsePeMetadata();
         pw.println("  \"metadata\": {");
         pw.println("    \"name\": \"" + escJson(currentProgram.getName()) + "\",");
         pw.println("    \"language\": \"" + escJson(currentProgram.getLanguageID().toString()) + "\",");
@@ -122,8 +124,119 @@ public class AreaAnalyze extends GhidraScript {
         for (MemoryBlock block : mem.getBlocks()) {
             size += block.getSize();
         }
-        pw.println("    \"memory_size\": " + size);
+        pw.println("    \"memory_size\": " + size + (pe != null ? "," : ""));
+        if (pe != null) {
+            pw.println("    \"is_dll\": " + pe.isDll + ",");
+            pw.println("    \"entry_point\": \"" + pe.entryPoint + "\",");
+            pw.println("    \"entry_point_rva\": \"0x" + Long.toHexString(pe.entryPointRva).toUpperCase() + "\",");
+            if (pe.entryFunction != null) {
+                pw.println("    \"entry_function\": \"" + escJson(pe.entryFunction) + "\",");
+                pw.println("    \"entry_signature\": \"" + escJson(pe.entrySignature) + "\",");
+                pw.print("    \"entry_callees\": [");
+                for (int i = 0; i < pe.entryCallees.size(); i++) {
+                    if (i > 0) pw.print(", ");
+                    FunctionRef ref = pe.entryCallees.get(i);
+                    pw.print("{\"name\": \"" + escJson(ref.name) + "\", \"address\": \"" + ref.address + "\"}");
+                }
+                pw.println("],");
+            }
+            pw.print("    \"section_names\": [");
+            for (int i = 0; i < pe.sectionNames.size(); i++) {
+                if (i > 0) pw.print(", ");
+                pw.print("\"" + escJson(pe.sectionNames.get(i)) + "\"");
+            }
+            pw.println("]");
+        }
         pw.print("  }");
+    }
+
+    private static class PeMetadata {
+        boolean isDll;
+        String entryPoint;
+        long entryPointRva;
+        String entryFunction;
+        String entrySignature;
+        List<FunctionRef> entryCallees = new ArrayList<>();
+        List<String> sectionNames = new ArrayList<>();
+    }
+
+    private static class FunctionRef {
+        String name;
+        String address;
+
+        FunctionRef(String name, String address) {
+            this.name = name;
+            this.address = address;
+        }
+    }
+
+    private PeMetadata parsePeMetadata() {
+        if (!currentProgram.getExecutableFormat().contains("Portable Executable")) return null;
+        try {
+            Memory mem = currentProgram.getMemory();
+            Address base = currentProgram.getImageBase();
+            long peOffset = readU32(mem, base, 0x3c);
+            if (readU32(mem, base, peOffset) != 0x00004550L) return null;
+
+            int numberOfSections = (int) readU16(mem, base, peOffset + 6);
+            int characteristics = (int) readU16(mem, base, peOffset + 22);
+            long optionalOffset = peOffset + 24;
+            long entryPointRva = readU32(mem, base, optionalOffset + 16);
+            Address entryPoint = base.add(entryPointRva);
+
+            PeMetadata pe = new PeMetadata();
+            pe.isDll = (characteristics & IMAGE_FILE_DLL) != 0;
+            pe.entryPoint = entryPoint.toString();
+            pe.entryPointRva = entryPointRva;
+
+            Function entryFunction = getFunctionContaining(entryPoint);
+            if (entryFunction == null) entryFunction = getFunctionAt(entryPoint);
+            if (entryFunction != null) {
+                pe.entryFunction = entryFunction.getName();
+                pe.entrySignature = entryFunction.getPrototypeString(false, false);
+                Set<Function> entryCallees = entryFunction.getCalledFunctions(monitor);
+                for (Function callee : entryCallees) {
+                    pe.entryCallees.add(new FunctionRef(callee.getName(), callee.getEntryPoint().toString()));
+                }
+            }
+
+            int optionalSize = (int) readU16(mem, base, peOffset + 20);
+            long sectionOffset = optionalOffset + optionalSize;
+            int maxSections = Math.min(numberOfSections, 32);
+            for (int i = 0; i < maxSections; i++) {
+                String name = readAscii(mem, base, sectionOffset + (long) i * 40, 8);
+                if (!name.isEmpty()) pe.sectionNames.add(name);
+            }
+            return pe;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private int readU8(Memory mem, Address base, long offset) throws Exception {
+        return mem.getByte(base.add(offset)) & 0xff;
+    }
+
+    private long readU16(Memory mem, Address base, long offset) throws Exception {
+        return (long) readU8(mem, base, offset)
+             | ((long) readU8(mem, base, offset + 1) << 8);
+    }
+
+    private long readU32(Memory mem, Address base, long offset) throws Exception {
+        return (long) readU8(mem, base, offset)
+             | ((long) readU8(mem, base, offset + 1) << 8)
+             | ((long) readU8(mem, base, offset + 2) << 16)
+             | ((long) readU8(mem, base, offset + 3) << 24);
+    }
+
+    private String readAscii(Memory mem, Address base, long offset, int maxLen) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < maxLen; i++) {
+            int b = readU8(mem, base, offset + i);
+            if (b == 0) break;
+            sb.append((char) b);
+        }
+        return sb.toString().trim();
     }
 
     // Resolve a filter string to a specific Function. Supports both name

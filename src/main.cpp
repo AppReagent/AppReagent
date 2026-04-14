@@ -51,6 +51,10 @@ static constexpr int kStatePollIter = 50;
 static constexpr int kStatePollIntervalMs = 200;
 static constexpr int kShutdownDelayUs = 100000;
 
+static bool commandNeedsDatabase(const std::string& command) {
+    return command == "scan" || command == "evaluate" || command == "improve";
+}
+
 static std::string getDataDir() {
     if (auto dir = std::getenv("AREA_DATA_DIR")) return dir;
     return "/opt/area";
@@ -420,12 +424,14 @@ int main(int argc, char* argv[]) {
     initProcess();
 
     area::Database db;
-    try {
-        db.connect(config.postgres_url, config.postgres_cert);
-    } catch (const std::exception& e) {
-        std::cerr << "Failed to connect to database: " << e.what() << std::endl;
-        curl_global_cleanup();
-        return 1;
+    if (commandNeedsDatabase(command)) {
+        try {
+            db.connect(config.postgres_url, config.postgres_cert);
+        } catch (const std::exception& e) {
+            std::cerr << "Failed to connect to database: " << e.what() << std::endl;
+            curl_global_cleanup();
+            return 1;
+        }
     }
 
     using Handler = std::function<int()>;

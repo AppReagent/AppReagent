@@ -385,7 +385,7 @@ std::vector<std::string> extractComparedCommandNames(const std::string& code) {
     std::vector<std::string> commands;
     std::set<std::string> seen;
     std::regex cmpPattern(
-        R"(strn?cmp\([^,]+,\s*s_([A-Za-z0-9_]+)_[0-9A-Fa-f]{6,}\s*,)");
+        R"((?:strn?cmp\([^,]+,\s*s_|memcmp\([^,]+,\s*s_)([A-Za-z0-9_]+)_[0-9A-Fa-f]{6,}\s*,)");
     std::smatch match;
     std::istringstream stream(code);
     std::string line;
@@ -408,6 +408,9 @@ std::vector<std::string> extractBehaviorInsights(const std::string& code) {
         && !commands.empty()) {
         notes.push_back("Likely decoded command loop: " + joinPreviewList(commands, 6));
     }
+    if (!commands.empty() && code.find("CreatePipe(") != std::string::npos) {
+        notes.push_back("Likely command dispatcher: " + joinPreviewList(commands, 8));
+    }
 
     if ((code.find("LoadLibraryA(") != std::string::npos
          || code.find("LoadLibrary(") != std::string::npos)
@@ -425,6 +428,18 @@ std::vector<std::string> extractBehaviorInsights(const std::string& code) {
     if (code.find("Ordinal_23()") != std::string::npos
         && code.find("printf(s_socket___GetLastError_reports") != std::string::npos) {
         notes.push_back("Likely socket command channel: socket creation path with command recv/send loop");
+    }
+    if (code.find("CreatePipe(") != std::string::npos
+        && code.find("CreateProcessA(") != std::string::npos) {
+        if (code.find("s__cmd_exe__c_") != std::string::npos
+            || code.find("s__command_exe__c_") != std::string::npos) {
+            notes.push_back("Likely command shell launcher: CreatePipe + CreateProcessA via \"\\\\cmd.exe /c \"");
+        } else {
+            notes.push_back("Likely command shell launcher: CreatePipe + CreateProcessA");
+        }
+    }
+    if (code.find("s_iexplore_exe_") != std::string::npos) {
+        notes.push_back("Default injection target: iexplore.exe");
     }
 
     return notes;

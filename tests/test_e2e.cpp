@@ -612,6 +612,62 @@ TEST(AgentPrompting, LargeBenchPromptSkipsGenericStringBootstrapSweep) {
               ghidraPtr->actions.end());
 }
 
+TEST(AgentPrompting, LargeBenchPromptBootstrapsCmdShellFromStartxcmdString) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    backend->setResponse("ANSWER: done");
+
+    area::ToolRegistry tools;
+    auto ghidraTool = std::make_unique<FakeGhidraActionTool>();
+    auto* ghidraPtr = ghidraTool.get();
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | xrefs | cmd.exe"] =
+        "=== Ghidra Cross-References: sample.dll ===\n\n"
+        "Data: 010095B34 .. 010095B40\n"
+        "Type: string (13 bytes)\n"
+        "Value: \"\\\\cmd.exe /c \"\n\n"
+        "--- Referencing Functions (1) ---\n"
+        "  FUN_1000ff58 @ 1000ff58 - undefined4 FUN_1000ff58(char * param_1)\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | decompile | 0x1000ff58"] =
+        "=== Ghidra Decompilation: sample.dll ===\n\n"
+        "--- FUN_1000ff58 @ 1000ff58 (64 bytes) ---\n"
+        "Likely command shell launcher: CreatePipe + CreateProcessA via \"\\\\cmd.exe /c \"\n"
+        "Likely command dispatcher: robotwork, language\n"
+        "Default injection target: iexplore.exe\n\n"
+        "undefined4 FUN_1000ff58(char * param_1)\n"
+        "{\n"
+        "  CreatePipe((PHANDLE)&stack0xfffffff0,(PHANDLE)&stack0xffffffec,\n"
+        "             (LPSECURITY_ATTRIBUTES)&stack0xffffffcc,0);\n"
+        "  CreateProcessA((LPCSTR)0x0,&local_ac4,(LPSECURITY_ATTRIBUTES)0x0,\n"
+        "                 (LPSECURITY_ATTRIBUTES)0x0,1,0,(LPVOID)0x0,(LPCSTR)0x0,\n"
+        "                 (LPSTARTUPINFOA)&local_78,lpProcessInformation);\n"
+        "}\n";
+    tools.add(std::move(ghidraTool));
+
+    area::Agent agent(std::move(backend), tools);
+    std::string prompt =
+        "Analyze /tmp/sample.dll.\n\n"
+        "Questions: interesting functions, suspicious strings, malware behavior.\n"
+        "========================= GHIDRA DATA =========================\n"
+        "========== GHIDRA: /tmp/sample.dll ==========\n"
+        "--- strings ---\n"
+        "  [100934b0] \"startxcmd\"\n"
+        "===================== END GHIDRA DATA =========================\n";
+    prompt += std::string(21000, 'C');
+
+    std::vector<area::AgentMessage> msgs;
+    agent.process(prompt, [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    EXPECT_NE(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
+                        "GHIDRA: /tmp/sample.dll | xrefs | cmd.exe"),
+              ghidraPtr->actions.end());
+    EXPECT_NE(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
+                        "GHIDRA: /tmp/sample.dll | decompile | 0x1000ff58"),
+              ghidraPtr->actions.end());
+    ASSERT_FALSE(msgs.empty());
+    EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
+    EXPECT_EQ(msgs.back().content, "done");
+}
+
 TEST(AgentPrompting, LargeBenchPromptCapsPostBootstrapGhidraActions) {
     area::AiEndpoint ep{"test", "mock", "", "auto"};
     auto backend = std::make_unique<area::MockBackend>(ep);
@@ -750,12 +806,6 @@ TEST(AgentPrompting, LargeBenchPromptBootstrapsThreadStartFromDllMain) {
         "               (LPVOID)0x0,0,(LPDWORD)0x0);\n"
         "  return 1;\n"
         "}\n";
-    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | function_at | 0x10001656"] =
-        "=== Ghidra Function Lookup: sample.dll ===\n\n"
-        "Requested address: 010001656\n"
-        "Function: sub_10001620 @ 010001620\n"
-        "Signature: void sub_10001620(void)\n"
-        "Callers: 1 | Callees: 2\n";
     ghidraPtr->responses["GHIDRA: /tmp/sample.dll | decompile | 0x10001656"] =
         "=== Ghidra Decompilation: sample.dll ===\n\n"
         "--- sub_10001620 @ 010001620 (64 bytes) ---\n\n"
@@ -781,9 +831,6 @@ TEST(AgentPrompting, LargeBenchPromptBootstrapsThreadStartFromDllMain) {
 
     EXPECT_NE(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
                         "GHIDRA: /tmp/sample.dll | decompile | 0x1000d02e"),
-              ghidraPtr->actions.end());
-    EXPECT_NE(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
-                        "GHIDRA: /tmp/sample.dll | function_at | 0x10001656"),
               ghidraPtr->actions.end());
     EXPECT_NE(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
                         "GHIDRA: /tmp/sample.dll | decompile | 0x10001656"),
@@ -1334,6 +1381,70 @@ TEST(AgentPrompting, BootstrapEvidenceCapturesStackStrings) {
     ASSERT_FALSE(msgs.empty());
     EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
     EXPECT_EQ(msgs.back().content, "saw stack string");
+}
+
+TEST(AgentPrompting, BootstrapEvidenceCapturesCommandShellInsights) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    auto* backendPtr = backend.get();
+    backend->setResponses({
+        "ANSWER: broad summary without exact evidence",
+        "ANSWER: missing command-shell evidence"
+    });
+
+    area::MockPromptEntry commandShellEvidence;
+    commandShellEvidence.id = "command-shell-evidence";
+    commandShellEvidence.match = {
+        "Likely command shell launcher: CreatePipe + CreateProcessA via \"\\\\cmd.exe /c \"",
+        "Likely command dispatcher: robotwork, language",
+        "Default injection target: iexplore.exe"
+    };
+    commandShellEvidence.response = "ANSWER: saw command shell evidence";
+    backend->setPromptEntries({commandShellEvidence});
+
+    area::ToolRegistry tools;
+    auto ghidraTool = std::make_unique<FakeGhidraActionTool>();
+    auto* ghidraPtr = ghidraTool.get();
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | xrefs | cmd.exe"] =
+        "=== Ghidra Cross-References: sample.dll ===\n\n"
+        "Data: 010095B34 .. 010095B40\n"
+        "Type: string (13 bytes)\n"
+        "Value: \"\\\\cmd.exe /c \"\n\n"
+        "--- Referencing Functions (1) ---\n"
+        "  FUN_1000ff58 @ 1000ff58 - undefined4 FUN_1000ff58(char * param_1)\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | decompile | 0x1000ff58"] =
+        "=== Ghidra Decompilation: sample.dll ===\n\n"
+        "--- FUN_1000ff58 @ 1000ff58 (64 bytes) ---\n"
+        "Likely command shell launcher: CreatePipe + CreateProcessA via \"\\\\cmd.exe /c \"\n"
+        "Likely command dispatcher: robotwork, language\n"
+        "Default injection target: iexplore.exe\n\n"
+        "undefined4 FUN_1000ff58(char * param_1)\n"
+        "{\n"
+        "  CreatePipe((PHANDLE)&stack0xfffffff0,(PHANDLE)&stack0xffffffec,\n"
+        "             (LPSECURITY_ATTRIBUTES)&stack0xffffffcc,0);\n"
+        "  CreateProcessA((LPCSTR)0x0,&local_ac4,(LPSECURITY_ATTRIBUTES)0x0,\n"
+        "                 (LPSECURITY_ATTRIBUTES)0x0,1,0,(LPVOID)0x0,(LPCSTR)0x0,\n"
+        "                 (LPSTARTUPINFOA)&local_78,lpProcessInformation);\n"
+        "}\n";
+    tools.add(std::move(ghidraTool));
+
+    area::Agent agent(std::move(backend), tools);
+    std::vector<area::AgentMessage> msgs;
+    agent.process(
+        "Analyze /tmp/sample.dll.\n\n"
+        "Questions: interesting functions, suspicious strings, malware behavior.\n"
+        "========================= GHIDRA DATA =========================\n"
+        "========== GHIDRA: /tmp/sample.dll ==========\n"
+        "--- strings ---\n"
+        "  [100934b0] \"startxcmd\"\n"
+        "===================== END GHIDRA DATA =========================\n"
+        + std::string(21000, 'D'),
+        [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    EXPECT_EQ(backendPtr->lastMatchedId(), "command-shell-evidence");
+    ASSERT_FALSE(msgs.empty());
+    EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
+    EXPECT_EQ(msgs.back().content, "saw command shell evidence");
 }
 
 // ---------------------------------------------------------------------------

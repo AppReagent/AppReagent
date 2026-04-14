@@ -416,6 +416,25 @@ std::vector<std::string> extractPromptBootstrapQueries(const std::string& userIn
     return queries;
 }
 
+std::vector<std::string> extractLargePromptBootstrapQueries(const std::string& userInput) {
+    std::vector<std::string> queries;
+    std::istringstream stream(userInput);
+    std::string line;
+    std::regex stringLine(R"(\[([0-9A-Fa-f]{8,16})\]\s+\"([^\"]+)\")");
+    std::smatch match;
+
+    while (std::getline(stream, line)) {
+        if (!std::regex_search(line, match, stringLine)) continue;
+        std::string lower = toLowerCopy(match[2].str());
+        if (lower.find("startxcmd") != std::string::npos) {
+            queries.push_back("cmd.exe");
+            break;
+        }
+    }
+
+    return queries;
+}
+
 void appendUniqueAction(std::deque<std::string>& queue,
                         std::set<std::string>& seen,
                         const std::string& action) {
@@ -611,6 +630,13 @@ std::string summarizeGhidraObservation(const std::string& action,
             } else if (trimmed.starts_with("Likely stack string: ")) {
                 notes.push_back(trimmed);
             } else if (trimmed.starts_with("Likely sleep duration: ")) {
+                notes.push_back(trimmed);
+            } else if (trimmed.starts_with("Likely decoded command loop: ")
+                       || trimmed.starts_with("Likely command dispatcher: ")
+                       || trimmed.starts_with("Likely socket command channel: ")
+                       || trimmed.starts_with("Likely command shell launcher: ")
+                       || trimmed.starts_with("Dynamic API/plugin load: ")
+                       || trimmed.starts_with("Default injection target: ")) {
                 notes.push_back(trimmed);
             }
         }
@@ -953,6 +979,11 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
                     appendUniqueAction(bootstrapActions, seenActions,
                                        "GHIDRA: " + path + " | xrefs | " + query);
                 }
+            } else {
+                for (const auto& query : extractLargePromptBootstrapQueries(userInput)) {
+                    appendUniqueAction(bootstrapActions, seenActions,
+                                       "GHIDRA: " + path + " | xrefs | " + query);
+                }
             }
 
             ToolContext toolCtx{cb, confirm, harness_};
@@ -979,8 +1010,10 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
                 if (action.find("| decompile |") != std::string::npos) {
                     int threadTargets = 0;
                     for (const auto& target : extractThreadStartTargets(toolResult->observation)) {
-                        appendUniqueAction(bootstrapActions, seenActions,
-                                           "GHIDRA: " + path + " | function_at | " + target);
+                        if (!largeBinaryPrompt) {
+                            appendUniqueAction(bootstrapActions, seenActions,
+                                               "GHIDRA: " + path + " | function_at | " + target);
+                        }
                         appendUniqueAction(bootstrapActions, seenActions,
                                            "GHIDRA: " + path + " | decompile | " + target);
                         if (++threadTargets >= (largeBinaryPrompt ? 1 : 2)) break;

@@ -769,6 +769,35 @@ TEST(GhidraTool, ExtractsDynamicLoadAndSocketInsightsFromDecompileOutput) {
     fs::remove(path, ec);
 }
 
+TEST(GhidraTool, ExtractsCommandShellInsightsFromDecompileOutput) {
+    FakeGhidraTool tool;
+    GhidraToolMessages msgs;
+    area::Harness h;
+    area::ToolContext ctx{msgs.cb(), nullptr, h};
+    std::string path = makeTempBinary();
+
+    tool.outputs["decompile"] = R"json({
+  "metadata": {"name": "sample.dll", "language": "x86:LE:32:default"},
+  "functions": [
+    {
+      "name": "FUN_1000ff58",
+      "address": "1000ff58",
+      "size": 256,
+      "decompiled": "undefined4 FUN_1000ff58(char *param_1)\n{\n  BOOL BVar3;\n  char *pcVar7;\n\n  BVar3 = CreatePipe((PHANDLE)&stack0xfffffff0,(PHANDLE)&stack0xffffffec,\n                     (LPSECURITY_ATTRIBUTES)&stack0xffffffcc,0);\n  if (BVar3 != 0) {\n    if (DAT_1008e5c4 == 0) {\n      pcVar7 = s__command_exe__c_10095b20;\n    }\n    else {\n      pcVar7 = s__cmd_exe__c_10095b34;\n    }\n    iVar5 = memcmp(acStackY_5c5 + 1,s_robotwork_10095acc,9);\n    if (iVar5 == 0) {\n      FUN_100052a2(param_1);\n      return 0;\n    }\n    iVar5 = memcmp(acStackY_5c5 + 1,s_language_10095ad8,8);\n    if (iVar5 == 0) {\n      FUN_10004e79(param_1);\n      return 0;\n    }\n    if (iVar5 != 0) {\n      BVar3 = CreateProcessA((LPCSTR)0x0,&local_ac4,(LPSECURITY_ATTRIBUTES)0x0,\n                             (LPSECURITY_ATTRIBUTES)0x0,1,0,(LPVOID)0x0,(LPCSTR)0x0,\n                             (LPSTARTUPINFOA)&local_78,lpProcessInformation);\n    }\n    strcpy(&local_6c4,s_iexplore_exe_10094e54);\n  }\n}\n"
+    }
+  ]
+})json";
+
+    auto result = tool.tryExecute("GHIDRA: " + path + " | decompile | 0x1000ff58", ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NE(result->observation.find("Likely command shell launcher: CreatePipe + CreateProcessA via \"\\\\cmd.exe /c \""), std::string::npos);
+    EXPECT_NE(result->observation.find("Likely command dispatcher: robotwork, language"), std::string::npos);
+    EXPECT_NE(result->observation.find("Default injection target: iexplore.exe"), std::string::npos);
+
+    std::error_code ec;
+    fs::remove(path, ec);
+}
+
 TEST(GhidraTool, FormatsResolvedImportOrdinalsAndCallers) {
     FakeGhidraTool tool;
     GhidraToolMessages msgs;

@@ -175,6 +175,14 @@ public class AreaAnalyze extends GhidraScript {
         }
     }
 
+    private static class ReferenceFunctionSummary {
+        String function;
+        String address;
+        String signature;
+        List<String> callsites = new ArrayList<>();
+        List<FunctionRef> callees = new ArrayList<>();
+    }
+
     private static class ImportRef {
         Function function;
         ExternalLocation location;
@@ -759,6 +767,86 @@ public class AreaAnalyze extends GhidraScript {
         }
     }
 
+    private List<FunctionRef> collectDirectCallees(Function function, int limit) {
+        List<FunctionRef> refs = new ArrayList<>();
+        if (function == null || limit <= 0) return refs;
+
+        List<Function> callees = new ArrayList<>(function.getCalledFunctions(monitor));
+        Collections.sort(callees, Comparator.comparing(f -> f.getEntryPoint().toString()));
+        int shown = 0;
+        for (Function callee : callees) {
+            if (shown++ >= limit) break;
+            refs.add(new FunctionRef(callee.getName(), callee.getEntryPoint().toString()));
+        }
+        return refs;
+    }
+
+    private List<ReferenceFunctionSummary> summarizeReferences(Reference[] refs) {
+        List<Reference> sortedRefs = new ArrayList<>(Arrays.asList(refs));
+        Collections.sort(sortedRefs, Comparator.comparing(r -> r.getFromAddress().toString()));
+
+        LinkedHashMap<String, ReferenceFunctionSummary> summaries = new LinkedHashMap<>();
+        for (Reference ref : sortedRefs) {
+            Function caller = getFunctionContaining(ref.getFromAddress());
+            String key = caller != null
+                ? caller.getEntryPoint().toString()
+                : "unknown:" + ref.getFromAddress();
+
+            ReferenceFunctionSummary summary = summaries.get(key);
+            if (summary == null) {
+                summary = new ReferenceFunctionSummary();
+                if (caller != null) {
+                    summary.function = caller.getName();
+                    summary.address = caller.getEntryPoint().toString();
+                    summary.signature = caller.getPrototypeString(false, false);
+                    summary.callees = collectDirectCallees(caller, 8);
+                } else {
+                    summary.function = "unknown";
+                    summary.address = ref.getFromAddress().toString();
+                    summary.signature = "";
+                }
+                summaries.put(key, summary);
+            }
+
+            if (summary.callsites.size() < 8) {
+                summary.callsites.add(ref.getFromAddress().toString());
+            }
+        }
+
+        return new ArrayList<>(summaries.values());
+    }
+
+    private void writeReferenceFunctionSummaries(String fieldName, List<ReferenceFunctionSummary> summaries) {
+        pw.print("    \"" + fieldName + "\": [");
+        boolean firstSummary = true;
+        for (ReferenceFunctionSummary summary : summaries) {
+            if (!firstSummary) pw.print(", ");
+            firstSummary = false;
+
+            pw.print("{\"function\": \"" + escJson(summary.function) + "\"");
+            pw.print(", \"address\": \"" + summary.address + "\"");
+            if (summary.signature != null && !summary.signature.isEmpty()) {
+                pw.print(", \"signature\": \"" + escJson(summary.signature) + "\"");
+            }
+            pw.print(", \"callsite_count\": " + summary.callsites.size());
+            pw.print(", \"callsites\": [");
+            for (int i = 0; i < summary.callsites.size(); i++) {
+                if (i > 0) pw.print(", ");
+                pw.print("\"" + summary.callsites.get(i) + "\"");
+            }
+            pw.print("]");
+            pw.print(", \"callees\": [");
+            for (int i = 0; i < summary.callees.size(); i++) {
+                if (i > 0) pw.print(", ");
+                FunctionRef callee = summary.callees.get(i);
+                pw.print("{\"name\": \"" + escJson(callee.name) + "\"");
+                pw.print(", \"address\": \"" + callee.address + "\"}");
+            }
+            pw.print("]}");
+        }
+        pw.print("]");
+    }
+
     private static Map<String, Map<Integer, String>> createImportOrdinalNames() {
         Map<String, Map<Integer, String>> libs = new HashMap<>();
 
@@ -1048,8 +1136,12 @@ public class AreaAnalyze extends GhidraScript {
                 pw.print(", \"type\": \"" + escJson(ref.getReferenceType().getName()) + "\"}");
             }
             pw.println("\n    ],");
+            writeReferenceFunctionSummaries("caller_summaries",
+                summarizeReferences(callRefs.toArray(new Reference[0])));
+            pw.println(",");
             pw.println("    \"callees\": []");
         } else if (target != null) {
+            Reference[] refsTo = getReferencesTo(target.getEntryPoint());
             pw.println("    \"kind\": \"function\",");
             pw.println("    \"function\": \"" + escJson(target.getName()) + "\",");
             pw.println("    \"address\": \"" + target.getEntryPoint() + "\",");
@@ -1058,7 +1150,6 @@ public class AreaAnalyze extends GhidraScript {
             }
 
             pw.println("    \"callers\": [");
-            Reference[] refsTo = getReferencesTo(target.getEntryPoint());
             firstEntry = true;
             for (Reference ref : refsTo) {
                 Function caller = getFunctionContaining(ref.getFromAddress());
@@ -1070,6 +1161,8 @@ public class AreaAnalyze extends GhidraScript {
                 pw.print(", \"type\": \"" + escJson(ref.getReferenceType().getName()) + "\"}");
             }
             pw.println("\n    ],");
+            writeReferenceFunctionSummaries("caller_summaries", summarizeReferences(refsTo));
+            pw.println(",");
 
             pw.println("    \"callees\": [");
             firstEntry = true;
@@ -1083,12 +1176,17 @@ public class AreaAnalyze extends GhidraScript {
             }
             pw.println("\n    ]");
         } else {
+            Reference[] refsTo;
             pw.println("    \"kind\": \"data\",");
             if (isTrivialUndefined(targetData)) {
+                refsTo = getReferencesTo(requestedAddr);
                 writeRawDataJson(requestedAddr);
             } else {
+                refsTo = getReferencesTo(targetData.getAddress());
                 writeDataJson(targetData, requestedAddr);
             }
+            pw.println(",");
+            writeReferenceFunctionSummaries("reference_functions", summarizeReferences(refsTo));
             pw.println(",");
             pw.println("    \"callees\": []");
         }

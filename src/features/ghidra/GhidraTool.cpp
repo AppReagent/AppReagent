@@ -52,6 +52,53 @@ std::string joinCallsites(const json& refs) {
     return out.str();
 }
 
+std::string joinNamedAddresses(const json& items, const char* nameKey, const char* addressKey) {
+    if (!items.is_array() || items.empty()) return "none";
+
+    std::ostringstream out;
+    bool first = true;
+    for (const auto& item : items) {
+        if (!first) out << ", ";
+        first = false;
+        out << item.value(nameKey, "?") << " @ " << item.value(addressKey, "?");
+    }
+    return out.str();
+}
+
+void appendReferenceFunctionSummaries(std::ostringstream& out,
+                                      const std::string& title,
+                                      const json& summaries) {
+    if (!summaries.is_array() || summaries.empty()) return;
+
+    out << "\n--- " << title << " (" << summaries.size() << ") ---\n";
+    for (const auto& summary : summaries) {
+        out << "  " << summary.value("function", "?")
+            << " @ " << summary.value("address", "?");
+        auto signature = summary.value("signature", "");
+        if (!signature.empty()) out << " - " << signature;
+        out << "\n";
+
+        auto callsites = summary.value("callsites", json::array());
+        if (callsites.is_array() && !callsites.empty()) {
+            out << "    callsites (" << summary.value("callsite_count", callsites.size())
+                << "): ";
+            bool first = true;
+            for (const auto& callsite : callsites) {
+                if (!first) out << ", ";
+                first = false;
+                out << callsite.get<std::string>();
+            }
+            out << "\n";
+        }
+
+        auto callees = summary.value("callees", json::array());
+        if (callees.is_array() && !callees.empty()) {
+            out << "    direct callees: "
+                << joinNamedAddresses(callees, "name", "address") << "\n";
+        }
+    }
+}
+
 std::vector<unsigned char> parseHexBytes(const std::string& hex) {
     std::vector<unsigned char> bytes;
     std::istringstream stream(hex);
@@ -810,6 +857,8 @@ std::string GhidraTool::formatXrefs(const std::string& jsonPath) {
             }
             out << "\n--- References (" << xr.value("xref_count", 0) << ") ---\n"
                 << "  " << joinCallsites(xr.value("references", json::array())) << "\n";
+            appendReferenceFunctionSummaries(
+                out, "Referencing Functions", xr.value("reference_functions", json::array()));
             return out.str();
         }
         if (kind == "import") {
@@ -840,6 +889,8 @@ std::string GhidraTool::formatXrefs(const std::string& jsonPath) {
                         << " [" << c.value("type", "?") << "]\n";
                 }
             }
+            appendReferenceFunctionSummaries(
+                out, "Caller Functions", xr.value("caller_summaries", json::array()));
             return out.str();
         }
 
@@ -857,6 +908,13 @@ std::string GhidraTool::formatXrefs(const std::string& jsonPath) {
                     << " @ " << c.value("from", "?")
                     << " [" << c.value("type", "?") << "]\n";
             }
+            out << "\n";
+        }
+
+        appendReferenceFunctionSummaries(
+            out, "Caller Functions", xr.value("caller_summaries", json::array()));
+        if (xr.contains("caller_summaries") && xr["caller_summaries"].is_array()
+            && !xr["caller_summaries"].empty()) {
             out << "\n";
         }
 

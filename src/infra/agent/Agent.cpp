@@ -232,6 +232,12 @@ std::string summarizeGhidraObservation(const std::string& action,
             } else if (trimmed.starts_with("Value: ")
                        || trimmed.starts_with("Offset from start:")) {
                 notes.push_back(trimmed);
+            } else if (trimmed.starts_with("callsites (")
+                       || trimmed.starts_with("direct callees:")) {
+                notes.push_back(trimmed);
+            } else if (trimmed.find(" @ ") != std::string::npos
+                       && trimmed.find(" - ") != std::string::npos) {
+                notes.push_back("Function summary: " + trimmed);
             } else if (trimmed.starts_with("FUN_") || trimmed.starts_with("unknown @")) {
                 notes.push_back("Callsite: " + trimmed);
                 if (notes.size() >= 6) break;

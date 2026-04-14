@@ -478,6 +478,73 @@ TEST(AgentPrompting, BootstrapEvidenceForcesAnswerRevision) {
               "Parameter count: 0. Sleep(iVar1 * 1000).");
 }
 
+TEST(AgentPrompting, BootstrapEvidenceCapturesCallerSummaries) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    auto* backendPtr = backend.get();
+    backend->setResponses({
+        "ANSWER: broad summary without exact evidence",
+        "ANSWER: missing direct callees"
+    });
+
+    area::MockPromptEntry directCallees;
+    directCallees.id = "caller-summary";
+    directCallees.match = {
+        "direct callees: socket @ EXTERNAL:00000017, connect @ EXTERNAL:00000004"
+    };
+    directCallees.response = "ANSWER: saw direct callees";
+    backend->setPromptEntries({directCallees});
+
+    area::ToolRegistry tools;
+    auto ghidraTool = std::make_unique<FakeGhidraActionTool>();
+    auto* ghidraPtr = ghidraTool.get();
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | xrefs | gethostbyname"] =
+        "=== Ghidra Cross-References: sample.dll ===\n\n"
+        "Import: gethostbyname [WS2_32.DLL] @ EXTERNAL:00000016\n"
+        "Functions calling: 1 | Call sites: 1\n\n"
+        "--- Callers (1) ---\n"
+        "  FUN_10001074 @ 100011af [COMPUTED_CALL]\n"
+        "\n--- Caller Functions (1) ---\n"
+        "  FUN_10001074 @ 10001074 - undefined4 FUN_10001074(void)\n"
+        "    callsites (1): 100011af\n"
+        "    direct callees: socket @ EXTERNAL:00000017, connect @ EXTERNAL:00000004\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | xrefs | Sleep"] =
+        "=== Ghidra Cross-References: sample.dll ===\n\n"
+        "Import: Sleep [KERNEL32.DLL] @ EXTERNAL:00000078\n"
+        "Functions calling: 1 | Call sites: 1\n\n"
+        "--- Callers (1) ---\n"
+        "  FUN_10001074 @ 10001358 [COMPUTED_CALL]\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | decompile | 0x100011af"] =
+        "=== Ghidra Decompilation: sample.dll ===\n\n"
+        "--- FUN_10001074 @ 10001074 (32 bytes) ---\n\n"
+        "undefined4 FUN_10001074(void)\n\n"
+        "{\n"
+        "  int iVar1;\n"
+        "  Sleep(iVar1 * 1000);\n"
+        "}\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | decompile | 0x10001358"] =
+        ghidraPtr->responses["GHIDRA: /tmp/sample.dll | decompile | 0x100011af"];
+    tools.add(std::move(ghidraTool));
+
+    area::Agent agent(std::move(backend), tools);
+    std::vector<area::AgentMessage> msgs;
+    agent.process(
+        "Analyze /tmp/sample.dll.\n\n"
+        "Questions: interesting functions, suspicious strings, malware behavior.\n"
+        "========================= GHIDRA DATA =========================\n"
+        "========== GHIDRA: /tmp/sample.dll ==========\n"
+        "--- imports ---\n"
+        "  gethostbyname [WS2_32.DLL] (ordinal 52) @ EXTERNAL:00000016\n"
+        "  Sleep [KERNEL32.DLL] @ EXTERNAL:00000078\n"
+        "===================== END GHIDRA DATA =========================\n",
+        [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    EXPECT_EQ(backendPtr->lastMatchedId(), "caller-summary");
+    ASSERT_FALSE(msgs.empty());
+    EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
+    EXPECT_EQ(msgs.back().content, "saw direct callees");
+}
+
 // ---------------------------------------------------------------------------
 // IPC tests
 // ---------------------------------------------------------------------------

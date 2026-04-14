@@ -314,6 +314,19 @@ TEST(GhidraTool, FormatsDataXrefs) {
     "references": [
       {"from": "010001656", "function": "sub_10001620", "type": "READ"}
     ],
+    "reference_functions": [
+      {
+        "function": "sub_10001620",
+        "address": "010001620",
+        "signature": "void sub_10001620(void)",
+        "callsite_count": 1,
+        "callsites": ["010001656"],
+        "callees": [
+          {"name": "Sleep", "address": "EXTERNAL:00000078"},
+          {"name": "socket", "address": "EXTERNAL:00000017"}
+        ]
+      }
+    ],
     "callees": []
   }
 })json";
@@ -326,6 +339,13 @@ TEST(GhidraTool, FormatsDataXrefs) {
     EXPECT_NE(result->observation.find("Data: 01001D980 .. 01001D99F"), std::string::npos);
     EXPECT_NE(result->observation.find("References (1)"), std::string::npos);
     EXPECT_NE(result->observation.find("sub_10001620 @ 010001656 [READ]"), std::string::npos);
+    EXPECT_NE(result->observation.find("Referencing Functions (1)"), std::string::npos);
+    EXPECT_NE(result->observation.find("sub_10001620 @ 010001620 - void sub_10001620(void)"),
+              std::string::npos);
+    EXPECT_NE(result->observation.find("callsites (1): 010001656"), std::string::npos);
+    EXPECT_NE(result->observation.find(
+                  "direct callees: Sleep @ EXTERNAL:00000078, socket @ EXTERNAL:00000017"),
+              std::string::npos);
 
     std::error_code ec;
     fs::remove(path, ec);
@@ -427,6 +447,27 @@ TEST(GhidraTool, FormatsImportXrefs) {
       {"from": "010001074", "function": "FUN_10001074", "type": "UNCONDITIONAL_CALL"},
       {"from": "01000208f", "function": "FUN_1000208f", "type": "UNCONDITIONAL_CALL"}
     ],
+    "caller_summaries": [
+      {
+        "function": "FUN_10001074",
+        "address": "010001000",
+        "signature": "undefined4 FUN_10001074(void)",
+        "callsite_count": 1,
+        "callsites": ["010001074"],
+        "callees": [
+          {"name": "socket", "address": "EXTERNAL:00000017"},
+          {"name": "connect", "address": "EXTERNAL:00000004"}
+        ]
+      },
+      {
+        "function": "FUN_1000208f",
+        "address": "010002000",
+        "signature": "void FUN_1000208f(void)",
+        "callsite_count": 1,
+        "callsites": ["01000208f"],
+        "callees": []
+      }
+    ],
     "callees": []
   }
 })json";
@@ -441,6 +482,63 @@ TEST(GhidraTool, FormatsImportXrefs) {
     EXPECT_NE(result->observation.find("Functions calling: 2 | Call sites: 4"), std::string::npos);
     EXPECT_NE(result->observation.find("--- Callers (2) ---"), std::string::npos);
     EXPECT_NE(result->observation.find("FUN_10001074 @ 010001074 [UNCONDITIONAL_CALL]"), std::string::npos);
+    EXPECT_NE(result->observation.find("Caller Functions (2)"), std::string::npos);
+    EXPECT_NE(result->observation.find("FUN_10001074 @ 010001000 - undefined4 FUN_10001074(void)"),
+              std::string::npos);
+    EXPECT_NE(result->observation.find("callsites (1): 010001074"), std::string::npos);
+    EXPECT_NE(result->observation.find(
+                  "direct callees: socket @ EXTERNAL:00000017, connect @ EXTERNAL:00000004"),
+              std::string::npos);
+
+    std::error_code ec;
+    fs::remove(path, ec);
+}
+
+TEST(GhidraTool, FormatsFunctionXrefCallerSummaries) {
+    FakeGhidraTool tool;
+    GhidraToolMessages msgs;
+    area::Harness h;
+    area::ToolContext ctx{msgs.cb(), nullptr, h};
+    std::string path = makeTempBinary();
+
+    tool.outputs["xrefs"] = R"json({
+  "metadata": {"name": "sample.exe"},
+  "xrefs": {
+    "requested_address": "010001656",
+    "kind": "function",
+    "function": "sub_10001620",
+    "address": "010001620",
+    "offset_from_entry": 54,
+    "callers": [
+      {"from": "010001656", "function": "sub_10001320", "type": "UNCONDITIONAL_CALL"}
+    ],
+    "caller_summaries": [
+      {
+        "function": "sub_10001320",
+        "address": "010001320",
+        "signature": "void sub_10001320(void)",
+        "callsite_count": 1,
+        "callsites": ["010001656"],
+        "callees": [
+          {"name": "Sleep", "address": "EXTERNAL:00000078"}
+        ]
+      }
+    ],
+    "callees": [
+      {"name": "Sleep", "address": "EXTERNAL:00000078"}
+    ]
+  }
+})json";
+
+    auto result = tool.tryExecute("GHIDRA: " + path + " | xrefs | 0x10001656", ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NE(result->observation.find("Function: sub_10001620 @ 010001620"), std::string::npos);
+    EXPECT_NE(result->observation.find("Caller Functions (1)"), std::string::npos);
+    EXPECT_NE(result->observation.find("sub_10001320 @ 010001320 - void sub_10001320(void)"),
+              std::string::npos);
+    EXPECT_NE(result->observation.find("callsites (1): 010001656"), std::string::npos);
+    EXPECT_NE(result->observation.find("direct callees: Sleep @ EXTERNAL:00000078"),
+              std::string::npos);
 
     std::error_code ec;
     fs::remove(path, ec);

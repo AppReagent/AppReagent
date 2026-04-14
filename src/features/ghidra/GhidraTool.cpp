@@ -363,6 +363,73 @@ std::vector<std::string> extractSleepInsights(const std::string& code) {
     return notes;
 }
 
+std::string joinPreviewList(const std::vector<std::string>& items, size_t limit) {
+    std::ostringstream out;
+    bool first = true;
+    for (size_t i = 0; i < items.size() && i < limit; i++) {
+        if (!first) out << ", ";
+        first = false;
+        out << items[i];
+    }
+    if (items.size() > limit) out << ", ...";
+    return out.str();
+}
+
+std::string cleanSymbolToken(std::string token) {
+    while (!token.empty() && token.back() == '_') token.pop_back();
+    while (!token.empty() && token.front() == '_') token.erase(0, 1);
+    return token;
+}
+
+std::vector<std::string> extractComparedCommandNames(const std::string& code) {
+    std::vector<std::string> commands;
+    std::set<std::string> seen;
+    std::regex cmpPattern(
+        R"(strn?cmp\([^,]+,\s*s_([A-Za-z0-9_]+)_[0-9A-Fa-f]{6,}\s*,)");
+    std::smatch match;
+    std::istringstream stream(code);
+    std::string line;
+
+    while (std::getline(stream, line)) {
+        if (!std::regex_search(line, match, cmpPattern)) continue;
+        std::string token = cleanSymbolToken(match[1].str());
+        if (token.size() < 4) continue;
+        if (seen.insert(token).second) commands.push_back(token);
+    }
+
+    return commands;
+}
+
+std::vector<std::string> extractBehaviorInsights(const std::string& code) {
+    std::vector<std::string> notes;
+    auto commands = extractComparedCommandNames(code);
+    if (code.find(" - DAT_") != std::string::npos
+        && code.find("strncmp((char *)") != std::string::npos
+        && !commands.empty()) {
+        notes.push_back("Likely decoded command loop: " + joinPreviewList(commands, 6));
+    }
+
+    if ((code.find("LoadLibraryA(") != std::string::npos
+         || code.find("LoadLibrary(") != std::string::npos)
+        && code.find("GetProcAddress(") != std::string::npos) {
+        std::regex procPattern(R"(GetProcAddress\([^,]+,\s*s_([A-Za-z0-9_]+)_[0-9A-Fa-f]{6,}\))");
+        std::smatch match;
+        if (std::regex_search(code, match, procPattern)) {
+            notes.push_back("Dynamic API/plugin load: LoadLibraryA + GetProcAddress(\""
+                + cleanSymbolToken(match[1].str()) + "\")");
+        } else {
+            notes.push_back("Dynamic API/plugin load: LoadLibraryA + GetProcAddress");
+        }
+    }
+
+    if (code.find("Ordinal_23()") != std::string::npos
+        && code.find("printf(s_socket___GetLastError_reports") != std::string::npos) {
+        notes.push_back("Likely socket command channel: socket creation path with command recv/send loop");
+    }
+
+    return notes;
+}
+
 std::vector<std::string> extractDisassemblyInsights(const json& instructions) {
     std::vector<std::string> notes;
     if (!instructions.is_array() || instructions.empty()) return notes;
@@ -894,7 +961,13 @@ std::string GhidraTool::formatDecompile(const std::string& jsonPath) {
                 for (const auto& note : sleepInsights) {
                     out << note << "\n";
                 }
-                if (!stackStrings.empty() || !sleepInsights.empty()) out << "\n";
+                auto behaviorInsights = extractBehaviorInsights(code);
+                for (const auto& note : behaviorInsights) {
+                    out << note << "\n";
+                }
+                if (!stackStrings.empty() || !sleepInsights.empty() || !behaviorInsights.empty()) {
+                    out << "\n";
+                }
                 out << code << "\n";
             }
             out << "\n";

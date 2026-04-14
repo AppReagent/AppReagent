@@ -713,6 +713,62 @@ TEST(GhidraTool, InfersSleepDurationFromDecompileOutput) {
     fs::remove(path, ec);
 }
 
+TEST(GhidraTool, ExtractsDecodedCommandLoopInsightsFromDecompileOutput) {
+    FakeGhidraTool tool;
+    GhidraToolMessages msgs;
+    area::Harness h;
+    area::ToolContext ctx{msgs.cb(), nullptr, h};
+    std::string path = makeTempBinary();
+
+    tool.outputs["decompile"] = R"json({
+  "metadata": {"name": "sample.dll", "language": "x86:LE:32:default"},
+  "functions": [
+    {
+      "name": "FUN_10001656",
+      "address": "10001656",
+      "size": 128,
+      "decompiled": "void FUN_10001656(void)\n{\n  byte bVar2;\n  char cVar21;\n  byte abStack_66c[4];\n\n  bVar2 = cVar21 - DAT_1008e5d4;\n  abStack_66c[0] = bVar2;\n  iVar3 = strncmp((char *)abStack_66c,s_sethostinfo_10093534,0xb);\n  if (iVar3 == 0) {\n    return;\n  }\n  iVar3 = strncmp((char *)abStack_66c,s_delhostinfo_10093528,0xb);\n  if (iVar3 == 0) {\n    return;\n  }\n  iVar3 = strncmp((char *)abStack_66c,s_suspendx_100934dc,8);\n}\n"
+    }
+  ]
+})json";
+
+    auto result = tool.tryExecute("GHIDRA: " + path + " | decompile | 0x10001656", ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NE(result->observation.find("Likely decoded command loop: sethostinfo, delhostinfo, suspendx"), std::string::npos);
+    EXPECT_NE(result->observation.find("s_sethostinfo_10093534"), std::string::npos);
+
+    std::error_code ec;
+    fs::remove(path, ec);
+}
+
+TEST(GhidraTool, ExtractsDynamicLoadAndSocketInsightsFromDecompileOutput) {
+    FakeGhidraTool tool;
+    GhidraToolMessages msgs;
+    area::Harness h;
+    area::ToolContext ctx{msgs.cb(), nullptr, h};
+    std::string path = makeTempBinary();
+
+    tool.outputs["decompile"] = R"json({
+  "metadata": {"name": "sample.dll", "language": "x86:LE:32:default"},
+  "functions": [
+    {
+      "name": "FUN_10001656",
+      "address": "10001656",
+      "size": 128,
+      "decompiled": "void FUN_10001656(void)\n{\n  HMODULE pHVar4;\n  FARPROC pFVar5;\n  undefined *puVar6;\n\n  pHVar4 = LoadLibraryA((LPCSTR)0x1009358c);\n  pFVar5 = GetProcAddress(pHVar4,s_Plug_KeyLog_Restart_10093578);\n  (*pFVar5)();\n  puVar6 = (undefined *)Ordinal_23();\n  printf(s_socket___GetLastError_reports__d_10093554,uVar7);\n}\n"
+    }
+  ]
+})json";
+
+    auto result = tool.tryExecute("GHIDRA: " + path + " | decompile | 0x10001656", ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NE(result->observation.find("Dynamic API/plugin load: LoadLibraryA + GetProcAddress(\"Plug_KeyLog_Restart\")"), std::string::npos);
+    EXPECT_NE(result->observation.find("Likely socket command channel: socket creation path with command recv/send loop"), std::string::npos);
+
+    std::error_code ec;
+    fs::remove(path, ec);
+}
+
 TEST(GhidraTool, FormatsResolvedImportOrdinalsAndCallers) {
     FakeGhidraTool tool;
     GhidraToolMessages msgs;

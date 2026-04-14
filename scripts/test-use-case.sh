@@ -30,7 +30,13 @@ trap cleanup EXIT
 start_server() {
     mkdir -p "$DATA_DIR/chats/default"
     local ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-    cp "$ROOT/config.json" "$DATA_DIR/" 2>/dev/null || true
+    if [ -f "$ROOT/config.json" ]; then
+        cp "$ROOT/config.json" "$DATA_DIR/config.json"
+    elif [ -f /opt/area/config.json ]; then
+        cp /opt/area/config.json "$DATA_DIR/config.json"
+    elif [ -f "$ROOT/config.example.json" ]; then
+        cp "$ROOT/config.example.json" "$DATA_DIR/config.json"
+    fi
     cp "$ROOT/ddl.sql" "$DATA_DIR/" 2>/dev/null || true
     cp -r "$ROOT/prompts" "$DATA_DIR/" 2>/dev/null || true
     cp "$ROOT/ca-certificate.crt" "$DATA_DIR/" 2>/dev/null || true

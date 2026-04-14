@@ -6,6 +6,7 @@
 #include <deque>
 #include <exception>
 #include <optional>
+#include <regex>
 #include <set>
 #include <sstream>
 #include <utility>
@@ -128,6 +129,57 @@ std::optional<std::string> extractStringAddress(const std::string& userInput,
 
 bool containsCaseInsensitive(const std::string& haystack, const std::string& needle) {
     return toLowerCopy(haystack).find(toLowerCopy(needle)) != std::string::npos;
+}
+
+struct AddressQuery {
+    std::string value;
+    bool dataHint = false;
+};
+
+std::string extractQuestionSection(const std::string& userInput) {
+    std::string lower = toLowerCopy(userInput);
+    size_t cut = std::string::npos;
+    for (const std::string& marker : {
+             "========================= ghidra data",
+             "========== ghidra:",
+             "ghidra data:"
+         }) {
+        auto pos = lower.find(marker);
+        if (pos != std::string::npos) {
+            cut = std::min(cut, pos);
+        }
+    }
+    if (cut == std::string::npos) return userInput;
+    return userInput.substr(0, cut);
+}
+
+std::vector<AddressQuery> extractQuestionAddresses(const std::string& userInput) {
+    std::vector<AddressQuery> addrs;
+    std::set<std::string> seen;
+    std::string question = extractQuestionSection(userInput);
+    std::string lower = toLowerCopy(question);
+    std::regex pattern(R"((?:0x)?([0-9a-f]{8,16}))");
+
+    for (std::sregex_iterator it(lower.begin(), lower.end(), pattern), end; it != end; ++it) {
+        std::string addr = "0x" + (*it)[1].str();
+        if (!seen.insert(addr).second) continue;
+
+        size_t pos = static_cast<size_t>(it->position(0));
+        size_t start = pos > 48 ? pos - 48 : 0;
+        std::string context = lower.substr(start, pos - start);
+        bool dataHint = containsAny(context, {
+            "data at",
+            "string at",
+            "bytes at",
+            "buffer at",
+            "contents at"
+        });
+
+        addrs.push_back({addr, dataHint});
+        if (addrs.size() >= 3) break;
+    }
+
+    return addrs;
 }
 
 void appendUniqueAction(std::deque<std::string>& queue,
@@ -280,6 +332,38 @@ std::string summarizeGhidraObservation(const std::string& action,
                 || trimmed.find("connect(") != std::string::npos
                 || trimmed.find("CreateProcess") != std::string::npos) {
                 notes.push_back("Key line: " + trimmed);
+            }
+        }
+    } else if (action.find("| function_at |") != std::string::npos) {
+        for (const auto& rawLine : lines) {
+            std::string trimmed = rawLine;
+            util::trimInPlace(trimmed);
+            if (trimmed.starts_with("Requested address: ")
+                || trimmed.starts_with("Function: ")
+                || trimmed.starts_with("Signature: ")
+                || trimmed.starts_with("Calling convention: ")
+                || trimmed.starts_with("Size: ")
+                || trimmed.starts_with("Offset from entry: ")
+                || trimmed.starts_with("Callers: ")
+                || trimmed.starts_with("Thunk: ")) {
+                notes.push_back(trimmed);
+            }
+        }
+    } else if (action.find("| data_at |") != std::string::npos) {
+        for (const auto& rawLine : lines) {
+            std::string trimmed = rawLine;
+            util::trimInPlace(trimmed);
+            if (trimmed.starts_with("Requested address: ")
+                || trimmed.starts_with("Data: ")
+                || trimmed.starts_with("Type: ")
+                || trimmed.starts_with("Value: ")
+                || trimmed.starts_with("Bytes: ")
+                || trimmed.starts_with("ASCII: ")
+                || trimmed.starts_with("Likely single-byte XOR decode: ")
+                || trimmed.starts_with("Offset from start: ")
+                || trimmed.starts_with("References: ")
+                || trimmed.starts_with("Referenced by: ")) {
+                notes.push_back(trimmed);
             }
         }
     } else if (action.find("| disasm |") != std::string::npos) {
@@ -509,6 +593,21 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
             std::deque<std::string> bootstrapActions;
             std::set<std::string> seenActions;
 
+            for (const auto& addr : extractQuestionAddresses(userInput)) {
+                if (addr.dataHint) {
+                    appendUniqueAction(bootstrapActions, seenActions,
+                                       "GHIDRA: " + path + " | data_at | " + addr.value);
+                    appendUniqueAction(bootstrapActions, seenActions,
+                                       "GHIDRA: " + path + " | xrefs | " + addr.value);
+                } else {
+                    appendUniqueAction(bootstrapActions, seenActions,
+                                       "GHIDRA: " + path + " | function_at | " + addr.value);
+                    appendUniqueAction(bootstrapActions, seenActions,
+                                       "GHIDRA: " + path + " | decompile | " + addr.value);
+                    appendUniqueAction(bootstrapActions, seenActions,
+                                       "GHIDRA: " + path + " | disasm | " + addr.value);
+                }
+            }
             if (auto dllMain = extractLineHexAddress(userInput, "Likely DllMain:")) {
                 appendUniqueAction(bootstrapActions, seenActions,
                                    "GHIDRA: " + path + " | decompile | " + *dllMain);

@@ -16,3 +16,9 @@ output=$(ask "use ghidra to get an overview of $HELLO")
 
 # Should show function listing and metadata
 assert_contains "$output" "main\|function\|ELF\|x86" "showed binary overview"
+
+info "requesting exact-address analysis of malicious binary..."
+output=$(ask "use ghidra on $REVSHELL and tell me what the subroutine at 0x401a8d does")
+
+assert_contains "$output" "anti_debug\|read_etc_passwd\|establish_c2\|exec_shell\|socket\|connect" \
+  "answered exact-address function question with malicious behavior"

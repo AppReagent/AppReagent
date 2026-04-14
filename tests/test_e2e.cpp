@@ -423,6 +423,82 @@ TEST(AgentPrompting, BenchStylePromptAutoRunsGhidraBootstrap) {
     EXPECT_EQ(msgs.back().content, "done");
 }
 
+TEST(AgentPrompting, BenchStylePromptBootstrapsExplicitQuestionAddresses) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    auto* backendPtr = backend.get();
+    backend->setResponse("ANSWER: done");
+
+    area::ToolRegistry tools;
+    auto ghidraTool = std::make_unique<FakeGhidraActionTool>();
+    auto* ghidraPtr = ghidraTool.get();
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | function_at | 0x10001656"] =
+        "=== Ghidra Function Lookup: sample.dll ===\n\n"
+        "Requested address: 010001656\n"
+        "Function: sub_10001620 @ 010001620\n"
+        "Signature: void sub_10001620(void)\n"
+        "Calling convention: __stdcall\n"
+        "Size: 64 bytes\n"
+        "Offset from entry: 54\n"
+        "Callers: 3 | Callees: 2\n"
+        "Thunk: no\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | decompile | 0x10001656"] =
+        "=== Ghidra Decompilation: sample.dll ===\n\n"
+        "--- sub_10001620 @ 010001620 (64 bytes) ---\n\n"
+        "void sub_10001620(void)\n\n"
+        "{\n"
+        "  Sleep(1000);\n"
+        "}\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | disasm | 0x10001656"] =
+        "=== Ghidra Disassembly: sample.dll ===\n\n"
+        "Requested address: 010001656\n"
+        "Function: sub_10001620 @ 010001620\n"
+        "Offset from entry: 54\n"
+        "Instructions shown: 1\n\n"
+        "=> 010001656: CALL Sleep [CALL]\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | data_at | 0x1001d988"] =
+        "=== Ghidra Data Lookup: sample.dll ===\n\n"
+        "Requested address: 01001D988\n"
+        "Data: 01001D980 .. 01001D99F\n"
+        "Type: raw_bytes (32 bytes)\n"
+        "Bytes: 3D 21 21 25 6F 7A 7A 36 67 7B 30 2D 34 38 25 39 30\n"
+        "Likely single-byte XOR decode: key 0x55 -> \"http://c2.example\"\n"
+        "Offset from start: 8\n"
+        "References: 1\n"
+        "Referenced by: sub_10001620 @ 010001656 [READ]\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | xrefs | 0x1001d988"] =
+        "=== Ghidra Cross-References: sample.dll ===\n\n"
+        "Requested address: 01001D988\n"
+        "Data: 01001D980 .. 01001D99F\n"
+        "Type: raw_bytes (32 bytes)\n"
+        "References: 1\n";
+    tools.add(std::move(ghidraTool));
+
+    area::Agent agent(std::move(backend), tools);
+    std::vector<area::AgentMessage> msgs;
+    agent.process(
+        "Analyze /tmp/sample.dll.\n\n"
+        "Questions:\n"
+        "1. What does the subroutine at 0x10001656 do?\n"
+        "2. What is the data at 0x1001D988?\n"
+        "========================= GHIDRA DATA =========================\n"
+        "========== GHIDRA: /tmp/sample.dll ==========\n"
+        "--- overview ---\n"
+        "Likely DllMain: FUN_1000d02e @ 1000d02e\n"
+        "===================== END GHIDRA DATA =========================\n",
+        [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    EXPECT_GE(backendPtr->callCount(), 1);
+    EXPECT_GE(ghidraPtr->actions.size(), 6u);
+    EXPECT_EQ(ghidraPtr->actions[0], "GHIDRA: /tmp/sample.dll | function_at | 0x10001656");
+    EXPECT_EQ(ghidraPtr->actions[1], "GHIDRA: /tmp/sample.dll | decompile | 0x10001656");
+    EXPECT_EQ(ghidraPtr->actions[2], "GHIDRA: /tmp/sample.dll | disasm | 0x10001656");
+    EXPECT_EQ(ghidraPtr->actions[3], "GHIDRA: /tmp/sample.dll | data_at | 0x1001d988");
+    EXPECT_EQ(ghidraPtr->actions[4], "GHIDRA: /tmp/sample.dll | xrefs | 0x1001d988");
+    EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
+    EXPECT_EQ(msgs.back().content, "done");
+}
+
 TEST(AgentPrompting, BootstrapEvidenceForcesAnswerRevision) {
     area::AiEndpoint ep{"test", "mock", "", "auto"};
     auto backend = std::make_unique<area::MockBackend>(ep);
@@ -612,6 +688,96 @@ TEST(AgentPrompting, BootstrapEvidenceCapturesDisasmTargets) {
     ASSERT_FALSE(msgs.empty());
     EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
     EXPECT_EQ(msgs.back().content, "saw disasm");
+}
+
+TEST(AgentPrompting, BootstrapEvidenceCapturesLookupResults) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    auto* backendPtr = backend.get();
+    backend->setResponses({
+        "ANSWER: broad summary without exact evidence",
+        "ANSWER: missing lookup evidence"
+    });
+
+    area::MockPromptEntry lookupEvidence;
+    lookupEvidence.id = "lookup-evidence";
+    lookupEvidence.match = {
+        "Requested address: 010001656",
+        "Function: sub_10001620 @ 010001620",
+        "Likely single-byte XOR decode: key 0x55 -> \"http://c2.example\""
+    };
+    lookupEvidence.response = "ANSWER: saw lookup evidence";
+    backend->setPromptEntries({lookupEvidence});
+
+    area::ToolRegistry tools;
+    auto ghidraTool = std::make_unique<FakeGhidraActionTool>();
+    auto* ghidraPtr = ghidraTool.get();
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | function_at | 0x10001656"] =
+        "=== Ghidra Function Lookup: sample.dll ===\n\n"
+        "Requested address: 010001656\n"
+        "Function: sub_10001620 @ 010001620\n"
+        "Signature: void sub_10001620(void)\n"
+        "Calling convention: __stdcall\n"
+        "Size: 64 bytes\n"
+        "Offset from entry: 54\n"
+        "Callers: 3 | Callees: 2\n"
+        "Thunk: no\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | decompile | 0x10001656"] =
+        "=== Ghidra Decompilation: sample.dll ===\n\n"
+        "--- sub_10001620 @ 010001620 (64 bytes) ---\n\n"
+        "void sub_10001620(void)\n\n"
+        "{\n"
+        "  Sleep(1000);\n"
+        "}\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | disasm | 0x10001656"] =
+        "=== Ghidra Disassembly: sample.dll ===\n\n"
+        "Requested address: 010001656\n"
+        "Function: sub_10001620 @ 010001620\n"
+        "Offset from entry: 54\n"
+        "Instructions shown: 1\n\n"
+        "=> 010001656: CALL Sleep [CALL]\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | data_at | 0x1001d988"] =
+        "=== Ghidra Data Lookup: sample.dll ===\n\n"
+        "Requested address: 01001D988\n"
+        "Data: 01001D980 .. 01001D99F\n"
+        "Type: raw_bytes (32 bytes)\n"
+        "Bytes: 3D 21 21 25 6F 7A 7A 36 67 7B 30 2D 34 38 25 39 30\n"
+        "Likely single-byte XOR decode: key 0x55 -> \"http://c2.example\"\n"
+        "Offset from start: 8\n"
+        "References: 1\n"
+        "Referenced by: sub_10001620 @ 010001656 [READ]\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | xrefs | 0x1001d988"] =
+        "=== Ghidra Cross-References: sample.dll ===\n\n"
+        "Requested address: 01001D988\n"
+        "Data: 01001D980 .. 01001D99F\n"
+        "Type: raw_bytes (32 bytes)\n"
+        "References: 1\n";
+    tools.add(std::move(ghidraTool));
+
+    area::Agent agent(std::move(backend), tools);
+    std::vector<area::AgentMessage> msgs;
+    agent.process(
+        "Analyze /tmp/sample.dll.\n\n"
+        "Questions:\n"
+        "1. What does the subroutine at 0x10001656 do?\n"
+        "2. What is the data at 0x1001D988?\n"
+        "========================= GHIDRA DATA =========================\n"
+        "========== GHIDRA: /tmp/sample.dll ==========\n"
+        "--- overview ---\n"
+        "Likely DllMain: FUN_1000d02e @ 1000d02e\n"
+        "===================== END GHIDRA DATA =========================\n",
+        [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    EXPECT_EQ(backendPtr->lastMatchedId(), "lookup-evidence");
+    EXPECT_TRUE(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
+                          "GHIDRA: /tmp/sample.dll | function_at | 0x10001656")
+                != ghidraPtr->actions.end());
+    EXPECT_TRUE(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
+                          "GHIDRA: /tmp/sample.dll | data_at | 0x1001d988")
+                != ghidraPtr->actions.end());
+    ASSERT_FALSE(msgs.empty());
+    EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
+    EXPECT_EQ(msgs.back().content, "saw lookup evidence");
 }
 
 // ---------------------------------------------------------------------------

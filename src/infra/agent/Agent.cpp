@@ -432,6 +432,9 @@ std::vector<std::string> extractDecompileTargets(const std::string& observation)
     std::string line;
 
     while (std::getline(stream, line)) {
+        std::string lower = toLowerCopy(line);
+        if (lower.find("direct callees:") != std::string::npos) continue;
+
         auto atPos = line.find(" @ ");
         if (atPos == std::string::npos) continue;
         std::string tail = line.substr(atPos + 3);
@@ -451,7 +454,46 @@ std::vector<std::string> extractDecompileTargets(const std::string& observation)
         }
     }
 
-    std::sort(addrs.begin(), addrs.end());
+    return addrs;
+}
+
+std::vector<std::string> extractThreadStartTargets(const std::string& observation) {
+    std::vector<std::string> dataTargets;
+    std::vector<std::string> functionTargets;
+    std::set<std::string> seen;
+    std::istringstream stream(observation);
+    std::string line;
+    std::regex symbolPattern(R"((FUN|DAT)_([0-9A-Fa-f]{8,16}))");
+    int activeWindow = 0;
+
+    while (std::getline(stream, line)) {
+        std::string lower = toLowerCopy(line);
+        if (lower.find("createthread") != std::string::npos
+            || lower.find("lpstartaddress") != std::string::npos
+            || lower.find("lpthread_start_routine") != std::string::npos) {
+            activeWindow = 2;
+        }
+
+        if (activeWindow <= 0) continue;
+
+        for (std::sregex_iterator it(line.begin(), line.end(), symbolPattern), end; it != end; ++it) {
+            std::string kind = (*it)[1].str();
+            std::string addr = "0x" + (*it)[2].str();
+            if (seen.insert(addr).second) {
+                if (kind == "DAT") {
+                    dataTargets.push_back(addr);
+                } else {
+                    functionTargets.push_back(addr);
+                }
+            }
+        }
+        activeWindow--;
+    }
+
+    std::vector<std::string> addrs;
+    addrs.insert(addrs.end(), dataTargets.begin(), dataTargets.end());
+    addrs.insert(addrs.end(), functionTargets.begin(), functionTargets.end());
+    if (addrs.size() > 2) addrs.resize(2);
     return addrs;
 }
 
@@ -880,11 +922,9 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
                                        "GHIDRA: " + path + " | disasm | " + addr.value);
                 }
             }
-            if (!largeBinaryPrompt) {
-                if (auto dllMain = extractLineHexAddress(userInput, "Likely DllMain:")) {
-                    appendUniqueAction(bootstrapActions, seenActions,
-                                       "GHIDRA: " + path + " | decompile | " + *dllMain);
-                }
+            if (auto dllMain = extractLineHexAddress(userInput, "Likely DllMain:")) {
+                appendUniqueAction(bootstrapActions, seenActions,
+                                   "GHIDRA: " + path + " | decompile | " + *dllMain);
             }
             if (containsCaseInsensitive(userInput, "gethostbyname")) {
                 appendUniqueAction(bootstrapActions, seenActions,
@@ -916,7 +956,7 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
             }
 
             ToolContext toolCtx{cb, confirm, harness_};
-            int bootstrapBudget = largeBinaryPrompt ? 4 : 8;
+            int bootstrapBudget = largeBinaryPrompt ? 6 : 8;
             std::vector<std::string> bootstrapSummaries;
             while (!bootstrapActions.empty() && bootstrapBudget-- > 0) {
                 std::string action = bootstrapActions.front();
@@ -936,6 +976,17 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
                     bootstrapSummaries.push_back(summary);
                 }
 
+                if (action.find("| decompile |") != std::string::npos) {
+                    int threadTargets = 0;
+                    for (const auto& target : extractThreadStartTargets(toolResult->observation)) {
+                        appendUniqueAction(bootstrapActions, seenActions,
+                                           "GHIDRA: " + path + " | function_at | " + target);
+                        appendUniqueAction(bootstrapActions, seenActions,
+                                           "GHIDRA: " + path + " | decompile | " + target);
+                        if (++threadTargets >= (largeBinaryPrompt ? 1 : 2)) break;
+                    }
+                }
+
                 if (action.find("| xrefs |") == std::string::npos) continue;
 
                 auto targets = extractDecompileTargets(toolResult->observation);
@@ -943,8 +994,10 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
                 for (const auto& target : targets) {
                     appendUniqueAction(bootstrapActions, seenActions,
                                        "GHIDRA: " + path + " | decompile | " + target);
-                    appendUniqueAction(bootstrapActions, seenActions,
-                                       "GHIDRA: " + path + " | disasm | " + target);
+                    if (!largeBinaryPrompt) {
+                        appendUniqueAction(bootstrapActions, seenActions,
+                                           "GHIDRA: " + path + " | disasm | " + target);
+                    }
                     if (++followups >= (largeBinaryPrompt ? 1 : 2)) break;
                 }
             }
@@ -964,7 +1017,8 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
     int maxIterations = largeBinaryPrompt ? 16 : MAX_ITERATIONS;
     int iterationWarning = std::min(ITERATION_WARNING, std::max(4, maxIterations - 4));
     int remainingLargePromptGhidraActions =
-        largeBinaryPrompt ? 2 : std::numeric_limits<int>::max();
+        largeBinaryPrompt ? 1 : std::numeric_limits<int>::max();
+    bool forcedLargePromptWrapUp = false;
 
     for (int iter = 0; iter < maxIterations; iter++) {
         if (interrupted_.load()) {
@@ -1059,12 +1113,30 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
         if (largeBinaryPrompt && action.starts_with("GHIDRA:")) {
             if (remainingLargePromptGhidraActions <= 0) {
                 history_.push_back({"assistant", rawResponse});
-                history_.push_back({"user",
-                    "SYSTEM: You have already used the additional GHIDRA budget for this "
-                    "large prefetched prompt. Answer now using the prefetched data and "
-                    "bootstrap evidence you already have. If evidence is still missing, "
-                    "state the specific next GHIDRA query instead of calling it."});
-                continue;
+                if (!forcedLargePromptWrapUp) {
+                    forcedLargePromptWrapUp = true;
+                    history_.push_back({"user",
+                        "SYSTEM: You have already used the additional GHIDRA budget for this "
+                        "large prefetched prompt. Do not call GHIDRA again. Answer now using "
+                        "the prefetched data and bootstrap evidence you already have. If "
+                        "evidence is still missing, list the single next GHIDRA query in the "
+                        "writeup instead of calling it.\n\n"
+                        + bootstrapMemo});
+                    continue;
+                }
+
+                std::string fallback = bootstrapMemo;
+                if (fallback.empty()) {
+                    fallback =
+                        "Unable to finalize within the GHIDRA budget. Additional requested "
+                        "query: " + action;
+                } else {
+                    fallback += "\nAdditional requested GHIDRA query not executed: " + action;
+                }
+                AgentMessage msg{AgentMessage::ANSWER, fallback};
+                cb(msg);
+                emitEvent(msg);
+                return;
             }
             remainingLargePromptGhidraActions--;
         }

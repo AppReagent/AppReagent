@@ -359,7 +359,7 @@ TEST(AgentPrompting, LargeBenchPromptCompactsUserMessageForModel) {
         "========================= GHIDRA DATA =========================\n"
         "========== GHIDRA: /tmp/sample.dll ==========\n"
         "--- overview ---\n"
-        "Likely DllMain: FUN_1000d02e @ 1000d02e\n"
+        "Entry point: 1001516d (DLL entry) -> entry\n"
         "--- Named Functions / Exports (2) ---\n"
         "  StartEXS @ 10007ecb — undefined StartEXS(void)\n"
         "  ServiceMain @ 1000cf30 — undefined ServiceMain(void)\n"
@@ -384,7 +384,7 @@ TEST(AgentPrompting, LargeBenchPromptCompactsUserMessageForModel) {
     std::string sent = backendPtr->lastUserMessage().content;
     EXPECT_LT(sent.size(), prompt.size());
     EXPECT_NE(sent.find("GHIDRA DATA (COMPACTED)"), std::string::npos);
-    EXPECT_NE(sent.find("Likely DllMain: FUN_1000d02e"), std::string::npos);
+    EXPECT_NE(sent.find("Entry point: 1001516d"), std::string::npos);
     EXPECT_NE(sent.find("connect [WS2_32.DLL]"), std::string::npos);
     EXPECT_NE(sent.find("\"InstallSB\""), std::string::npos);
 }
@@ -484,7 +484,7 @@ TEST(AgentPrompting, LargeBenchPromptCompactsGhidraObservationsForModel) {
         "========================= GHIDRA DATA =========================\n"
         "========== GHIDRA: /tmp/sample.dll ==========\n"
         "--- overview ---\n"
-        "Likely DllMain: FUN_1000d02e @ 1000d02e\n"
+        "Entry point: 1001516d (DLL entry) -> entry\n"
         "===================== END GHIDRA DATA =========================\n";
     prompt += std::string(21000, 'E');
 
@@ -657,16 +657,140 @@ TEST(AgentPrompting, LargeBenchPromptCapsPostBootstrapGhidraActions) {
     std::vector<area::AgentMessage> msgs;
     agent.process(prompt, [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
 
-    EXPECT_EQ(ghidraPtr->actions.size(), 3u);
+    EXPECT_EQ(ghidraPtr->actions.size(), 2u);
     EXPECT_EQ(ghidraPtr->actions[0], "GHIDRA: /tmp/sample.dll | xrefs | gethostbyname");
     EXPECT_EQ(ghidraPtr->actions[1], "GHIDRA: /tmp/sample.dll | decompile | 0x10001074");
-    EXPECT_EQ(ghidraPtr->actions[2], "GHIDRA: /tmp/sample.dll | decompile | 0x10001074");
     EXPECT_EQ(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
                         "GHIDRA: /tmp/sample.dll | decompile | 0x10002000"),
               ghidraPtr->actions.end());
     ASSERT_FALSE(msgs.empty());
     EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
     EXPECT_FALSE(msgs.back().content.empty());
+}
+
+TEST(AgentPrompting, LargeBenchPromptXrefBootstrapPrefersCallerFunctionOverDirectCallee) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    backend->setResponse("ANSWER: done");
+
+    area::ToolRegistry tools;
+    auto ghidraTool = std::make_unique<FakeGhidraActionTool>();
+    auto* ghidraPtr = ghidraTool.get();
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | xrefs | gethostbyname"] =
+        "=== Ghidra Cross-References: sample.dll ===\n\n"
+        "Import: gethostbyname [WS2_32.DLL] @ EXTERNAL:00000016\n"
+        "Functions calling: 3 | Call sites: 8\n"
+        "\n"
+        "--- Caller Functions (2) ---\n"
+        "  FUN_10001074 @ 10001074 - undefined4 FUN_10001074(void)\n"
+        "    callsites (3): 100011af, 10001247, 100012df\n"
+        "    direct callees: FUN_10001000 @ 10001000, Ordinal_52 @ EXTERNAL:00000016\n"
+        "  FUN_1000208f @ 1000208f - undefined4 FUN_1000208f(void)\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | decompile | 0x10001074"] =
+        "=== Ghidra Decompilation: sample.dll ===\n\n"
+        "--- FUN_10001074 @ 10001074 (64 bytes) ---\n\n"
+        "void FUN_10001074(void)\n"
+        "{\n"
+        "  Sleep(30000);\n"
+        "}\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | disasm | 0x10001074"] =
+        "=== Ghidra Disassembly: sample.dll ===\n\n"
+        "Requested address: 10001074\n"
+        "Function: FUN_10001074 @ 10001074\n"
+        "Instructions shown: 1 / 1\n"
+        "\n"
+        "=> 10001074: CALL Sleep [CALL]\n";
+    tools.add(std::move(ghidraTool));
+
+    area::Agent agent(std::move(backend), tools);
+    std::string prompt =
+        "Analyze /tmp/sample.dll.\n\n"
+        "Questions: interesting functions, suspicious strings, malware behavior.\n"
+        "========================= GHIDRA DATA =========================\n"
+        "========== GHIDRA: /tmp/sample.dll ==========\n"
+        "--- imports ---\n"
+        "  gethostbyname [WS2_32.DLL] (ordinal 52) @ EXTERNAL:00000016\n"
+        "===================== END GHIDRA DATA =========================\n";
+    prompt += std::string(21000, 'G');
+
+    std::vector<area::AgentMessage> msgs;
+    agent.process(prompt, [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    EXPECT_NE(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
+                        "GHIDRA: /tmp/sample.dll | xrefs | gethostbyname"),
+              ghidraPtr->actions.end());
+    EXPECT_NE(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
+                        "GHIDRA: /tmp/sample.dll | decompile | 0x10001074"),
+              ghidraPtr->actions.end());
+    EXPECT_EQ(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
+                        "GHIDRA: /tmp/sample.dll | decompile | 0x10001000"),
+              ghidraPtr->actions.end());
+    EXPECT_EQ(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
+                        "GHIDRA: /tmp/sample.dll | disasm | 0x10001000"),
+              ghidraPtr->actions.end());
+    ASSERT_FALSE(msgs.empty());
+    EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
+    EXPECT_EQ(msgs.back().content, "done");
+}
+
+TEST(AgentPrompting, LargeBenchPromptBootstrapsThreadStartFromDllMain) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    backend->setResponse("ANSWER: done");
+
+    area::ToolRegistry tools;
+    auto ghidraTool = std::make_unique<FakeGhidraActionTool>();
+    auto* ghidraPtr = ghidraTool.get();
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | decompile | 0x1000d02e"] =
+        "=== Ghidra Decompilation: sample.dll ===\n\n"
+        "--- FUN_1000d02e @ 01000D02E (64 bytes) ---\n\n"
+        "int FUN_1000d02e(void)\n"
+        "{\n"
+        "  CreateThread((LPSECURITY_ATTRIBUTES)0x0,0,(LPTHREAD_START_ROUTINE)&DAT_10001656,\n"
+        "               (LPVOID)0x0,0,(LPDWORD)0x0);\n"
+        "  return 1;\n"
+        "}\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | function_at | 0x10001656"] =
+        "=== Ghidra Function Lookup: sample.dll ===\n\n"
+        "Requested address: 010001656\n"
+        "Function: sub_10001620 @ 010001620\n"
+        "Signature: void sub_10001620(void)\n"
+        "Callers: 1 | Callees: 2\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | decompile | 0x10001656"] =
+        "=== Ghidra Decompilation: sample.dll ===\n\n"
+        "--- sub_10001620 @ 010001620 (64 bytes) ---\n\n"
+        "void sub_10001620(void)\n"
+        "{\n"
+        "  Sleep(1000);\n"
+        "}\n";
+    tools.add(std::move(ghidraTool));
+
+    area::Agent agent(std::move(backend), tools);
+    std::string prompt =
+        "Analyze /tmp/sample.dll.\n\n"
+        "Questions: interesting functions, suspicious strings, malware behavior.\n"
+        "========================= GHIDRA DATA =========================\n"
+        "========== GHIDRA: /tmp/sample.dll ==========\n"
+        "--- overview ---\n"
+        "Likely DllMain: FUN_1000d02e @ 1000d02e\n"
+        "===================== END GHIDRA DATA =========================\n";
+    prompt += std::string(21000, 'F');
+
+    std::vector<area::AgentMessage> msgs;
+    agent.process(prompt, [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    EXPECT_NE(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
+                        "GHIDRA: /tmp/sample.dll | decompile | 0x1000d02e"),
+              ghidraPtr->actions.end());
+    EXPECT_NE(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
+                        "GHIDRA: /tmp/sample.dll | function_at | 0x10001656"),
+              ghidraPtr->actions.end());
+    EXPECT_NE(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
+                        "GHIDRA: /tmp/sample.dll | decompile | 0x10001656"),
+              ghidraPtr->actions.end());
+    ASSERT_FALSE(msgs.empty());
+    EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
+    EXPECT_EQ(msgs.back().content, "done");
 }
 
 TEST(AgentPrompting, BenchStylePromptBootstrapsExplicitQuestionAddresses) {

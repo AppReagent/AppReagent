@@ -359,10 +359,12 @@ std::string summarizeGhidraObservation(const std::string& action,
                 || trimmed.starts_with("Value: ")
                 || trimmed.starts_with("Bytes: ")
                 || trimmed.starts_with("ASCII: ")
-                || trimmed.starts_with("Likely single-byte XOR decode: ")
                 || trimmed.starts_with("Offset from start: ")
                 || trimmed.starts_with("References: ")
                 || trimmed.starts_with("Referenced by: ")) {
+                notes.push_back(trimmed);
+            } else if (trimmed.starts_with("Likely ")
+                       && trimmed.find("XOR decode:") != std::string::npos) {
                 notes.push_back(trimmed);
             }
         }

@@ -291,6 +291,39 @@ TEST(GhidraTool, DetectsLikelySingleByteXorInDataLookup) {
     fs::remove(path, ec);
 }
 
+TEST(GhidraTool, DetectsLikelyRepeatingKeyXorInDataLookup) {
+    FakeGhidraTool tool;
+    GhidraToolMessages msgs;
+    area::Harness h;
+    area::ToolContext ctx{msgs.cb(), nullptr, h};
+    std::string path = makeTempBinary();
+
+    tool.outputs["data_at"] = R"json({
+  "metadata": {"name": "sample.exe"},
+  "data_at": {
+    "requested_address": "01001D988",
+    "address": "01001D988",
+    "max_address": "01001D998",
+    "data_type": "raw_bytes",
+    "length": 17,
+    "memory_block": ".data",
+    "offset_from_start": 0,
+    "hex_bytes": "7B 43 67 47 29 18 3C 54 21 19 76 4F 72 5A 63 5B 76",
+    "ascii_preview": "{CgG).<T!.vOrZc[v",
+    "xref_count": 0
+  }
+})json";
+
+    auto result = tool.tryExecute("GHIDRA: " + path + " | data_at | 0x1001D988", ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NE(result->observation.find("Likely repeating-key XOR decode: key 0x13 0x37"),
+              std::string::npos);
+    EXPECT_NE(result->observation.find("\"http://c2.example\""), std::string::npos);
+
+    std::error_code ec;
+    fs::remove(path, ec);
+}
+
 TEST(GhidraTool, FormatsDataXrefs) {
     FakeGhidraTool tool;
     GhidraToolMessages msgs;
@@ -419,6 +452,42 @@ TEST(GhidraTool, DetectsLikelySingleByteXorInDataXrefs) {
     auto result = tool.tryExecute("GHIDRA: " + path + " | xrefs | 0x1001D988", ctx);
     ASSERT_TRUE(result.has_value());
     EXPECT_NE(result->observation.find("Likely single-byte XOR decode: key 0x55"), std::string::npos);
+    EXPECT_NE(result->observation.find("\"http://c2.example\""), std::string::npos);
+
+    std::error_code ec;
+    fs::remove(path, ec);
+}
+
+TEST(GhidraTool, DetectsLikelyRepeatingKeyXorInDataXrefs) {
+    FakeGhidraTool tool;
+    GhidraToolMessages msgs;
+    area::Harness h;
+    area::ToolContext ctx{msgs.cb(), nullptr, h};
+    std::string path = makeTempBinary();
+
+    tool.outputs["xrefs"] = R"json({
+  "metadata": {"name": "sample.exe"},
+  "xrefs": {
+    "requested_address": "01001D988",
+    "kind": "data",
+    "address": "01001D988",
+    "max_address": "01001D998",
+    "data_type": "raw_bytes",
+    "length": 17,
+    "memory_block": ".data",
+    "offset_from_start": 0,
+    "hex_bytes": "7B 43 67 47 29 18 3C 54 21 19 76 4F 72 5A 63 5B 76",
+    "ascii_preview": "{CgG).<T!.vOrZc[v",
+    "xref_count": 0,
+    "references": [],
+    "callees": []
+  }
+})json";
+
+    auto result = tool.tryExecute("GHIDRA: " + path + " | xrefs | 0x1001D988", ctx);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NE(result->observation.find("Likely repeating-key XOR decode: key 0x13 0x37"),
+              std::string::npos);
     EXPECT_NE(result->observation.find("\"http://c2.example\""), std::string::npos);
 
     std::error_code ec;

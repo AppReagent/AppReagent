@@ -176,42 +176,72 @@ double xorCandidateScore(const std::vector<unsigned char>& decoded) {
     return score;
 }
 
+struct XorDecodeCandidate {
+    double score = -1.0;
+    std::vector<int> key;
+    std::string preview;
+};
+
+void considerXorCandidate(const std::vector<unsigned char>& bytes,
+                          const std::vector<int>& key,
+                          XorDecodeCandidate& best) {
+    std::vector<unsigned char> decoded;
+    decoded.reserve(bytes.size());
+    for (size_t i = 0; i < bytes.size(); i++) {
+        decoded.push_back(static_cast<unsigned char>(bytes[i] ^ key[i % key.size()]));
+    }
+
+    double score = xorCandidateScore(decoded);
+    if (score <= best.score) return;
+
+    std::string preview = trimPreview(printablePreview(decoded));
+    if (preview.size() < 6) return;
+
+    best.score = score;
+    best.key = key;
+    best.preview = preview;
+}
+
 std::string detectSingleByteXor(const std::string& hex) {
     auto bytes = parseHexBytes(hex);
     if (bytes.size() < 6) return "";
 
-    double bestScore = -1.0;
-    int bestKey = -1;
-    std::string bestPreview;
+    XorDecodeCandidate bestSingle;
+    XorDecodeCandidate bestRepeating;
 
     for (int key = 1; key < 256; key++) {
-        std::vector<unsigned char> decoded;
-        decoded.reserve(bytes.size());
-        for (unsigned char b : bytes) decoded.push_back(static_cast<unsigned char>(b ^ key));
-
-        double score = xorCandidateScore(decoded);
-        if (score <= bestScore) continue;
-
-        std::string preview = trimPreview(printablePreview(decoded));
-        if (preview.size() < 6) continue;
-
-        bestScore = score;
-        bestKey = key;
-        bestPreview = preview;
+        considerXorCandidate(bytes, {key}, bestSingle);
+    }
+    for (int key0 = 1; key0 < 256; key0++) {
+        for (int key1 = 1; key1 < 256; key1++) {
+            considerXorCandidate(bytes, {key0, key1}, bestRepeating);
+        }
     }
 
-    if (bestKey < 0) return "";
+    XorDecodeCandidate best = bestSingle;
+    if (bestRepeating.score >= 120.0 && bestRepeating.score > bestSingle.score + 15.0) {
+        best = bestRepeating;
+    }
+    if (best.key.empty()) return "";
 
-    if (bestPreview.size() > 80) {
-        bestPreview.erase(80);
-        bestPreview += "...";
+    if (best.preview.size() > 80) {
+        best.preview.erase(80);
+        best.preview += "...";
     }
 
     std::ostringstream out;
-    out << "Likely single-byte XOR decode: key 0x";
+    if (best.key.size() == 1) {
+        out << "Likely single-byte XOR decode: key 0x";
+    } else {
+        out << "Likely repeating-key XOR decode: key";
+    }
     out << std::hex << std::uppercase;
-    if (bestKey < 0x10) out << '0';
-    out << bestKey << std::dec << " -> \"" << bestPreview << "\"";
+    for (size_t i = 0; i < best.key.size(); i++) {
+        if (best.key.size() > 1) out << " 0x";
+        if (best.key[i] < 0x10) out << '0';
+        out << best.key[i];
+    }
+    out << std::dec << " -> \"" << best.preview << "\"";
     return out.str();
 }
 }  // namespace

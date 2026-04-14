@@ -780,6 +780,65 @@ TEST(AgentPrompting, BootstrapEvidenceCapturesLookupResults) {
     EXPECT_EQ(msgs.back().content, "saw lookup evidence");
 }
 
+TEST(AgentPrompting, BootstrapEvidenceCapturesRepeatingKeyXorDecode) {
+    area::AiEndpoint ep{"test", "mock", "", "auto"};
+    auto backend = std::make_unique<area::MockBackend>(ep);
+    auto* backendPtr = backend.get();
+    backend->setResponses({
+        "ANSWER: broad summary without exact evidence",
+        "ANSWER: missing xor evidence"
+    });
+
+    area::MockPromptEntry xorEvidence;
+    xorEvidence.id = "repeating-xor";
+    xorEvidence.match = {
+        "Likely repeating-key XOR decode: key 0x13 0x37 -> \"http://c2.example\""
+    };
+    xorEvidence.response = "ANSWER: saw repeating xor";
+    backend->setPromptEntries({xorEvidence});
+
+    area::ToolRegistry tools;
+    auto ghidraTool = std::make_unique<FakeGhidraActionTool>();
+    auto* ghidraPtr = ghidraTool.get();
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | data_at | 0x1001d988"] =
+        "=== Ghidra Data Lookup: sample.dll ===\n\n"
+        "Requested address: 01001D988\n"
+        "Data: 01001D988 .. 01001D998\n"
+        "Type: raw_bytes (17 bytes)\n"
+        "Bytes: 7B 43 67 47 29 18 3C 54 21 19 76 4F 72 5A 63 5B 76\n"
+        "Likely repeating-key XOR decode: key 0x13 0x37 -> \"http://c2.example\"\n"
+        "Offset from start: 0\n"
+        "References: 0\n";
+    ghidraPtr->responses["GHIDRA: /tmp/sample.dll | xrefs | 0x1001d988"] =
+        "=== Ghidra Cross-References: sample.dll ===\n\n"
+        "Requested address: 01001D988\n"
+        "Data: 01001D988 .. 01001D998\n"
+        "Type: raw_bytes (17 bytes)\n"
+        "References: 0\n";
+    tools.add(std::move(ghidraTool));
+
+    area::Agent agent(std::move(backend), tools);
+    std::vector<area::AgentMessage> msgs;
+    agent.process(
+        "Analyze /tmp/sample.dll.\n\n"
+        "Questions:\n"
+        "1. What is the data at 0x1001D988?\n"
+        "========================= GHIDRA DATA =========================\n"
+        "========== GHIDRA: /tmp/sample.dll ==========\n"
+        "--- overview ---\n"
+        "Likely DllMain: FUN_1000d02e @ 1000d02e\n"
+        "===================== END GHIDRA DATA =========================\n",
+        [&](const area::AgentMessage& msg) { msgs.push_back(msg); });
+
+    EXPECT_EQ(backendPtr->lastMatchedId(), "repeating-xor");
+    EXPECT_TRUE(std::find(ghidraPtr->actions.begin(), ghidraPtr->actions.end(),
+                          "GHIDRA: /tmp/sample.dll | data_at | 0x1001d988")
+                != ghidraPtr->actions.end());
+    ASSERT_FALSE(msgs.empty());
+    EXPECT_EQ(msgs.back().type, area::AgentMessage::ANSWER);
+    EXPECT_EQ(msgs.back().content, "saw repeating xor");
+}
+
 // ---------------------------------------------------------------------------
 // IPC tests
 // ---------------------------------------------------------------------------

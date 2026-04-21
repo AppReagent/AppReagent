@@ -17,27 +17,3 @@ sass:
 
 plugins:
   - jekyll-seo-tag
-
-exclude:
-  - CMakeLists.txt
-  - CPPLINT.cfg
-  - Dockerfile.improve
-  - Gemfile
-  - Gemfile.lock
-  - LICENSE
-  - Makefile
-  - README.md
-  - area.service
-  - autoresearch/
-  - bench/
-  - config.example.json
-  - constitution.md
-  - ddl.sql
-  - docker/
-  - include/
-  - iwyu.imp
-  - prompts/
-  - scripts/
-  - src/
-  - tests/
-  - vendor/

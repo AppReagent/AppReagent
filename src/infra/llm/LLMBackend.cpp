@@ -182,13 +182,11 @@ ChatResult OpenAIBackend::chatWithUsage(const std::string& system,
     nlohmann::json body = {
         {"messages", buildMessages(system, messages)},
         {"stream", false},
+        {"thinking", false},
     };
 
-    if (max_tokens > 0) {
-        int ctx = endpoint_.context_window;
-        if (max_tokens > ctx && ctx > 0) max_tokens = ctx;
-        body["max_tokens"] = max_tokens;
-    }
+    if (max_tokens <= 0) max_tokens = 16384;
+    body["max_tokens"] = max_tokens;
 
     if (endpoint_.model != "auto") {
         body["model"] = endpoint_.model;

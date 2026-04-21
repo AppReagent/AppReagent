@@ -563,14 +563,11 @@ static std::string ghidraHome() {
 
     std::string home = std::getenv("HOME") ? std::getenv("HOME") : "";
 
-    // Linux / user-local install: ~/.local/opt/ghidra_*
     if (!home.empty()) {
         if (auto hit = firstExistingChild(home + "/.local/opt", "ghidra_"); !hit.empty())
             return hit;
     }
 
-    // macOS Homebrew: /opt/homebrew/Cellar/ghidra/<ver>/libexec (Apple Silicon)
-    //                 /usr/local/Cellar/ghidra/<ver>/libexec    (Intel)
     for (const char* cellar : {"/opt/homebrew/Cellar/ghidra",
                                 "/usr/local/Cellar/ghidra"}) {
         if (auto hit = firstExistingChild(cellar, ""); !hit.empty()) {
@@ -580,7 +577,6 @@ static std::string ghidraHome() {
         }
     }
 
-    // Generic system installs
     for (const char* p : {"/opt/ghidra", "/usr/local/ghidra", "/usr/share/ghidra"}) {
         if (fs::is_directory(p)) return p;
     }
@@ -593,13 +589,11 @@ static std::string javaHome() {
 
     std::string home = std::getenv("HOME") ? std::getenv("HOME") : "";
 
-    // Linux / user-local install: ~/.local/opt/jdk-*
     if (!home.empty()) {
         if (auto hit = firstExistingChild(home + "/.local/opt", "jdk-"); !hit.empty())
             return hit;
     }
 
-    // macOS Homebrew openjdk
     for (const char* p : {"/opt/homebrew/opt/openjdk@21",
                           "/opt/homebrew/opt/openjdk@17",
                           "/opt/homebrew/opt/openjdk",
@@ -610,7 +604,6 @@ static std::string javaHome() {
         if (fs::is_directory(candidate)) return candidate;
     }
 
-    // macOS system: /usr/libexec/java_home resolves the active JDK
     if (fs::exists("/usr/libexec/java_home")) {
         int rc = 0;
         std::string out;

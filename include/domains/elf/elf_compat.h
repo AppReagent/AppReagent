@@ -143,4 +143,4 @@ struct Elf64_Sym {
     Elf64_Xword   st_size;
 };
 
-#endif  // __has_include(<elf.h>)
+#endif

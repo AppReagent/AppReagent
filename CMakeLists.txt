@@ -32,6 +32,16 @@ set(CAPSTONE_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(json yoga capstone)
 
+if(APPLE)
+    foreach(prefix /opt/homebrew/opt/libpq /usr/local/opt/libpq
+                   /opt/homebrew/opt/openssl@3 /usr/local/opt/openssl@3
+                   /opt/homebrew/opt/curl /usr/local/opt/curl)
+        if(EXISTS ${prefix})
+            list(APPEND CMAKE_PREFIX_PATH ${prefix})
+        endif()
+    endforeach()
+endif()
+
 find_package(PostgreSQL REQUIRED)
 find_package(CURL REQUIRED)
 

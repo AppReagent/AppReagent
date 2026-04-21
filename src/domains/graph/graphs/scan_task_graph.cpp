@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <bits/std_abs.h>
+#include <cstdlib>
 #include <algorithm>
 #include <cctype>
 #include <cinttypes>

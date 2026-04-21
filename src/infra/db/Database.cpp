@@ -1,6 +1,6 @@
 #include "infra/db/Database.h"
 
-#include <bits/chrono.h>
+#include <chrono>
 #include <sstream>
 #include <stdexcept>
 #include <utility>

@@ -1,6 +1,6 @@
 #include "features/classes/ClassesTool.h"
 
-#include <bits/chrono.h>
+#include <chrono>
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>

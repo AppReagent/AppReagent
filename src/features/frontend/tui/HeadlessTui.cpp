@@ -1,7 +1,11 @@
 #include "features/frontend/tui/HeadlessTui.h"
 
 #include <poll.h>
+#if defined(__APPLE__) || defined(__FreeBSD__)
+#include <util.h>
+#else
 #include <pty.h>
+#endif
 #include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <unistd.h>

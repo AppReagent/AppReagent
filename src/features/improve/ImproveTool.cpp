@@ -2,7 +2,7 @@
 
 #include <sys/wait.h>
 #include <unistd.h>
-#include <bits/types/struct_FILE.h>
+#include <cstdio>
 #include <time.h>
 #include <array>
 #include <algorithm>

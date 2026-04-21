@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include <cstring>
-#include <elf.h>
+#include "domains/elf/elf_compat.h"
 
 #include "domains/elf/disassembler.h"
 

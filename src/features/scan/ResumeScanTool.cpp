@@ -1,6 +1,6 @@
 #include "features/scan/ResumeScanTool.h"
 
-#include <bits/chrono.h>
+#include <chrono>
 #include <sstream>
 #include <functional>
 #include <memory>

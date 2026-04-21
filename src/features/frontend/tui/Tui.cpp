@@ -1,9 +1,6 @@
 #include "features/frontend/tui/Tui.h"
 
-#include <bits/termios-c_cc.h>
-#include <bits/termios-c_cflag.h>
-#include <bits/termios-c_iflag.h>
-#include <bits/types/sig_atomic_t.h>
+#include <csignal>
 #include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>

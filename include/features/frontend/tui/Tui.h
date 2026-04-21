@@ -1,7 +1,7 @@
 #pragma once
 
 #include <termios.h>
-#include <bits/chrono.h>
+#include <chrono>
 #include <stdint.h>
 #include <atomic>
 #include <mutex>

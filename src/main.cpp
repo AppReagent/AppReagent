@@ -5,7 +5,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <curl/curl.h>
-#include <bits/chrono.h>
+#include <chrono>
 #include <csignal>
 #include <cstdlib>
 #include <filesystem>
@@ -57,6 +57,11 @@ static bool commandNeedsDatabase(const std::string& command) {
 
 static std::string getDataDir() {
     if (auto dir = std::getenv("AREA_DATA_DIR")) return dir;
+#ifdef __APPLE__
+    if (auto home = std::getenv("HOME")) {
+        return std::string(home) + "/Library/Application Support/area";
+    }
+#endif
     return "/opt/area";
 }
 

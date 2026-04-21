@@ -6,13 +6,13 @@
   <meta name="theme-color" content="#07111B">
   <title>{% if page.title %}{{ page.title }}{% else %}{{ site.title }} — {{ site.tagline }}{% endif %}</title>
   <meta name="description" content="{{ page.description | default: site.description | strip_newlines }}">
-  <link rel="icon" type="image/svg+xml" href="{{ '/logo.svg' | relative_url }}">
+  <link rel="icon" type="image/svg+xml" href="{{ '/assets/logo.svg' | relative_url }}">
 
   <meta property="og:title" content="{{ page.title | default: site.title }}">
   <meta property="og:description" content="{{ page.description | default: site.description | strip_newlines }}">
   <meta property="og:type" content="website">
   <meta property="og:url" content="{{ site.url }}{{ page.url | relative_url }}">
-  <meta property="og:image" content="{{ '/logo.svg' | absolute_url }}">
+  <meta property="og:image" content="{{ '/assets/logo.svg' | absolute_url }}">
   <meta name="twitter:card" content="summary">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -27,7 +27,7 @@
   <header class="site-header">
     <div class="container header-inner">
       <a href="{{ '/' | relative_url }}" class="brand" aria-label="AppReagent home">
-        <img src="{{ '/logo.svg' | relative_url }}" alt="" class="brand-logo" width="32" height="32">
+        <img src="{{ '/assets/logo.svg' | relative_url }}" alt="" class="brand-logo" width="32" height="32">
         <span class="brand-name">AppReagent</span>
       </a>
       <nav class="site-nav" aria-label="Primary">
@@ -52,7 +52,7 @@
       <div class="footer-grid">
         <div class="footer-brand">
           <div class="brand">
-            <img src="{{ '/logo.svg' | relative_url }}" alt="" class="brand-logo" width="28" height="28">
+            <img src="{{ '/assets/logo.svg' | relative_url }}" alt="" class="brand-logo" width="28" height="28">
             <span class="brand-name">AppReagent</span>
           </div>
           <p class="footer-tagline">{{ site.tagline }}</p>

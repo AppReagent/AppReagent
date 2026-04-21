@@ -546,33 +546,84 @@ std::vector<std::string> extractDisassemblyInsights(const json& instructions) {
 }
 }  // namespace
 
-static std::string ghidraHome() {
-    if (auto env = std::getenv("GHIDRA_HOME")) return env;
-
-    std::string home = std::getenv("HOME") ? std::getenv("HOME") : "/home/builder";
-
-    std::string optDir = home + "/.local/opt";
-    if (!fs::is_directory(optDir)) return "";
-    for (auto& entry : fs::directory_iterator(optDir)) {
+static std::string firstExistingChild(const std::string& parent,
+                                       const std::string& prefix) {
+    if (!fs::is_directory(parent)) return "";
+    for (auto& entry : fs::directory_iterator(parent)) {
         auto name = entry.path().filename().string();
-        if (name.starts_with("ghidra_") && entry.is_directory()) {
+        if (name.starts_with(prefix) && entry.is_directory()) {
             return entry.path().string();
         }
     }
     return "";
 }
 
-static std::string javaHome() {
-    if (auto env = std::getenv("JAVA_HOME")) return env;
-    std::string home = std::getenv("HOME") ? std::getenv("HOME") : "/home/builder";
-    std::string optDir = home + "/.local/opt";
-    if (!fs::is_directory(optDir)) return "";
-    for (auto& entry : fs::directory_iterator(optDir)) {
-        auto name = entry.path().filename().string();
-        if (name.starts_with("jdk-") && entry.is_directory()) {
-            return entry.path().string();
+static std::string ghidraHome() {
+    if (auto env = std::getenv("GHIDRA_HOME")) return env;
+
+    std::string home = std::getenv("HOME") ? std::getenv("HOME") : "";
+
+    // Linux / user-local install: ~/.local/opt/ghidra_*
+    if (!home.empty()) {
+        if (auto hit = firstExistingChild(home + "/.local/opt", "ghidra_"); !hit.empty())
+            return hit;
+    }
+
+    // macOS Homebrew: /opt/homebrew/Cellar/ghidra/<ver>/libexec (Apple Silicon)
+    //                 /usr/local/Cellar/ghidra/<ver>/libexec    (Intel)
+    for (const char* cellar : {"/opt/homebrew/Cellar/ghidra",
+                                "/usr/local/Cellar/ghidra"}) {
+        if (auto hit = firstExistingChild(cellar, ""); !hit.empty()) {
+            auto libexec = hit + "/libexec";
+            if (fs::is_directory(libexec)) return libexec;
+            return hit;
         }
     }
+
+    // Generic system installs
+    for (const char* p : {"/opt/ghidra", "/usr/local/ghidra", "/usr/share/ghidra"}) {
+        if (fs::is_directory(p)) return p;
+    }
+
+    return "";
+}
+
+static std::string javaHome() {
+    if (auto env = std::getenv("JAVA_HOME")) return env;
+
+    std::string home = std::getenv("HOME") ? std::getenv("HOME") : "";
+
+    // Linux / user-local install: ~/.local/opt/jdk-*
+    if (!home.empty()) {
+        if (auto hit = firstExistingChild(home + "/.local/opt", "jdk-"); !hit.empty())
+            return hit;
+    }
+
+    // macOS Homebrew openjdk
+    for (const char* p : {"/opt/homebrew/opt/openjdk@21",
+                          "/opt/homebrew/opt/openjdk@17",
+                          "/opt/homebrew/opt/openjdk",
+                          "/usr/local/opt/openjdk@21",
+                          "/usr/local/opt/openjdk@17",
+                          "/usr/local/opt/openjdk"}) {
+        std::string candidate = std::string(p) + "/libexec/openjdk.jdk/Contents/Home";
+        if (fs::is_directory(candidate)) return candidate;
+    }
+
+    // macOS system: /usr/libexec/java_home resolves the active JDK
+    if (fs::exists("/usr/libexec/java_home")) {
+        int rc = 0;
+        std::string out;
+        FILE* pipe = popen("/usr/libexec/java_home 2>/dev/null", "r");
+        if (pipe) {
+            std::array<char, 512> buf;
+            while (fgets(buf.data(), buf.size(), pipe)) out += buf.data();
+            rc = pclose(pipe);
+            while (!out.empty() && (out.back() == '\n' || out.back() == ' ')) out.pop_back();
+            if (rc == 0 && !out.empty() && fs::is_directory(out)) return out;
+        }
+    }
+
     return "";
 }
 
@@ -1103,22 +1154,72 @@ std::string GhidraTool::formatStrings(const std::string& jsonPath) {
     auto& meta = data["metadata"];
     out << "=== Ghidra Strings: " << meta.value("name", "?") << " ===\n\n";
 
-    if (data.contains("strings") && data["strings"].is_array()) {
-        auto& strings = data["strings"];
-        out << strings.size() << " strings found:\n\n";
-        for (auto& s : strings) {
-            out << "  [" << s.value("address", "?") << "] \""
-                << s.value("value", "") << "\"";
-            int xrefs = s.value("xref_count", 0);
-            if (xrefs > 0) out << " (xrefs: " << xrefs << ")";
-            if (s.contains("referenced_by") && s["referenced_by"].is_array()) {
-                out << " - used by:";
-                for (auto& fn : s["referenced_by"]) {
-                    out << " " << fn.get<std::string>();
+    if (!data.contains("strings") || !data["strings"].is_array()) return out.str();
+    auto& strings = data["strings"];
+    out << strings.size() << " strings found (clustered by referencing function; largest first):\n\n";
+
+    auto formatString = [](const nlohmann::json& s) {
+        std::ostringstream line;
+        line << "  [" << s.value("address", "?") << "] \""
+             << s.value("value", "") << "\"";
+        int xrefs = s.value("xref_count", 0);
+        if (xrefs > 0) line << " (xrefs: " << xrefs << ")";
+        return line.str();
+    };
+
+    std::map<std::string, std::vector<const nlohmann::json*>> byFunc;
+    std::vector<const nlohmann::json*> unreferenced;
+    for (auto& s : strings) {
+        if (s.contains("referenced_by") && s["referenced_by"].is_array() && !s["referenced_by"].empty()) {
+            auto key = s["referenced_by"][0].get<std::string>();
+            byFunc[key].push_back(&s);
+        } else {
+            unreferenced.push_back(&s);
+        }
+    }
+
+    std::vector<std::pair<std::string, std::vector<const nlohmann::json*>>> groups(byFunc.begin(), byFunc.end());
+    std::sort(groups.begin(), groups.end(), [](const auto& a, const auto& b) {
+        if (a.second.size() != b.second.size()) return a.second.size() > b.second.size();
+        return a.first < b.first;
+    });
+
+    const size_t MAX_SHOWN = 8;
+    for (size_t gi = 0; gi < groups.size() && gi < MAX_SHOWN; gi++) {
+        auto& [fn, items] = groups[gi];
+        out << "== " << fn << " (" << items.size() << " string"
+            << (items.size() == 1 ? "" : "s") << ") ==\n";
+        if (gi == 0) {
+            size_t col = 0;
+            for (size_t i = 0; i < items.size(); i++) {
+                auto name = (*items[i]).value("value", "");
+                std::string piece = "\"" + name + "\"";
+                if (i > 0) piece = ", " + piece;
+                if (col > 0 && col + piece.size() > 100) {
+                    out << "\n";
+                    col = 0;
+                    piece = "\"" + name + "\"";
                 }
+                out << piece;
+                col += piece.size();
             }
             out << "\n";
+        } else {
+            size_t sample = std::min<size_t>(3, items.size());
+            for (size_t i = 0; i < sample; i++) out << formatString(*items[i]) << "\n";
+            if (items.size() > sample) out << "  ... (" << (items.size() - sample) << " more)\n";
         }
+        out << "\n";
+    }
+    if (groups.size() > MAX_SHOWN) {
+        out << "(" << (groups.size() - MAX_SHOWN) << " more smaller clusters omitted)\n\n";
+    }
+
+    if (!unreferenced.empty()) {
+        out << "== unreferenced (" << unreferenced.size() << ") ==\n";
+        size_t sample = std::min<size_t>(3, unreferenced.size());
+        for (size_t i = 0; i < sample; i++) out << formatString(*unreferenced[i]) << "\n";
+        if (unreferenced.size() > sample) out << "  ... (" << (unreferenced.size() - sample) << " more)\n";
     }
 
     return out.str();

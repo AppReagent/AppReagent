@@ -1,0 +1,295 @@
+---
+layout: default
+title: AppReagent — AI agent for finding malware in mobile apps
+description: Open-source reverse engineering operative for Android. Tears apart APKs, traces data flows, exposes malicious behavior — with receipts.
+---
+
+<section class="hero">
+  <div class="container hero-inner">
+    <div class="hero-text">
+      <div class="badge">
+        <span class="badge-dot"></span>
+        <span>Open source · MIT licensed</span>
+      </div>
+      <h1 class="hero-title">
+        An AI agent for finding
+        <span class="accent">malware</span>
+        in mobile apps.
+      </h1>
+      <p class="hero-sub">
+        AppReagent is a reverse engineering operative for Android. It tears apart APKs,
+        traces data flows, and pulls the mask off suspicious behavior — with receipts,
+        not vibes.
+      </p>
+      <div class="hero-cta">
+        <a href="https://github.com/AppReagent/AppReagent" class="btn btn-primary">
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+          View on GitHub
+        </a>
+        <a href="#install" class="btn btn-ghost">
+          Quick start <span class="arrow">→</span>
+        </a>
+      </div>
+      <blockquote class="hero-quote">
+        <span class="quote-open">&ldquo;</span>Scan my phone for malware, make no mistakes.<span class="quote-close">&rdquo;</span>
+      </blockquote>
+    </div>
+
+    <div class="hero-terminal" aria-hidden="true">
+      <div class="terminal-chrome">
+        <span class="dot red"></span>
+        <span class="dot yellow"></span>
+        <span class="dot green"></span>
+        <span class="terminal-title">area — malware sweep</span>
+      </div>
+      <pre class="terminal-body"><span class="t-prompt">$</span> <span class="t-cmd">./area suspicious.apk</span>
+<span class="t-muted">→ decompiling apk...</span>
+<span class="t-muted">→ parsing AndroidManifest...</span>
+<span class="t-ok">✓ 247 classes, 1,893 methods indexed</span>
+
+<span class="t-tag">SCAN</span> <span class="t-arg">goal=</span><span class="t-str">"exfiltrating contacts or SMS"</span>
+<span class="t-muted">→ 12 methods flagged for LLM analysis</span>
+<span class="t-muted">→ chasing xrefs, callgraphs...</span>
+
+<span class="t-bad">⬢ RELEVANT</span>   com.app.sync.Uploader.post()
+  reads ContactsContract + SMS inbox,
+  XOR-encodes payload, POSTs to
+  hardcoded C2 at <span class="t-str">https://x.evil[.]co</span>
+
+<span class="t-warn">⬢ PARTIALLY RELEVANT (2)</span>
+  com.app.sync.Scheduler.run
+  com.app.util.Crypt.wrap
+
+<span class="t-tag">REPORT</span>  <span class="t-ok">→ report.md (3,412 bytes)</span>
+<span class="t-prompt">$</span> <span class="t-caret">▊</span></pre>
+    </div>
+  </div>
+
+  <div class="hero-glow" aria-hidden="true"></div>
+</section>
+
+<section class="what" id="what">
+  <div class="container">
+    <div class="section-head">
+      <p class="eyebrow">What you get</p>
+      <h2 class="section-title">A full reverse-engineering toolkit,<br>wired to an agent that knows how to use it.</h2>
+    </div>
+
+    <div class="feature-grid">
+      <article class="feature-card">
+        <div class="feature-icon icon-scan">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        </div>
+        <h3>LLM-powered scanning</h3>
+        <p>Targeted scans hunt for specific behaviors — exfiltration, credential theft, persistence — with an agent that reads bytecode the way an analyst reads code.</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon icon-tools">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+        </div>
+        <h3>Static-analysis toolbelt</h3>
+        <p>Decompile APKs, disassemble smali and ELFs, grep and xref across the project, query the database with raw SQL. All the tools a human analyst reaches for.</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon icon-receipts">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/><line x1="9" y1="11" x2="15" y2="11"/></svg>
+        </div>
+        <h3>Receipts, not vibes</h3>
+        <p>Every finding comes with evidence: class names, method names, API calls, string constants, data-flow paths. No ghost findings. No hallucinated indicators.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="how" id="how">
+  <div class="container">
+    <div class="section-head">
+      <p class="eyebrow">How it thinks</p>
+      <h2 class="section-title">A five-phase playbook, run like<br>a seasoned analyst would.</h2>
+      <p class="section-sub">
+        AppReagent doesn't wander. Every investigation follows a deliberate
+        sequence — cheap tools first, LLM calls where they earn their cost.
+      </p>
+    </div>
+
+    <ol class="playbook">
+      <li class="playbook-step">
+        <div class="step-num">01</div>
+        <div class="step-body">
+          <h3>Recon</h3>
+          <p>Decompile the APK, read the manifest, map the terrain. Know what you're dealing with before you open a single smali file.</p>
+          <div class="step-tags">
+            <code>DECOMPILE</code>
+            <code>MANIFEST</code>
+            <code>FIND_FILES</code>
+          </div>
+        </div>
+      </li>
+      <li class="playbook-step">
+        <div class="step-num">02</div>
+        <div class="step-body">
+          <h3>Triage</h3>
+          <p>Fast, free passes first. Pull URLs, IPs, hardcoded secrets, reflection targets, and crypto constants. Flag anything sketchy for deeper work.</p>
+          <div class="step-tags">
+            <code>STRINGS</code>
+            <code>GREP</code>
+            <code>PERMISSIONS</code>
+          </div>
+        </div>
+      </li>
+      <li class="playbook-step">
+        <div class="step-num">03</div>
+        <div class="step-body">
+          <h3>Deep dive</h3>
+          <p>Targeted LLM scans for specific behaviors. Disassemble suspicious methods, follow the bytecode, trace from entry points to sinks.</p>
+          <div class="step-tags">
+            <code>SCAN</code>
+            <code>DISASM</code>
+            <code>CALLGRAPH</code>
+            <code>XREFS</code>
+          </div>
+        </div>
+      </li>
+      <li class="playbook-step">
+        <div class="step-num">04</div>
+        <div class="step-body">
+          <h3>Correlate</h3>
+          <p>Connect findings across files. One indicator is a clue. Two correlated indicators are a pattern. Three are a verdict.</p>
+          <div class="step-tags">
+            <code>FIND</code>
+            <code>SIMILAR</code>
+            <code>SQL</code>
+          </div>
+        </div>
+      </li>
+      <li class="playbook-step">
+        <div class="step-num">05</div>
+        <div class="step-body">
+          <h3>Report</h3>
+          <p>Structured markdown with the full kill chain: entry → collection → processing → exfiltration. Every claim backed by evidence.</p>
+          <div class="step-tags">
+            <code>REPORT</code>
+          </div>
+        </div>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section class="tools" id="tools">
+  <div class="container">
+    <div class="section-head">
+      <p class="eyebrow">The toolbelt</p>
+      <h2 class="section-title">Twenty-plus primitives,<br>composable under one agent.</h2>
+    </div>
+
+    <div class="tool-grid">
+      <div class="tool"><span class="tool-name">DECOMPILE</span><span class="tool-desc">Crack open an APK into smali, resources, and manifests.</span></div>
+      <div class="tool"><span class="tool-name">MANIFEST</span><span class="tool-desc">Read AndroidManifest.xml — permissions, components, intents.</span></div>
+      <div class="tool"><span class="tool-name">STRINGS</span><span class="tool-desc">Yank URLs, IPs, secrets, and crypto constants. Fast, no LLM.</span></div>
+      <div class="tool"><span class="tool-name">DISASM</span><span class="tool-desc">Read the actual bytecode of a suspicious method.</span></div>
+      <div class="tool"><span class="tool-name">SCAN</span><span class="tool-desc">Targeted LLM-powered behavioral analysis against a specific goal.</span></div>
+      <div class="tool"><span class="tool-name">CALLGRAPH</span><span class="tool-desc">Trace execution from entry points to sinks.</span></div>
+      <div class="tool"><span class="tool-name">XREFS</span><span class="tool-desc">Follow the breadcrumbs across the whole project.</span></div>
+      <div class="tool"><span class="tool-name">GREP</span><span class="tool-desc">Regex across decompiled source before you burn LLM calls.</span></div>
+      <div class="tool"><span class="tool-name">FIND</span><span class="tool-desc">Search behavioral findings across all scanned methods.</span></div>
+      <div class="tool"><span class="tool-name">SIMILAR</span><span class="tool-desc">Pattern-match against known malicious techniques.</span></div>
+      <div class="tool"><span class="tool-name">SQL</span><span class="tool-desc">Raw SQL over the scan database for cross-file patterns.</span></div>
+      <div class="tool"><span class="tool-name">REPORT</span><span class="tool-desc">Emit a structured markdown report with receipts.</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="principles">
+  <div class="container">
+    <div class="section-head">
+      <p class="eyebrow">Rules of engagement</p>
+      <h2 class="section-title">Opinionated about<br>how to do this well.</h2>
+    </div>
+
+    <div class="principle-grid">
+      <div class="principle">
+        <h3>Hypothesize, then test.</h3>
+        <p>Every tool call has a theory behind it. After the result, did it confirm or bust the theory? This keeps investigations sharp and stops aimless wandering.</p>
+      </div>
+      <div class="principle">
+        <h3>Cheap tools first.</h3>
+        <p>STRINGS and GREP are free. SCAN costs tokens. Narrow the field with static analysis before burning LLM calls on files that weren't the targets.</p>
+      </div>
+      <div class="principle">
+        <h3>Triangulate findings.</h3>
+        <p>One indicator is a clue; three are a verdict. A single suspicious API call isn't malware — trace its callers, the data flow, and the sink before you call it.</p>
+      </div>
+      <div class="principle">
+        <h3>Rule out the boring explanation.</h3>
+        <p>Before you cry malware — could it be an ad SDK? Crash reporter? OTP flow? Kill the mundane explanation first, then escalate.</p>
+      </div>
+      <div class="principle">
+        <h3>Call it like you see it.</h3>
+        <p>Three tiers, no sugarcoating: <code>relevant</code> = malicious, <code>partially_relevant</code> = suspicious, <code>not_relevant</code> = clean. No hedging.</p>
+      </div>
+      <div class="principle">
+        <h3>Own your uncertainty.</h3>
+        <p>&ldquo;Reads SMS and the same class has a network sink — possible exfil, tracing XREFS to confirm&rdquo; beats &ldquo;this exfiltrates SMS.&rdquo;</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="install" id="install">
+  <div class="container">
+    <div class="section-head center">
+      <p class="eyebrow">Get started</p>
+      <h2 class="section-title">Build it, run it,<br>point it at an APK.</h2>
+    </div>
+
+    <div class="install-steps">
+      <div class="install-step">
+        <div class="install-label">
+          <span class="install-num">1</span>
+          <span>Clone</span>
+        </div>
+        <pre class="code-block"><code><span class="c-prompt">$</span> git clone https://github.com/AppReagent/AppReagent.git
+<span class="c-prompt">$</span> cd AppReagent</code></pre>
+      </div>
+
+      <div class="install-step">
+        <div class="install-label">
+          <span class="install-num">2</span>
+          <span>Build</span>
+        </div>
+        <pre class="code-block"><code><span class="c-prompt">$</span> make</code></pre>
+      </div>
+
+      <div class="install-step">
+        <div class="install-label">
+          <span class="install-num">3</span>
+          <span>Run</span>
+        </div>
+        <pre class="code-block"><code><span class="c-prompt">$</span> ./area</code></pre>
+      </div>
+    </div>
+
+    <p class="install-note">
+      Requires CMake, a recent C++ compiler, libpq, libcurl, and libssl.
+      Configure your LLM provider in <code>config.json</code> —
+      see <a href="https://github.com/AppReagent/AppReagent/blob/main/config.example.json">config.example.json</a>
+      for the schema.
+    </p>
+  </div>
+</section>
+
+<section class="cta-banner">
+  <div class="container cta-inner">
+    <div>
+      <h2>Ready to rip the mask off?</h2>
+      <p>AppReagent is MIT-licensed and welcomes contributions — new tools, new prompts, new malware patterns.</p>
+    </div>
+    <div class="cta-buttons">
+      <a href="https://github.com/AppReagent/AppReagent" class="btn btn-primary">Star on GitHub</a>
+      <a href="https://github.com/AppReagent/AppReagent/issues" class="btn btn-ghost">File an issue</a>
+    </div>
+  </div>
+</section>

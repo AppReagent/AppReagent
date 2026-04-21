@@ -1,0 +1,43 @@
+title: AppReagent
+tagline: AI agent for finding malware in mobile apps.
+description: >-
+  Open-source reverse engineering operative for Android apps.
+  Methodical, evidence-driven, LLM-powered malware analysis.
+url: https://appreagent.com
+
+repository: AppReagent/AppReagent
+github_username: AppReagent
+
+encoding: UTF-8
+markdown: kramdown
+highlighter: rouge
+
+sass:
+  style: compressed
+
+plugins:
+  - jekyll-seo-tag
+
+exclude:
+  - CMakeLists.txt
+  - CPPLINT.cfg
+  - Dockerfile.improve
+  - Gemfile
+  - Gemfile.lock
+  - LICENSE
+  - Makefile
+  - README.md
+  - area.service
+  - autoresearch/
+  - bench/
+  - config.example.json
+  - constitution.md
+  - ddl.sql
+  - docker/
+  - include/
+  - iwyu.imp
+  - prompts/
+  - scripts/
+  - src/
+  - tests/
+  - vendor/

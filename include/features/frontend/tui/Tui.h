@@ -24,6 +24,8 @@ class Tui {
 
     void run();
 
+    void setInitialInput(std::string input);
+
     struct ColorTheme {
         struct RGB { int r, g, b; };
         RGB waveBase, waveAccent, pulseBase, pulseShift;
@@ -115,6 +117,7 @@ class Tui {
 
     std::string inputBuffer_;
     int cursorPos_ = 0;
+    std::string initialInput_;
 
     std::vector<std::string> history_;
     int historyIdx_ = -1;

@@ -147,6 +147,10 @@ Tui::~Tui() {
     exitAltScreen();
 }
 
+void Tui::setInitialInput(std::string input) {
+    initialInput_ = std::move(input);
+}
+
 Tui::TermSize Tui::getTermSize() {
     struct winsize ws{};
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws);
@@ -1666,6 +1670,12 @@ void Tui::run() {
     running_ = true;
 
     sendToServer({{"type", "attach"}, {"chat_id", currentChatId_}});
+    if (!initialInput_.empty()) {
+        dangerousMode_ = true;
+        sendToServer({{"type", "set_dangerous"}, {"chat_id", currentChatId_}, {"enabled", true}});
+        sendToServer({{"type", "user_input"}, {"chat_id", currentChatId_}, {"content", initialInput_}});
+        initialInput_.clear();
+    }
     render();
 
     bool needsRender = false;

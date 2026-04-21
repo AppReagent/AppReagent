@@ -374,7 +374,7 @@ static int cmdImprove(area::Config& config, area::Database& db, area::ArgParse& 
     return (result && result->observation.find("Error") != std::string::npos) ? 1 : 0;
 }
 
-static int cmdTui(area::Config& config) {
+static int cmdTui(area::Config& config, area::ArgParse& args) {
     int sockFd = connectToServer();
     if (sockFd < 0) {
         std::cerr << "Could not connect to server" << std::endl;
@@ -383,6 +383,23 @@ static int cmdTui(area::Config& config) {
 
     std::cerr << "Connected to server" << std::endl;
     area::Tui tui(sockFd, config.theme);
+
+    auto promptPath = args.getNamedArg("prompt");
+    auto target = args.getNamedArg("target");
+    if (promptPath) {
+        try {
+            std::string body = area::util::readFileOrThrow(*promptPath);
+            if (target) {
+                body = "Target binary: " + fs::absolute(*target).string() + "\n\n" + body;
+            }
+            tui.setInitialInput(std::move(body));
+        } catch (const std::exception& e) {
+            std::cerr << "Failed to load prompt: " << e.what() << std::endl;
+            area::ipc::closeFd(sockFd);
+            return 1;
+        }
+    }
+
     tui.run();
     area::ipc::closeFd(sockFd);
     return 0;
@@ -444,7 +461,7 @@ int main(int argc, char* argv[]) {
         {"ghidra",      [&] { return cmdGhidra(args); }},
         {"evaluate",    [&] { return cmdEvaluate(config, db); }},
         {"improve",     [&] { return cmdImprove(config, db, args); }},
-        {"tui",         [&] { return cmdTui(config); }},
+        {"tui",         [&] { return cmdTui(config, args); }},
     };
 
     int exitCode;

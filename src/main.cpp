@@ -46,7 +46,7 @@
 namespace fs = std::filesystem;
 
 static constexpr int kServerStartPollIter = 24;
-static constexpr int kChatPollTimeoutMs = 60000;
+static constexpr int kChatPollTimeoutMs = 1800000;
 static constexpr int kStatePollIter = 50;
 static constexpr int kStatePollIntervalMs = 200;
 static constexpr int kShutdownDelayUs = 100000;
@@ -251,6 +251,7 @@ static void processChatResponse(int sockFd) {
                 if (t == "answer") std::cout << c << std::endl;
                 else if (t == "sql") std::cout << "[sql] " << c << std::endl;
                 else if (t == "result") std::cout << "[result] " << c << std::endl;
+                else if (t == "thinking") std::cerr << "[thinking] " << c << std::endl;
                 else if (t == "error") std::cerr << "[error] " << c << std::endl;
             } else if (type == "state") {
                 if (!resp->value("processing", true)) done = true;

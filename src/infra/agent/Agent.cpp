@@ -1,6 +1,7 @@
 #include "infra/agent/Agent.h"
 
 #include <stddef.h>
+#include <cxxabi.h>
 #include <algorithm>
 #include <cctype>
 #include <deque>
@@ -11,6 +12,7 @@
 #include <regex>
 #include <set>
 #include <sstream>
+#include <typeinfo>
 #include <utility>
 
 #include "infra/events/EventBus.h"
@@ -1062,6 +1064,12 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
                 history_.push_back({"assistant",
                     "THOUGHT: I should gather concrete binary evidence before answering.\n" + action});
 
+                {
+                    AgentMessage beat{AgentMessage::THINKING, "[bootstrap] " + action};
+                    cb(beat);
+                    emitEvent(beat);
+                }
+
                 auto toolResult = tools_.dispatch(action, toolCtx);
                 if (!toolResult.has_value()) continue;
 
@@ -1127,6 +1135,7 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
     bool forcedLargePromptWrapUp = false;
 
     for (int iter = 0; iter < maxIterations; iter++) {
+      try {
         if (interrupted_.load()) {
             AgentMessage msg{AgentMessage::ANSWER, "(interrupted)"};
             cb(msg);
@@ -1306,6 +1315,50 @@ void Agent::process(const std::string& userInput, MessageCallback cb,
         cb(msg);
         emitEvent(msg);
         return;
+      } catch (const std::exception& e) {
+        AgentMessage msg{AgentMessage::ERROR,
+            std::string("iteration failed: ") + e.what() + " (retrying)"};
+        cb(msg);
+        emitEvent(msg);
+        history_.push_back({"user",
+            std::string("SYSTEM: Previous iteration errored: ") + e.what() +
+            ". Reconsider and continue or emit an ANSWER."});
+        continue;
+      } catch (...) {
+        std::string what = "unknown";
+        try {
+            auto p = std::current_exception();
+            if (p) std::rethrow_exception(p);
+        } catch (const std::runtime_error& re) {
+            what = std::string("runtime_error: ") + re.what();
+        } catch (const std::logic_error& le) {
+            what = std::string("logic_error: ") + le.what();
+        } catch (const std::exception& ex) {
+            what = std::string("[std::exception:") + typeid(ex).name() + "] " + ex.what();
+        } catch (const std::string& s)    { what = s; }
+          catch (const char* s)           { what = s; }
+          catch (int i)                   { what = "int:" + std::to_string(i); }
+          catch (...) {
+            auto* tid = abi::__cxa_current_exception_type();
+            if (tid) {
+                int status = 0;
+                char* demangled = abi::__cxa_demangle(tid->name(), nullptr, nullptr, &status);
+                const char* name = (status == 0 && demangled) ? demangled : tid->name();
+                what = std::string("non-std: ") + name;
+                std::free(demangled);
+            } else {
+                what = "non-std, no type info";
+            }
+          }
+        AgentMessage msg{AgentMessage::ERROR,
+            std::string("iteration failed: ") + what + " (retrying)"};
+        cb(msg);
+        emitEvent(msg);
+        history_.push_back({"user",
+            std::string("SYSTEM: Previous iteration errored: ") + what +
+            ". Reconsider and continue or emit an ANSWER."});
+        continue;
+      }
     }
 
     AgentMessage msg{AgentMessage::ANSWER, "(max iterations reached)"};

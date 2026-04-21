@@ -6,6 +6,7 @@
 #include <deque>
 #include <exception>
 #include <limits>
+#include <map>
 #include <optional>
 #include <regex>
 #include <set>

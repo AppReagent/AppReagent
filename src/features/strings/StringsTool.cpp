@@ -1,6 +1,6 @@
 #include "features/strings/StringsTool.h"
 
-#include <bits/chrono.h>
+#include <chrono>
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>

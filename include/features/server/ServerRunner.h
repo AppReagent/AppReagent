@@ -1,6 +1,6 @@
 #pragma once
 
-#include <bits/chrono.h>
+#include <chrono>
 #include <stdint.h>
 #include <atomic>
 #include <condition_variable>

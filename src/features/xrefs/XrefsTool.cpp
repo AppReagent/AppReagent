@@ -1,6 +1,6 @@
 #include "features/xrefs/XrefsTool.h"
 
-#include <bits/chrono.h>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>

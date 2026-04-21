@@ -1,6 +1,6 @@
 #include "features/analyze/AnalyzeCommand.h"
 
-#include <bits/chrono.h>
+#include <chrono>
 
 #include <cstdlib>
 #include <exception>

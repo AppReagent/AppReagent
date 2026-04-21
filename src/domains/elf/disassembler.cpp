@@ -1,6 +1,6 @@
 #include "domains/elf/disassembler.h"
 
-#include <elf.h>
+#include "domains/elf/elf_compat.h"
 #include <capstone/capstone.h>
 #include <stdio.h>
 #include <algorithm>

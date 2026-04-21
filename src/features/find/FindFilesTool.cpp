@@ -1,6 +1,6 @@
 #include "features/find/FindFilesTool.h"
 
-#include <bits/chrono.h>
+#include <chrono>
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>

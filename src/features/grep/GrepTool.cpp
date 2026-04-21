@@ -1,6 +1,6 @@
 #include "features/grep/GrepTool.h"
 
-#include <bits/chrono.h>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>

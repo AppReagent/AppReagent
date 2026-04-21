@@ -281,7 +281,7 @@ TEST(ElfMethodAnalysis, DetectsInt80Syscall) {
 #include "infra/llm/LLMBackend.h"
 #include "domains/elf/disassembler.h"
 #include <cstring>
-#include <elf.h>
+#include "domains/elf/elf_compat.h"
 #include <fstream>
 
 // Reuse the minimal test ELF builder

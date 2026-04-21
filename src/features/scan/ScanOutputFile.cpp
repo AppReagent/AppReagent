@@ -1,6 +1,6 @@
 #include "features/scan/ScanOutputFile.h"
 
-#include <bits/chrono.h>
+#include <chrono>
 #include <filesystem>
 #include <map>
 #include <stdexcept>

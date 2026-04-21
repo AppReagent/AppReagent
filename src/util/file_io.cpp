@@ -5,10 +5,21 @@
 #include <sstream>
 #include <stdexcept>
 
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+
 namespace area::util {
 
 std::string selfExe() {
     char buf[4096];
+#ifdef __APPLE__
+    uint32_t size = sizeof(buf);
+    if (_NSGetExecutablePath(buf, &size) != 0) return {};
+    char resolved[4096];
+    if (!realpath(buf, resolved)) return std::string(buf);
+    return std::string(resolved);
+#else
     ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
     if (n <= 0) return {};
     buf[n] = '\0';
@@ -17,6 +28,7 @@ std::string selfExe() {
     auto del = p.find(" (deleted)");
     if (del != std::string::npos) p.resize(del);
     return p;
+#endif
 }
 
 std::string readFile(const std::string& path) {

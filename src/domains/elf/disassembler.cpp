@@ -1,13 +1,15 @@
 #include "domains/elf/disassembler.h"
 
-#include "domains/elf/elf_compat.h"
 #include <capstone/capstone.h>
 #include <stdio.h>
+
 #include <algorithm>
 #include <cinttypes>
 #include <cstring>
 #include <sstream>
 #include <utility>
+
+#include "domains/elf/elf_compat.h"
 
 namespace area::elf {
 bool isElf(const std::string& data) {

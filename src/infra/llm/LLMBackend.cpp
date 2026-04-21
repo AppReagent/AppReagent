@@ -1,9 +1,6 @@
 #include "infra/llm/LLMBackend.h"
 
 #include <chrono>
-#include <curl/curl.h>
-#include <curl/system.h>
-
 #include <fstream>
 #include <iterator>
 #include <map>

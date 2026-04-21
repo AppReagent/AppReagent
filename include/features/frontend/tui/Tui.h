@@ -1,9 +1,10 @@
 #pragma once
 
-#include <termios.h>
-#include <chrono>
 #include <stdint.h>
+#include <termios.h>
+
 #include <atomic>
+#include <chrono>
 #include <mutex>
 #include <string>
 #include <vector>

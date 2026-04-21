@@ -1,6 +1,5 @@
 #include "features/frontend/tui/Tui.h"
 
-#include <csignal>
 #include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>

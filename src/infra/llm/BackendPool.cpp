@@ -34,7 +34,9 @@ static bool isTransient(const std::string& err) {
            err.find("context length") != std::string::npos ||
            err.find("context_length") != std::string::npos ||
            err.find("maximum input length") != std::string::npos ||
-           err.find("input tokens") != std::string::npos;
+           err.find("input tokens") != std::string::npos ||
+           err.find("response content is null") != std::string::npos ||
+           err.find("response content is \"None\"") != std::string::npos;
 }
 
 BackendPool::BackendPool(const std::vector<AiEndpoint>& endpoints)
@@ -116,6 +118,10 @@ auto BackendPool::withRetry(Fn&& fn) -> decltype(fn(std::declval<Slot&>())) {
             auto result = fn(slot);
             release(slot);
             return result;
+        } catch (const std::runtime_error& e) {
+            release(slot);
+            lastError = e.what();
+            if (!isTransient(lastError)) throw;
         } catch (const std::exception& e) {
             release(slot);
             lastError = e.what();

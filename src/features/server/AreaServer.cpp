@@ -306,30 +306,66 @@ void AreaServer::processUserInput(std::shared_ptr<ChatSession> chat, const std::
             };
         }
 
-        chat->agent->process(input, [this, chat](const AgentMessage& msg) {
-            if (msg.type == AgentMessage::TUI_CONTROL) {
-                try {
-                    auto payload = nlohmann::json::parse(msg.content);
-                    payload["type"] = "tui_control";
-                    payload["chat_id"] = chat->id;
-                    broadcastToChat(chat->id, payload);
-                } catch (...) {}
-                return;
-            }
+        try {
+            chat->agent->process(input, [this, chat](const AgentMessage& msg) {
+                if (msg.type == AgentMessage::TUI_CONTROL) {
+                    try {
+                        auto payload = nlohmann::json::parse(msg.content);
+                        payload["type"] = "tui_control";
+                        payload["chat_id"] = chat->id;
+                        broadcastToChat(chat->id, payload);
+                    } catch (...) {}
+                    return;
+                }
 
-            std::string typeStr = msgTypeStr(msg.type);
+                std::string typeStr = msgTypeStr(msg.type);
 
+                {
+                    std::lock_guard lk(chat->messagesMu);
+                    chat->messages.push_back({"agent", typeStr, msg.content});
+                }
+
+                broadcastToChat(chat->id, nlohmann::json{
+                    {"type", "agent_msg"},
+                    {"chat_id", chat->id},
+                    {"msg", {{"type", typeStr}, {"content", msg.content}}}
+                });
+            }, confirm);
+        } catch (const std::exception& e) {
+            std::string errMsg = std::string("uncaught agent exception: ") + e.what();
             {
                 std::lock_guard lk(chat->messagesMu);
-                chat->messages.push_back({"agent", typeStr, msg.content});
+                chat->messages.push_back({"agent", "error", errMsg});
             }
-
             broadcastToChat(chat->id, nlohmann::json{
-                {"type", "agent_msg"},
-                {"chat_id", chat->id},
-                {"msg", {{"type", typeStr}, {"content", msg.content}}}
+                {"type", "agent_msg"}, {"chat_id", chat->id},
+                {"msg", {{"type", "error"}, {"content", errMsg}}}
             });
-        }, confirm);
+        } catch (...) {
+            std::string errMsg = "uncaught unknown agent exception";
+            try {
+                auto p = std::current_exception();
+                if (p) std::rethrow_exception(p);
+            } catch (const std::exception& e) {
+                errMsg += std::string(" [std::exception: ") + e.what() + "]";
+            } catch (const std::string& s) {
+                errMsg += " [std::string: " + s + "]";
+            } catch (const char* s) {
+                errMsg += std::string(" [char*: ") + s + "]";
+            } catch (int i) {
+                errMsg += " [int: " + std::to_string(i) + "]";
+            } catch (...) {
+                errMsg += " [non-std, non-primitive]";
+            }
+            {
+                std::lock_guard lk(chat->messagesMu);
+                chat->messages.push_back({"agent", "error", errMsg});
+            }
+            broadcastToChat(chat->id, nlohmann::json{
+                {"type", "agent_msg"}, {"chat_id", chat->id},
+                {"msg", {{"type", "error"}, {"content", errMsg}}}
+            });
+        }
 
         chat->processing = false;
         chat->saveConvo();

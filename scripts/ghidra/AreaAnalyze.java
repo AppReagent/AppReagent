@@ -686,10 +686,12 @@ public class AreaAnalyze extends GhidraScript {
         firstEntry = true;
 
         String filterLower = filter.toLowerCase();
+        int cap = 2000;
         int count = 0;
+        Set<Address> emitted = new HashSet<>();
 
         DataIterator dataIter = currentProgram.getListing().getDefinedData(true);
-        while (dataIter.hasNext() && !monitor.isCancelled() && count < 1000) {
+        while (dataIter.hasNext() && !monitor.isCancelled() && count < cap) {
             Data data = dataIter.next();
             String typeName = data.getDataType().getName().toLowerCase();
 
@@ -732,9 +734,97 @@ public class AreaAnalyze extends GhidraScript {
             }
 
             pw.print("}");
+            emitted.add(data.getAddress());
             count++;
         }
+
+        // Second pass: sweep undefined initialized memory for ASCII runs that Ghidra
+        // did not auto-classify (e.g. Delphi Pascal-style length-prefixed strings).
+        count = writeUndefinedAsciiStrings(filterLower, emitted, count, cap);
+
         pw.print("\n  ]");
+    }
+
+    private int writeUndefinedAsciiStrings(String filterLower,
+                                           Set<Address> alreadyEmitted,
+                                           int count,
+                                           int cap) {
+        Memory memory = currentProgram.getMemory();
+        Listing listing = currentProgram.getListing();
+
+        for (MemoryBlock block : memory.getBlocks()) {
+            if (count >= cap || monitor.isCancelled()) break;
+            if (!block.isInitialized()) continue;
+            if (block.isExecute()) continue;
+            long size = block.getSize();
+            if (size <= 0 || size > 16 * 1024 * 1024) continue;
+
+            byte[] buf = new byte[(int) size];
+            try {
+                memory.getBytes(block.getStart(), buf);
+            } catch (Exception e) {
+                continue;
+            }
+
+            Address base = block.getStart();
+            int i = 0;
+            while (i < buf.length && count < cap && !monitor.isCancelled()) {
+                int b = buf[i] & 0xff;
+                if (b >= 0x20 && b < 0x7f) {
+                    int runStart = i;
+                    while (i < buf.length) {
+                        int bb = buf[i] & 0xff;
+                        if (bb < 0x20 || bb >= 0x7f) break;
+                        i++;
+                    }
+                    int runLen = i - runStart;
+                    boolean nulTerm = i < buf.length && buf[i] == 0;
+                    if (runLen >= 4 && nulTerm) {
+                        Address addr = base.add(runStart);
+                        Data def = listing.getDefinedDataAt(addr);
+                        if (def == null && !alreadyEmitted.contains(addr)) {
+                            String s = new String(buf, runStart, runLen, java.nio.charset.StandardCharsets.US_ASCII);
+                            if (filterLower.isEmpty() || s.toLowerCase().contains(filterLower)) {
+                                Reference[] refs = getReferencesTo(addr);
+                                Set<String> refFuncs = new LinkedHashSet<>();
+                                for (Reference ref : refs) {
+                                    Function caller = getFunctionContaining(ref.getFromAddress());
+                                    if (caller != null) refFuncs.add(caller.getName());
+                                }
+
+                                if (!firstEntry) pw.println(",");
+                                firstEntry = false;
+
+                                pw.print("    {\"address\": \"" + addr + "\"");
+                                pw.print(", \"value\": \"" + escJson(s) + "\"");
+                                pw.print(", \"type\": \"ascii\"");
+                                pw.print(", \"xref_count\": " + refs.length);
+
+                                if (!refFuncs.isEmpty()) {
+                                    pw.print(", \"referenced_by\": [");
+                                    boolean first = true;
+                                    int shown = 0;
+                                    for (String fn : refFuncs) {
+                                        if (shown++ >= 10) break;
+                                        if (!first) pw.print(", ");
+                                        first = false;
+                                        pw.print("\"" + escJson(fn) + "\"");
+                                    }
+                                    pw.print("]");
+                                }
+
+                                pw.print("}");
+                                count++;
+                            }
+                        }
+                    }
+                    if (nulTerm) i++;
+                } else {
+                    i++;
+                }
+            }
+        }
+        return count;
     }
 
     private String formatInstruction(Instruction instr) {
